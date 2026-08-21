@@ -1,5 +1,7 @@
 # ScriptedScreens Vector
 
+![ScriptedScreens Vector](ScriptedScreensVector/About/Preview.png)
+
 A client-side Stationeers mod that adds a **`vector` element type** to
 [ScriptedScreens](https://steamcommunity.com/sharedfiles/filedetails/?id=3666779631) surfaces.
 
