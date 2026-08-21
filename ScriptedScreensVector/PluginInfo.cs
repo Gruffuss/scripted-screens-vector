@@ -11,7 +11,7 @@ namespace ScriptedScreensVector;
 internal static partial class PluginInfo
 {
     /// <summary>Stable mod identity (Harmony ID, Workshop metadata, etc.).</summary>
-    internal const string PLUGIN_GUID = "zedle.stationeers.scriptedscreens.vector";
+    internal const string PLUGIN_GUID = "gruffuss.stationeers.scriptedscreens.vector";
 
     /// <summary>Human-readable mod name for logs and the mod list.</summary>
     internal const string PLUGIN_NAME = "ScriptedScreens Vector";

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
-	<Author>zedle</Author>
+	<Author>Gruffuss</Author>
 	<Version>0.1.0.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
@@ -64,7 +64,7 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 		<Tag>BepInEx</Tag>
 		<Tag>StationeersLaunchPad</Tag>
 	</Tags>
-	<ModID>zedle.stationeers.scriptedscreens.vector</ModID>
+	<ModID>gruffuss.stationeers.scriptedscreens.vector</ModID>
 	<Dependencies>
 		<Mod>
 			<Id>3666779631</Id>

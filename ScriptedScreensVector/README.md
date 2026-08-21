@@ -404,7 +404,7 @@ What still matters, in order:
 
 Off-screen consoles and paused games rebuild nothing at all.
 
-To measure, set `Diagnostics.Enabled = true` in `BepInEx/config/zedle.stationeers.scriptedscreens.vector.cfg`:
+To measure, set `Diagnostics.Enabled = true` in `BepInEx/config/gruffuss.stationeers.scriptedscreens.vector.cfg`:
 
 ```
 vector "gas": 30 Hz, 14.33 ms/rebuild (tessellate 14.21 off-thread + upload 0.12 on-thread),
@@ -423,7 +423,7 @@ you find out that 184 bands are two thirds of your scene.
 
 ## Configuration
 
-`BepInEx/config/zedle.stationeers.scriptedscreens.vector.cfg`, also editable in
+`BepInEx/config/gruffuss.stationeers.scriptedscreens.vector.cfg`, also editable in
 StationeersLaunchPad's settings UI.
 
 | Section | Key | Meaning |
