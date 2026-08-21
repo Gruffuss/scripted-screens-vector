@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
+	<Author>zedle</Author>
+	<Version>0.1.0.0</Version>
+	<Description>
+[h1]ScriptedScreens Vector[/h1]
+[i]Client-side only. Nothing on disk is modified.[/i]
+
+Adds a [b]vector[/b] element type to ScriptedScreens surfaces. Instead of drawing pixel by pixel onto a canvas, you describe a picture once and the game draws it as real geometry — then animates it on your machine, every frame, for free.
+
+[h2]Why you want it[/h2]
+A canvas console costs roughly [b]10 FPS[/b], and the cause is the number of drawing operations per frame. Every one is recorded, batched, sent over the network, replayed, and uploaded as a texture — sixty times a second.
+
+This makes that count [b]zero[/b]. The scene is sent once. Movement is described with expressions and evaluated on the client, so an animated console needs no per-frame Lua and no per-frame network traffic.
+
+Tessellation runs on a worker thread. A console with 800 shapes animating at 30 Hz costs about [b]0.4% of a frame[/b] on the main thread — a console being switched on is not measurably different from it being off.
+
+[h2]What you can draw[/h2]
+[list]
+[*] Rectangles with real rounded corners, ellipses, polygons, SVG paths with holes
+[*] Smooth liquid surfaces, waveforms and area charts that read as continuous edges
+[*] Catmull-Rom splines, strokes with caps, joins and dashes
+[*] Linear and radial gradients, including ones that follow the shape they fill
+[*] Real alpha — no more pre-composited opaque palettes
+[*] Antialiased edges, sized in screen pixels so they look right at any distance
+[*] Convex clipping, so a liquid stays in its tank
+[*] Opacity ramps along a surface, for gas fades that follow a moving edge
+[/list]
+
+[h2]How it animates[/h2]
+Any number can be an expression over [b]t[/b] (time), [b]i[/b] (repeat index) and your own data values:
+
+[code]{ op = "R", x = 10, y = "=100-$fill*100", h = "=$fill*100", f = "#2E8B6E" }[/code]
+
+Send [i]fill[/i] twice a second and the bar moves smoothly at display rate. Values are eased between updates automatically, so a gauge never steps.
+
+[b]hash(i)[/b] gives each instance of a repeat stable pseudo-random values, identical on every client with nothing transmitted — which is what makes a 400-mote particle field cost one node instead of four hundred.
+
+[h2]Resolution independent[/h2]
+Artwork is written in a viewbox and mapped onto whatever size the element is. The same scene fits a 128 px console and a 760 px one, and stays sharp on both.
+
+[h2]Getting started[/h2]
+The mod folder contains a numbered set of examples that each run on paste, from a three-shape "hello" up to a complete four-tank gas console, plus a full reference for every node and function.
+
+[h2]Notes[/h2]
+[list]
+[*] Text is not drawn by this layer — use ScriptedScreens' own label elements over the artwork
+[*] Clip shapes must be convex
+[*] Level of detail is automatic -- update rate and curve smoothness both follow on-screen size; consoles off screen or in a paused game cost nothing
+[*] Turn on Diagnostics in the settings to see exactly what a scene costs
+[/list]
+
+[h2]Requirements[/h2]
+[list]
+[*] [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3666779631]ScriptedScreens[/url] — [b]required[/b]; load before this mod
+[*] [url=https://github.com/StationeersLaunchPad/StationeersLaunchPad]StationeersLaunchPad[/url]
+[*] [url=https://github.com/BepInEx/BepInEx]BepInEx 5.x[/url]
+[/list]
+	</Description>
+	<WorkshopHandle>0</WorkshopHandle>
+	<Tags>
+		<Tag>Mod</Tag>
+		<Tag>BepInEx</Tag>
+		<Tag>StationeersLaunchPad</Tag>
+	</Tags>
+	<ModID>zedle.stationeers.scriptedscreens.vector</ModID>
+	<Dependencies>
+		<Mod>
+			<Id>3666779631</Id>
+		</Mod>
+	</Dependencies>
+</ModMetadata>

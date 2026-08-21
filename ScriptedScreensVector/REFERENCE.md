@@ -1,0 +1,413 @@
+# Vector layer — reference
+
+Every node, attribute and function the renderer accepts. Checked against the parser, not
+against the design document — where the two disagreed, the code won.
+
+For an introduction, read [README.md](README.md) first. For the reasoning behind the design,
+see `vector-format-spec.md` in the project root.
+
+---
+
+## Elements
+
+A scene is **two elements** sharing a `scene` name.
+
+### Structure element
+
+| Prop | Type | Meaning |
+|------|------|---------|
+| `scene` | string | scene id; pairs the two elements |
+| `w`, `h` | number | viewbox size — the units all artwork is written in |
+| `fit` | string | `stretch` (default), `contain`, `cover` |
+| `defs` | array | gradient and clip-path declarations |
+| `root` | array | the node list |
+
+### Data element
+
+| Prop | Type | Meaning |
+|------|------|---------|
+| `scene` | string | matching scene id |
+| `data` | map | named numbers, arrays of numbers, and colour strings |
+
+Give it a 1×1 rect at negative coordinates so it draws nothing.
+
+### Debug switches
+
+Set on the **structure** element's props, alongside `root`. Each disables one stage, so
+subtracting the reported cost isolates it.
+
+| Prop | Effect |
+|------|--------|
+| `nofill` | skip fills |
+| `nofeather` | skip feathering |
+| `noeval` | skip expression evaluation |
+
+---
+
+## Nodes
+
+A node is a table whose `op` key names its kind. Children live in `c`. Unknown keys are
+ignored, so annotations are harmless.
+
+| `op` | Kind |
+|------|------|
+| `G` | group — transform, opacity, clip |
+| `RP` | repeat |
+| `R` | rectangle |
+| `C` | ellipse |
+| `P` | SVG path |
+| `L` | polyline (open) |
+| `Y` | polygon (closed) |
+| `YS` | sampled band — a filled strip |
+| `LS` | sampled polyline — a stroked line |
+| `SP` | spline through literal points |
+
+### `G` — group
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `t` | `{x, y}` | translate |
+| `r` | number/expr | rotate, degrees clockwise |
+| `s` | `{sx, sy}` | scale |
+| `a` | `{x, y}` | anchor the transform pivots about, default `{0, 0}` |
+| `o` | number/expr | group opacity `0..1`, multiplied into all descendants |
+| `clip` | string | id of a `CP` in `defs` |
+| `c` | array | child nodes |
+
+Applied scale → rotate → translate, about `a`. Nests without limit.
+
+### `RP` — repeat
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `n` | **literal number** | instance count — not an expression |
+| `lod` | number | `1` allows count reduction at distance; omitted means never |
+| `c` | array | children, instantiated `n` times |
+
+Inside, `i` is the instance index `0..n-1` and `n` the count. Nested repeats shadow `i`; the
+enclosing index is `i1`, the next out `i2`.
+
+`n` is structural — changing it means resending the structure element.
+
+### `R` — rectangle
+
+`x`, `y`, `w`, `h`, plus optional `rx` / `ry` corner radii. `rx` alone gives circular
+corners. Radii clamp to half the shorter side. Corners are true arcs.
+
+### `C` — ellipse
+
+`cx`, `cy`, `rx`, `ry`.
+
+Segments follow **on-screen radius** (6 at the floor, 48 at the cap, quantised so camera drift
+does not retessellate), the same way rounded-rect corners do. A mote two pixels across costs
+about 6 vertices against a rectangle's 4, so circles are affordable as particles — use them
+wherever a round speck is what you actually mean.
+
+### `P` — path
+
+`d` is a string of SVG path commands. Uppercase absolute, lowercase relative.
+
+| Cmd | Args | Meaning |
+|-----|------|---------|
+| `M` | x y | move to |
+| `L` | x y | line to |
+| `H` | x | horizontal line |
+| `V` | y | vertical line |
+| `Q` | cx cy x y | quadratic bézier |
+| `T` | x y | smooth quadratic — reflects the previous control point |
+| `C` | c1x c1y c2x c2y x y | cubic bézier |
+| `S` | c2x c2y x y | smooth cubic — reflects the previous control point |
+| `A` | rx ry rot large sweep x y | elliptical arc |
+| `Z` | — | close subpath |
+
+`d` cannot contain expressions — a path's command list is static. Curves are flattened
+adaptively against on-screen size, cached in ~12% scale buckets so camera drift does not
+retessellate.
+
+Multiple subpaths make holes. The largest closed subpath is the outer contour; `fr` decides
+what the rest are.
+
+### `L`, `Y` — polyline, polygon
+
+`p` is a flat array of alternating coordinates: `{x, y, x, y, ...}`. `Y` closes
+automatically and can be filled; `L` is stroked only.
+
+### `YS` — sampled band
+
+| Key | Meaning |
+|-----|---------|
+| `n` | sample count |
+| `x` | x of each sample, `i` bound as in a repeat |
+| `y` | the sampled edge |
+| `y2` | the opposite edge — a constant fills to a baseline |
+| `fo2` | fill opacity at the `y2` edge, ramping from `fo` at the `y` edge |
+
+**`fo2` is the ramp-from-a-moving-edge primitive.** Each column interpolates between its own
+two sampled endpoints, so the ramp follows a rippling surface exactly, and it costs no extra
+geometry — the strip already emits a vertex on each edge.
+
+Neither obvious alternative can do this, which is why it exists:
+
+- a **gradient** is linear in space and anchored to the bounding box, so on a surface with
+  ripple amplitude `A` and a ramp of depth `D` it reaches only `D/(D+A)` of full opacity at a
+  crest and *starts* at `A/(D+A)` in a trough — a bright line exactly where the fade should
+  vanish;
+- **`fea`** ramps outward from a solid edge, the opposite direction.
+
+```lua
+{ op = "YS", n = 12, x = "=10+i*4", y = surface, y2 = "=" .. surface .. "+18",
+  f = "#5FD9A8", fo = 0, fo2 = 0.62 }
+```
+
+Produces **one connected strip**. This is the primitive `RP` cannot replace: a repeat emits
+`n` separate shapes with `n` flat tops, which reads as a staircase at any sample density.
+
+**Samples are joined by straight lines**, so `n` decides whether a curve reads as a curve.
+Around **20 segments per period** of the fastest term is where the facets stop showing; the
+sampling theorem's 8 per period is enough to reconstruct a sine and not to draw one. Sample
+generously — a curve is one node whatever `n` is.
+
+**Curve LOD** then samples it more coarsely when it is drawn small, quantised so camera drift
+does not retessellate, and never above the authored `n`. This is automatic and safe to leave
+on: `i` is a float and the geometry expressions are continuous in it, so a coarser step walks
+the *same* curve. Nothing is dropped, unlike count LOD on a repeat.
+
+### `LS` — sampled polyline
+
+Same sampling rule as `YS` (`n`, `x`, `y`), stroked rather than filled. The line-chart and
+waveform primitive.
+
+### `SP` — spline
+
+| Key | Meaning |
+|-----|---------|
+| `p` | flat point array `{x, y, x, y, ...}` |
+| `seg` | segments per span |
+
+Catmull-Rom, so the curve passes **through** its points rather than being pulled toward them.
+
+---
+
+## Paint
+
+Applies to any shape node.
+
+### Fill
+
+| Key | Meaning |
+|-----|---------|
+| `f` | `#rrggbb`, `#rrggbbaa`, `@gradientId`, `$dataName`, `none`, or a gradient sample (below) |
+| `fo` | fill opacity `0..1`, expression-capable |
+| `fr` | `nonzero` (default) or `evenodd` |
+
+**Gradient sample** — the way to animate a colour:
+
+```lua
+f = { grad = "status", at = "=clamp($level,0,1)" }
+```
+
+Samples the ramp at an expression and yields a flat colour. Needed because the expression
+evaluator is scalar: `f = "=lerp(...)"` has nothing to return, since a colour is not a number.
+
+**The same form works on `s`**, so an outline can follow a value exactly as a fill does.
+
+**Fill rules.** `evenodd`: every further contour is a hole. `nonzero`: a contour is a hole
+only when wound *against* the outer one. This is a winding comparison, exact for nested
+non-overlapping contours, approximate where contours partially overlap.
+
+### Stroke
+
+| Key | Meaning |
+|-----|---------|
+| `s` | stroke paint, same forms as `f` |
+| `sw` | width in scene units, **centred on the path**; scales with the transform |
+| `so` | stroke opacity |
+| `cap` | `butt` (default), `round`, `square` |
+| `join` | `miter` (default), `round`, `bevel` |
+| `ml` | miter limit, default 4 |
+| `dash` | array of on/off lengths |
+| `dofs` | dash start offset |
+
+**A stroke straddles its path**, half inside and half out. Outlining a shape on its exact
+bounds therefore paints `sw/2` beyond them, and leaves a gap of `sw/2` between the stroke and
+anything clipped to those same bounds. Inset the outline by half the width when the two have
+to meet:
+
+```lua
+{ op = "R", x = x + sw/2, y = y + sw/2, w = w - sw, h = h - sw, rx = r - sw/2,
+  f = "none", s = "#5FD9A8", sw = sw }
+```
+
+Joins are a **clamped miter** rather than inserted bevel or round geometry — invisible at UI
+stroke widths, visible on very wide strokes at sharp corners. `join` is closer to a hint than
+a guarantee.
+
+### Feathering
+
+| Key | Meaning |
+|-----|---------|
+| `fea` | edge softness in scene units; omitted means automatic |
+| `fea_edge` | softness for a band's sampled edge only |
+
+The default resolves to roughly **1.3 screen pixels**, not a fixed number of scene units,
+because the same scene draws at very different sizes. `0` gives deliberately hard edges; a
+large value gives a glow.
+
+`fea_edge` lets a liquid or gas surface carry a wide soft ramp while the walls beside it stay
+crisp.
+
+A clipped shape's feather is clipped too: where the clip cut the outline the ramp collapses
+to nothing, so no halo escapes, while untouched edges keep their full feather.
+
+**Set `fea_edge = 0` on a band edge that ABUTS another shape.** Feathering exists to soften a
+silhouette. An edge with a neighbour flush against it has no silhouette, and the ramp
+double-composites with what is already there: two shapes at opacity `a` meeting under a
+feather give `1-(1-a)²` — for `a = 0.62`, **0.86** — a bright rule a pixel or two tall exactly
+where the join should be invisible. The renderer cannot detect abutment; the scene has to say
+so.
+
+An edge already at opacity 0 needs no such guard — feathering is skipped there automatically.
+
+Without feathering every edge is hard — UGUI applies no antialiasing of its own.
+
+---
+
+## `defs`
+
+### `GL` — linear gradient
+
+| Key | Meaning |
+|-----|---------|
+| `id` | name, referenced as `@id` |
+| `x1`, `y1`, `x2`, `y2` | the ramp axis |
+| `units` | omitted for scene coordinates, `"bbox"` for shape-relative |
+| `stops` | array of `{ position, colour }`, position `0..1` |
+
+### `GR` — radial gradient
+
+| Key | Meaning |
+|-----|---------|
+| `id` | name |
+| `cx`, `cy`, `r` | centre and radius |
+| `fx`, `fy` | optional focus, default the centre |
+| `units` | as above |
+| `stops` | as above |
+
+**`units = "bbox"`** spans the referencing shape's own bounding box, `0..1`. Prefer it: no
+coordinates to get wrong, and it tracks a shape that moves or resizes. Without it,
+coordinates are in scene units and must be placed over the shape that uses them.
+
+Gradient coordinates are **static** — `PropNumber`, not expressions. `units = "bbox"` is what
+makes a gradient follow a moving shape.
+
+Gradients are baked into vertex colours. A two-stop linear gradient is exact; multi-stop and
+radial are subdivided automatically, and radial fills as concentric bands so vertices land at
+even gradient parameters.
+
+### `CP` — clip path
+
+| Key | Meaning |
+|-----|---------|
+| `id` | name, referenced from a group's `clip` |
+| `c` | one shape |
+
+**Must be convex** — rectangle, rounded rectangle, ellipse, convex polygon. Outlines are in
+**scene coordinates** and stay put when the referencing group is transformed. Clip outlines
+are static; `t` inside one is silently constant.
+
+A clipped fill cannot carry holes; they are dropped with a warning.
+
+---
+
+## Expressions
+
+Any numeric attribute may be a string beginning with `=`.
+
+### Variables
+
+| Name | Meaning |
+|------|---------|
+| `t` | seconds since the scene first appeared |
+| `i` | current repeat index, `0` outside a repeat |
+| `i1`, `i2`, … | enclosing repeat indices, outward |
+| `n` | current repeat count |
+| `$name` | scalar from the data payload |
+| `$name[expr]` | array element, **0-based**; out of range yields `0` |
+
+**Arrays are 0-based in expressions and 1-based in Lua.** `$history[0]` is the value your
+script stored at `history[1]`. A repeat's `i` runs `0..n-1`, so `$history[i]` lines up with a
+Lua array naturally; a hand-written index does not. When emitting per-item nodes from a Lua
+loop, subtract one:
+
+```lua
+for k = 1, #cells do
+    local node = { op = "R", h = ("=%.1f*$level[%d]"):format(H, k - 1), ... }
+end
+```
+
+Out-of-range reads yield `0` rather than failing, so an off-by-one shows up as a shape stuck
+at zero — not as an error.
+
+### Operators
+
+`+` `-` `*` `/` `%` `^`, unary `-`, parentheses. Standard precedence.
+
+**`^` is the power operator and there is no `pow()`** — reaching for one is an easy mistake
+when scanning the function table. An unknown function name throws at parse time rather than
+evaluating to zero, so it fails loudly, but the scene it is in will not draw.
+
+Division by zero yields `0`, not infinity — an infinity would poison vertex positions and produce an invisible mesh
+rather than a visible glitch.
+
+### Functions
+
+| Function | Meaning |
+|----------|---------|
+| `sin(x)` `cos(x)` `tan(x)` | radians |
+| `atan2(y,x)` | |
+| `abs(x)` `sign(x)` `sqrt(x)` | |
+| `floor(x)` `ceil(x)` `round(x)` | |
+| `min(a,b)` `max(a,b)` `clamp(x,lo,hi)` | |
+| `lerp(a,b,t)` | unclamped linear interpolation |
+| `mod(a,b)` | always positive, unlike `%` |
+| `saw(x)` | rising ramp, period 1, range `0..1` |
+| `tri(x)` | triangle wave, period 1, range `0..1` |
+| `pulse(x,duty)` | `1` for the first `duty` of each period, else `0` |
+| `step(edge,x)` | `0` below the edge, `1` at or above |
+| `smoothstep(a,b,x)` | smooth `0..1` ramp between the edges |
+| `if(c,a,b)` | `a` when `c` is non-zero, else `b` |
+| `eq(a,b)` `lt(a,b)` `gt(a,b)` `lte(a,b)` `gte(a,b)` | comparisons returning `0`/`1` |
+| `and(a,b)` `or(a,b)` `not(a)` | logical, on `0`/non-zero |
+| `hash(x)` | deterministic pseudo-random `0..1` |
+| `hash2(x,y)` | two-argument variant |
+| `pi()` `tau()` | constants |
+
+`hash` is an integer avalanche over fixed-point input, **not** `fract(sin(x)*k)` —
+transcendentals are not bit-identical across platforms and every client must agree, or a
+particle field looks different to each player.
+
+**It is random, not evenly spread.** Over few instances that shows: for `i = 0..8` it returns
+`0.405 .. 0.988`, so `hash(i) * width` leaves the left 40% empty. Below ~40 instances,
+stratify — `(i + hash(i)) / n` puts one per slot and jitters it within — and add a per-copy
+offset (`hash(i + seed)`) when the same subtree is built more than once, or every copy scatters
+identically.
+
+---
+
+## Coordinates
+
+Top-left origin, **+Y down**, in viewbox units. The viewbox maps onto the element rect
+according to `fit`.
+
+---
+
+## Not supported
+
+| | Why |
+|---|---|
+| text | needs child TMP objects; use ScriptedScreens' own `label` elements over the artwork |
+| blur, drop shadow, glow | need an offscreen pass or custom shader; `fea` approximates them |
+| non-convex clipping | needs a stencil buffer |
+| self-intersecting fills | ear clipping is undefined on them; detection costs more than the fill |
+| holes inside a clipped fill | needs boolean subtraction |
+| expressions in `d` or in gradient coordinates | both are static; use `units = "bbox"` |

@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net8.0</TargetFramework>
+        <Optimize>true</Optimize>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <RootNamespace>ScriptedScreensVector.Tests</RootNamespace>
+        <AssemblyName>ScriptedScreensVector.Tests</AssemblyName>
+        <!-- Deliberately not the mod's analyzer settings: this is a throwaway runner and
+             warnings-as-errors on it would cost more than it earns. -->
+        <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+        <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    </PropertyGroup>
+
+    <Import Project="..\Stationeers.VS.User.props" />
+
+    <PropertyGroup>
+        <UnityManagedDirectory>$(SteamLibraryDirectory)\Stationeers\rocketstation_Data\Managed</UnityManagedDirectory>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- The production sources under test, compiled from source rather than referenced.
+             The mod assembly targets netstandard2.1 and depends on BepInEx and
+             StationeersMods, neither of which loads outside the game; compiling the one file
+             we care about against a stub logger (Stubs.cs) keeps the test runnable with
+             plain `dotnet run` and, more importantly, tests the real code instead of a
+             re-implementation of it. A ported copy would drift. -->
+        <Compile Include="..\ScriptedScreensVector\Triangulator.cs" />
+        <Compile Include="..\ScriptedScreensVector\Clip.cs" />
+        <Compile Include="..\ScriptedScreensVector\Gradient.cs" />
+        <Compile Include="..\ScriptedScreensVector\Expression.cs" />
+        <Compile Include="Stubs.cs" />
+        <Compile Include="TriangulatorTests.cs" />
+        <Compile Include="ClipTests.cs" />
+        <Compile Include="GradientTests.cs" />
+        <Compile Include="Benchmark.cs" />
+        <Compile Include="Program.cs" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Vector2 and Mathf are plain managed types; nothing here starts the engine. -->
+        <Reference Include="UnityEngine.CoreModule">
+            <HintPath>$(UnityManagedDirectory)\UnityEngine.CoreModule.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="UnityEngine.UI">
+            <HintPath>$(UnityManagedDirectory)\UnityEngine.UI.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="UnityEngine">
+            <HintPath>$(UnityManagedDirectory)\UnityEngine.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+    </ItemGroup>
+
+    <Target Name="EnsureUnityAssemblies" BeforeTargets="ResolveAssemblyReferences">
+        <Error Text="UnityEngine.CoreModule.dll not found at $(UnityManagedDirectory). Check SteamLibraryDirectory in Stationeers.VS.User.props."
+               Condition="!Exists('$(UnityManagedDirectory)\UnityEngine.CoreModule.dll')" />
+    </Target>
+</Project>

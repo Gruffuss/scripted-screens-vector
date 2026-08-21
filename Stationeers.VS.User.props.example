@@ -1,0 +1,13 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<PropertyGroup>
+		<!-- Parent folder of the Stationeers game install. Edit for your machine. -->
+		<SteamLibraryDirectory>C:\Program Files (x86)\Steam\steamapps\common</SteamLibraryDirectory>
+
+		<!-- Where the built mod is copied. The default below assumes Documents is
+		     NOT redirected. If OneDrive (or anything else) has moved your
+		     Documents folder, set this to the one that actually holds
+		     modconfig.xml, or the build will report success and copy nothing:
+		     every Copy task here is ContinueOnError. -->
+		<!-- <StationeersDocumentsDirectory>C:\Users\$(username)\OneDrive\Documents\My Games\Stationeers</StationeersDocumentsDirectory> -->
+	</PropertyGroup>
+</Project>

@@ -1,0 +1,745 @@
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading.Tasks;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace ScriptedScreensVector;
+
+/// <summary>
+/// The vector layer's draw surface: a UGUI mesh covering one ScriptedScreens element.
+/// </summary>
+/// <remarks>
+/// Lives on a <em>child</em> of the element's host GameObject, not the host itself, because
+/// UGUI allows one <see cref="Graphic"/> per GameObject and ScriptedScreens has already put
+/// its fallback <see cref="Image"/> on the host for unrecognised element types.
+///
+/// The animation rule that makes this worth building: a scene whose attributes never
+/// reference <c>t</c> is tessellated once and then costs nothing per frame. Only
+/// time-varying scenes mark themselves dirty in <see cref="Update"/>.
+/// </remarks>
+internal sealed class VectorGraphic : MaskableGraphic
+{
+    /// <summary>
+    /// Per-surface rebuild cost, reported periodically.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately **per surface**, not aggregated. The first version summed every surface
+    /// and divided by their count, which quietly averaged unrelated things: a console
+    /// animating at 28 Hz beside a static one reported "14 Hz each", below a floor of 15 that
+    /// nothing had actually breached, and `ms per rebuild` blended two different scenes into
+    /// a number describing neither. Comparing two runs against that is not possible.
+    ///
+    /// Each line now names its scene, so A/B runs can be read directly.
+    /// </remarks>
+    private static class Stats
+    {
+        private const float ReportIntervalSeconds = 5f;
+
+        private static readonly List<VectorGraphic> Live = new();
+        private static readonly Stopwatch Timer = new();
+        private static float _nextReport;
+
+        internal static void Register(VectorGraphic graphic)
+        {
+            if (!Live.Contains(graphic))
+                Live.Add(graphic);
+        }
+
+        internal static void Unregister(VectorGraphic graphic)
+        {
+            Live.Remove(graphic);
+        }
+
+        internal static void ReportIfDue()
+        {
+            if (!VectorConfig.Diagnostics)
+                return;
+
+            if (!Timer.IsRunning)
+                Timer.Start();
+
+            var now = (float)Timer.Elapsed.TotalSeconds;
+            if (now < _nextReport)
+                return;
+
+            _nextReport = now + ReportIntervalSeconds;
+
+            foreach (var graphic in Live)
+            {
+                if (graphic == null)
+                    continue;
+
+                if (graphic._rebuilds == 0)
+                {
+                    // Zero is a result, not an absence: it means culled, paused, or a scene
+                    // with no `t` reference. Silence would look like the surface had gone.
+                    ScriptedScreensVectorPlugin.Log?.LogInfo(
+                        $"vector \"{graphic._sceneId}\": idle (off screen, paused, or static)");
+                    continue;
+                }
+
+                var hz = graphic._rebuilds / ReportIntervalSeconds;
+                var perRebuild = graphic._milliseconds / graphic._rebuilds;
+                var load = graphic._milliseconds / (ReportIntervalSeconds * 1000d) * 100d;
+
+                var tessellate = graphic._tessellateMs / graphic._rebuilds;
+                var upload = graphic._uploadMs / graphic._rebuilds;
+
+                // Label which half is on the frame. Tessellation now runs on a worker, so
+                // the big number no longer costs frames and reading it as though it does
+                // would send the next round of tuning straight back at the wrong target.
+                // Main-thread cost is the upload, and only the upload.
+                var mainThread = graphic._uploadMs / (ReportIntervalSeconds * 1000d) * 100d;
+
+                // Worker load from CPU time, not stopwatch time. A descheduled worker keeps
+                // accumulating wall milliseconds while burning no CPU, so the stopwatch
+                // figure is an upper bound and can overstate load badly on a busy machine.
+                var cpuLoad = graphic._tessellateCpuMs / (ReportIntervalSeconds * 1000d) * 100d;
+                var workerText = graphic._tessellateCpuMs > 0d
+                    ? $"{cpuLoad:F1}% of a worker core (cpu; {load:F1}% wall)"
+                    : $"{load:F1}% of a worker core (wall)";
+
+                ScriptedScreensVectorPlugin.Log?.LogInfo(
+                    $"vector \"{graphic._sceneId}\": {hz:F0} Hz, {perRebuild:F2} ms/rebuild " +
+                    $"(tessellate {tessellate:F2} off-thread + upload {upload:F2} on-thread), " +
+                    $"{mainThread:F2}% of a frame on the main thread, " +
+                    $"{workerText}, {graphic._peakVertices} verts, " +
+                    $"{graphic._lastShapeCount} shapes, " +
+                    (graphic._screenPixels < 0f ? "size UNKNOWN" : $"{graphic._screenPixels:F0} px"));
+
+                // Where the time actually went, biggest first. Six inferences about this
+                // have been wrong; this is measured per node type.
+                var names = new[] { "G", "RP", "R", "C", "YS", "L/Y", "LS", "SP", "P" };
+                var order = new int[names.Length];
+                for (var i = 0; i < order.Length; i++)
+                    order[i] = i;
+
+                System.Array.Sort(order, (a, b) => graphic._opMs[b].CompareTo(graphic._opMs[a]));
+
+                var breakdown = new System.Text.StringBuilder();
+                for (var i = 0; i < 4; i++)
+                {
+                    var op = order[i];
+                    if (graphic._opMs[op] <= 0d)
+                        continue;
+
+                    if (breakdown.Length > 0)
+                        breakdown.Append(", ");
+
+                    breakdown.Append(
+                        $"{names[op]} {graphic._opMs[op] / graphic._rebuilds:F2}ms x{graphic._opCount[op]}");
+                }
+
+                if (breakdown.Length > 0)
+                    ScriptedScreensVectorPlugin.Log?.LogInfo($"    by op: {breakdown}");
+
+                if (graphic._bandSampleMs + graphic._bandStripMs + graphic._bandFeatherMs > 0d)
+                {
+                    ScriptedScreensVectorPlugin.Log?.LogInfo(
+                        $"    YS phases: sample {graphic._bandSampleMs / graphic._rebuilds:F2}ms, "
+                        + $"strip {graphic._bandStripMs / graphic._rebuilds:F2}ms, "
+                        + $"feather {graphic._bandFeatherMs / graphic._rebuilds:F2}ms, "
+                        + $"{graphic._bandQuads} quads");
+                }
+
+                graphic._rebuilds = 0;
+                graphic._milliseconds = 0d;
+                graphic._tessellateMs = 0d;
+                graphic._uploadMs = 0d;
+                graphic._peakVertices = 0;
+                graphic._tessellateCpuMs = 0d;
+                graphic._bandSampleMs = 0d;
+                graphic._bandStripMs = 0d;
+                graphic._bandFeatherMs = 0d;
+                System.Array.Clear(graphic._opMs, 0, graphic._opMs.Length);
+            }
+        }
+    }
+
+    /// <summary>
+    /// CPU time actually consumed by the calling thread, in milliseconds.
+    /// </summary>
+    /// <remarks>
+    /// A Stopwatch measures WALL time. A worker that gets descheduled mid-job keeps
+    /// accumulating elapsed milliseconds while consuming no CPU at all, so reporting
+    /// stopwatch time as though it were CPU load overstates it — possibly by a lot on a busy
+    /// machine, and the difference is invisible unless measured.
+    ///
+    /// GetThreadTimes reports kernel + user time in 100 ns units. Its resolution is the
+    /// scheduler quantum (~15.6 ms), which is far too coarse for one job but averages out
+    /// across the ~150 jobs in a five-second reporting window.
+    /// </remarks>
+    [System.Runtime.InteropServices.DefaultDllImportSearchPaths(System.Runtime.InteropServices.DllImportSearchPath.System32)]
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentThread();
+
+    [System.Runtime.InteropServices.DefaultDllImportSearchPaths(System.Runtime.InteropServices.DllImportSearchPath.System32)]
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool GetThreadTimes(
+        IntPtr thread, out long creation, out long exit, out long kernel, out long user);
+
+    private static double ThreadCpuMilliseconds()
+    {
+        try
+        {
+            if (GetThreadTimes(GetCurrentThread(), out _, out _, out var kernel, out var user))
+                return (kernel + user) / 10000d;
+        }
+        catch (System.EntryPointNotFoundException)
+        {
+            // Not Windows. Fall back to reporting nothing rather than a wrong number.
+        }
+        catch (System.DllNotFoundException)
+        {
+        }
+
+        return -1d;
+    }
+
+    private static Camera? _camera;
+
+    private double _tessellateCpuMs;
+    private double _bandSampleMs;
+    private double _bandStripMs;
+    private double _bandFeatherMs;
+    private int _bandQuads;
+
+    /// <summary>The tessellation job in flight, or null.</summary>
+    /// <remarks>
+    /// While this is non-null a worker thread owns <c>_builder</c>, <c>_context</c> and the
+    /// stats object. Nothing on the main thread may touch them until it lands.
+    /// </remarks>
+    private Task<(double Wall, double Cpu)>? _job;
+
+    private VecScene? _pendingScene;
+    private EvalContext? _pendingData;
+    private bool _needsRebuild = true;
+    private float _jobScreenPixels = -1f;
+    private readonly TessellationStats _stats = new();
+
+    private readonly EvalContext _context = new();
+    private readonly Stopwatch _stopwatch = new();
+    private readonly MeshBuilder _builder = new();
+
+    private Mesh? _mesh;
+
+    private VecScene? _scene;
+    private float _startTime;
+    private float _lastRebuild;
+
+    /// <summary>Shortest gap between payloads worth blending across.</summary>
+    private const float MinBlendSeconds = 0.05f;
+
+    /// <summary>Longest. Beyond this a scene is effectively static and should just snap.</summary>
+    private const float MaxBlendSeconds = 1.5f;
+
+    private float _dataArrived;
+    private float _dataInterval = MinBlendSeconds;
+
+    private string _sceneId = "?";
+    private int _rebuilds;
+    private double _milliseconds;
+    private double _tessellateMs;
+    private double _uploadMs;
+    private readonly double[] _opMs = new double[9];
+    private readonly int[] _opCount = new int[9];
+    private int _peakVertices;
+    private float _screenPixels = -1f;
+    private int _lastShapeCount;
+
+    /// <summary>Installs a parsed structure. Resets the clock so animations start at t=0.</summary>
+    internal void SetScene(VecScene scene)
+    {
+        if (_job != null)
+        {
+            _pendingScene = scene;
+            return;
+        }
+
+        ApplyScene(scene);
+    }
+
+    private void ApplyScene(VecScene scene)
+    {
+        _scene = scene;
+        _needsRebuild = true;
+        _sceneId = string.IsNullOrEmpty(scene.Id) ? "?" : scene.Id;
+        _startTime = Now();
+        SetVerticesDirty();
+    }
+
+    /// <summary>Replaces the data bindings referenced as <c>$name</c>. Cheap; called per tick.</summary>
+    internal void SetData(EvalContext source)
+    {
+        if (_job != null)
+        {
+            // One payload may supersede another that never got applied. The newer one wins;
+            // the blend then eases from whatever is currently on screen, which is what it
+            // would have done anyway.
+            _pendingData = source;
+            return;
+        }
+
+        ApplyData(source);
+    }
+
+    private void ApplyData(EvalContext source)
+    {
+        // Keep what we had: the next few frames ease from it to the new payload rather than
+        // snapping, which is what stops a data-driven gauge stepping at the tick rate.
+        _context.Previous.Clear();
+        foreach (var pair in _context.Scalars)
+            _context.Previous[pair.Key] = pair.Value;
+
+        var now = Now();
+        _dataInterval = Mathf.Clamp(now - _dataArrived, MinBlendSeconds, MaxBlendSeconds);
+        _dataArrived = now;
+
+        _context.Scalars.Clear();
+        foreach (var pair in source.Scalars)
+            _context.Scalars[pair.Key] = pair.Value;
+
+        // Hand the old arrays over rather than copying them: ReadData allocates fresh ones
+        // for every payload, so the outgoing set can simply become the previous set.
+        _context.PreviousArrays.Clear();
+        foreach (var pair in _context.Arrays)
+            _context.PreviousArrays[pair.Key] = pair.Value;
+
+        _context.Arrays.Clear();
+        foreach (var pair in source.Arrays)
+            _context.Arrays[pair.Key] = pair.Value;
+
+        SetVerticesDirty();
+    }
+
+    /// <summary>Shapes emitted by the last rebuild. Diagnostic.</summary>
+    internal int ShapeCount => _lastShapeCount;
+
+    /// <summary>
+    /// How many screen pixels one canvas unit covers right now, or -1 when unknown.
+    /// </summary>
+    /// <remarks>
+    /// Everything that adapts to on-screen size — rebuild rate, feather width, curve
+    /// flattening — needs this, and it cannot come from the tessellation matrix: that matrix
+    /// is built from the element's rect in **canvas** units and stops there, so distance is
+    /// invisible to it.
+    ///
+    /// The camera is the awkward part. A world-space Canvas normally has a null
+    /// <c>worldCamera</c> unless an event camera was assigned, so it has to fall back to the
+    /// main camera. Treating world coordinates as screen coordinates in that case — which an
+    /// earlier version did — reports a two-metre console as about two pixels wide, which
+    /// starves the rebuild rate and sheds nearly every instance.
+    ///
+    /// **Unknown returns -1, and callers treat that as full quality.** Failing toward full
+    /// detail costs performance; failing toward minimum detail makes the mod look broken,
+    /// and that is the wrong way round.
+    /// </remarks>
+    private float ScreenPixelsPerCanvasUnit()
+    {
+        var rect = rectTransform.rect;
+        if (rect.width <= 0f)
+            return -1f;
+
+        var target = canvas;
+        if (target == null)
+            return -1f;
+
+        if (target.renderMode == RenderMode.ScreenSpaceOverlay)
+        {
+            // Overlay canvases are already in screen space; scale is whatever the canvas
+            // scaler applied, which lossyScale reports faithfully here.
+            return Mathf.Abs(target.transform.lossyScale.x);
+        }
+
+        var camera = target.worldCamera != null ? target.worldCamera : ResolveCamera();
+        if (camera == null)
+            return -1f;
+
+        var left = rectTransform.TransformPoint(new Vector3(rect.xMin, rect.yMin, 0f));
+        var right = rectTransform.TransformPoint(new Vector3(rect.xMax, rect.yMin, 0f));
+
+        var a = camera.WorldToScreenPoint(left);
+        var b = camera.WorldToScreenPoint(right);
+
+        // Behind the camera: the projection wraps and the distance is meaningless.
+        if (a.z <= 0.01f || b.z <= 0.01f)
+            return -1f;
+
+        var pixels = Vector2.Distance(new Vector2(a.x, a.y), new Vector2(b.x, b.y));
+        if (pixels <= 0.01f || pixels > 100000f)
+            return -1f;
+
+        return pixels / rect.width;
+    }
+
+    /// <summary>
+    /// Whether any part of this element is within the viewport.
+    /// </summary>
+    /// <remarks>
+    /// Projects the rect's four corners and tests their bounding box against the screen,
+    /// generously padded — a partly visible console must still animate, and the box is a
+    /// loose bound for a rotated rect.
+    ///
+    /// Unknown counts as visible. Failing toward drawing costs frames; failing toward not
+    /// drawing means a console that stays blank, which reads as the mod being broken.
+    /// </remarks>
+    private bool IsOnScreen()
+    {
+        var target = canvas;
+        if (target == null)
+            return true;
+
+        if (target.renderMode == RenderMode.ScreenSpaceOverlay)
+            return true;
+
+        var camera = target.worldCamera != null ? target.worldCamera : ResolveCamera();
+        if (camera == null)
+            return true;
+
+        var rect = rectTransform.rect;
+
+        var minX = float.MaxValue;
+        var minY = float.MaxValue;
+        var maxX = float.MinValue;
+        var maxY = float.MinValue;
+        var anyInFront = false;
+
+        for (var i = 0; i < 4; i++)
+        {
+            var corner = new Vector3(
+                i is 0 or 3 ? rect.xMin : rect.xMax,
+                i is 0 or 1 ? rect.yMin : rect.yMax,
+                0f);
+
+            var projected = camera.WorldToScreenPoint(rectTransform.TransformPoint(corner));
+            if (projected.z <= 0.01f)
+                continue;
+
+            anyInFront = true;
+            minX = Mathf.Min(minX, projected.x);
+            minY = Mathf.Min(minY, projected.y);
+            maxX = Mathf.Max(maxX, projected.x);
+            maxY = Mathf.Max(maxY, projected.y);
+        }
+
+        // Entirely behind the camera.
+        if (!anyInFront)
+            return false;
+
+        const float margin = 64f;
+        return maxX >= -margin && minX <= Screen.width + margin
+               && maxY >= -margin && minY <= Screen.height + margin;
+    }
+
+    /// <summary>
+    /// Main camera, cached. <c>Camera.main</c> is a tag search and this runs every frame.
+    /// </summary>
+    private static Camera? ResolveCamera()
+    {
+        if (_camera != null)
+            return _camera;
+
+        _camera = Camera.main;
+        return _camera;
+    }
+
+    /// <inheritdoc />
+    protected override void OnEnable()
+    {
+        base.OnEnable();
+        Stats.Register(this);
+    }
+
+    /// <inheritdoc />
+    protected override void OnDisable()
+    {
+        Stats.Unregister(this);
+        base.OnDisable();
+    }
+
+    private void Update()
+    {
+        // Land first: a finished job releases the shared state that any deferred scene or
+        // data payload is waiting on, so both can happen in the same frame.
+        LandJob();
+        ApplyDeferred();
+
+        // The entire per-frame cost of a static scene is this one boolean.
+        // A scene with no `t` still has to redraw while data is easing to a new value.
+        var blending = VectorConfig.SmoothData && Now() - _dataArrived < _dataInterval;
+        var animated = _scene != null && (_scene.UsesTime || blending);
+
+        if (VectorConfig.RendererEnabled && _scene != null && _job == null
+            && (_needsRebuild || (animated && DueForRebuild())))
+        {
+            Dispatch();
+        }
+
+        Stats.ReportIfDue();
+    }
+
+    /// <summary>
+    /// Applies a scene or data payload that arrived while a job held the shared state.
+    /// </summary>
+    /// <remarks>
+    /// The sync patch runs on the main thread whenever ScriptedScreens delivers an element,
+    /// which may be mid-job. Blocking it until the worker finished would hand the main
+    /// thread back the exact cost this design removes, so the payload waits a frame instead.
+    /// At a 0.5 s tick against a sub-frame job, that is almost never even reached.
+    /// </remarks>
+    private void ApplyDeferred()
+    {
+        if (_job != null)
+            return;
+
+        if (_pendingScene != null)
+        {
+            var scene = _pendingScene;
+            _pendingScene = null;
+            ApplyScene(scene);
+        }
+
+        if (_pendingData != null)
+        {
+            var data = _pendingData;
+            _pendingData = null;
+            ApplyData(data);
+        }
+    }
+
+    /// <summary>
+    /// Rate-limits rebuilds by on-screen size: temporal level of detail.
+    /// </summary>
+    /// <remarks>
+    /// Preferred over shedding instances, which is what the first LOD attempt did. Dropping
+    /// members of a field makes motes pop in and out *and* changes its apparent density, so
+    /// the field visibly dims as you walk away. Updating a distant console at 10 Hz instead
+    /// of 60 has neither problem: every mote is still there, in the right place, just
+    /// resampled less often — and at that size the motion is a few pixels of slow drift
+    /// where the difference cannot be seen.
+    ///
+    /// It attacks the same arithmetic. Seven distant consoles at 10 Hz cost a sixth of seven
+    /// at 60 Hz, which is the multi-console problem, without a visual artefact class.
+    ///
+    /// Fast motion on a *large* console is unaffected: full rate is restored well before an
+    /// element is big enough to read detail in.
+    /// </remarks>
+    /// <summary>
+    /// The scene clock. Game time by default, so animation stops when the game pauses.
+    /// </summary>
+    /// <remarks>
+    /// Originally unscaled, on the reasoning that animation should not depend on game speed.
+    /// That was wrong twice over: a console visibly kept animating while everything around it
+    /// was frozen, and it went on rebuilding meshes for a paused game.
+    /// </remarks>
+    private static float Now()
+    {
+        return VectorConfig.PauseWithGame ? Time.time : Time.unscaledTime;
+    }
+
+    private bool DueForRebuild()
+    {
+        // Paused: the clock is not advancing, so a rebuild would produce identical geometry.
+        if (VectorConfig.PauseWithGame && Time.timeScale <= 0f)
+            return false;
+
+        // Off screen: Unity culls the draw, but nothing was stopping the rebuild.
+        if (VectorConfig.CullOffScreen && !IsOnScreen())
+            return false;
+
+        var maximum = VectorConfig.MaximumHz;
+
+        if (!VectorConfig.RateLodEnabled)
+            return Elapsed(maximum);
+
+        var scale = ScreenPixelsPerCanvasUnit();
+
+        // Unknown size: assume full quality rather than minimum. This is the safe direction.
+        if (scale < 0f)
+            return Elapsed(maximum);
+
+        var width = rectTransform.rect.width * scale;
+        var minimum = Mathf.Min(VectorConfig.MinimumHz, maximum);
+
+        // sqrt rather than linear: the drop-off was too steep near the threshold, so a
+        // console only slightly smaller than full size lost far more rate than it lost
+        // detail. This holds the rate up longer and eases into the floor.
+        var t = Mathf.Sqrt(Mathf.Clamp01(width / VectorConfig.FullRatePixels));
+        var hz = Mathf.Lerp(minimum, maximum, t);
+
+        return Elapsed(hz);
+    }
+
+    private bool Elapsed(float hz)
+    {
+        var period = 1f / Mathf.Max(1f, hz);
+        var now = Time.unscaledTime;
+        var since = now - _lastRebuild;
+
+        if (since < period)
+            return false;
+
+        // Advance by whole periods rather than snapping to now, so a rebuild that lands late
+        // does not push the whole schedule late and beat against the frame rate.
+        _lastRebuild = now - Mathf.Min(period * 0.5f, since - period);
+        return true;
+    }
+
+    /// <summary>
+    /// Builds and uploads the mesh directly, bypassing <c>VertexHelper</c>.
+    /// </summary>
+    /// <remarks>
+    /// The base implementation routes through <c>VertexHelper</c> and <c>OnPopulateMesh</c>,
+    /// which was measured at ~259 ns per vertex in game and dominated everything else.
+    /// Overriding here is the supported way to supply a Graphic's mesh: masking, batching and
+    /// material handling all key off <c>canvasRenderer.SetMesh</c>, which is exactly what the
+    /// base does at the end of the same path.
+    /// </remarks>
+    protected override void UpdateGeometry()
+    {
+        EnsureMesh();
+
+        // Must not touch _builder: a worker may own it right now. The mesh is main-thread
+        // only, so clearing that is safe.
+        if (_scene == null || !VectorConfig.RendererEnabled)
+            _mesh!.Clear();
+
+        canvasRenderer.SetMesh(_mesh);
+        _needsRebuild = true;
+    }
+
+    private void EnsureMesh()
+    {
+        if (_mesh != null)
+            return;
+
+        _mesh = new Mesh { name = "VectorSurface" };
+        _mesh.MarkDynamic();
+    }
+
+    /// <summary>
+    /// Hands a rebuild to a worker thread, capturing everything it will read.
+    /// </summary>
+    /// <remarks>
+    /// Every Unity-side input is read here, on the main thread, because none of it is legal
+    /// anywhere else: rectTransform.rect, the canvas camera behind ScreenPixelsPerCanvasUnit,
+    /// and Time.*. What the job then runs is pure managed arithmetic over Vector2, Matrix4x4
+    /// and Color, which is what makes this safe at all — the rebuild path was checked and
+    /// contains no native call. ColorUtility.TryParseHtmlString, the one that would have
+    /// broken it, lives in scene and defs parsing and never runs during tessellation.
+    ///
+    /// The mesh upload stays on the main thread, where it belongs. It was measured at
+    /// 0.12 ms against 15 ms of tessellation, so this moves ~99% of the cost off the frame.
+    /// </remarks>
+    private void Dispatch()
+    {
+        var rect = rectTransform.rect;
+        if (rect.width <= 0f || rect.height <= 0f)
+            return;
+
+        EnsureMesh();
+
+        var now = Now();
+        _context.Time = now - _startTime;
+
+        // Blend across the gap the last two payloads were actually separated by, so this
+        // self-tunes to whatever tick rate the script happens to use.
+        _context.Blend = VectorConfig.SmoothData
+            ? Mathf.Clamp01((now - _dataArrived) / _dataInterval)
+            : 1f;
+
+        var screenScale = ScreenPixelsPerCanvasUnit();
+        var known = screenScale > 0f;
+
+        _jobScreenPixels = known ? rect.width * screenScale : -1f;
+        _needsRebuild = false;
+
+        var scene = _scene!;
+        var context = _context;
+        var builder = _builder;
+        var stats = _stats;
+        var scale = known ? screenScale : 1f;
+
+        _job = Task.Run(() =>
+        {
+            var cpuBefore = ThreadCpuMilliseconds();
+            var mark = Stopwatch.GetTimestamp();
+
+            Tessellator.Emit(builder, scene, context, rect, scale, known, stats);
+
+            var wall = (Stopwatch.GetTimestamp() - mark) * 1000d / Stopwatch.Frequency;
+            var cpuAfter = ThreadCpuMilliseconds();
+
+            return (wall, cpuBefore < 0d || cpuAfter < 0d ? -1d : cpuAfter - cpuBefore);
+        });
+    }
+
+    /// <summary>Uploads a finished job's geometry and records what it cost.</summary>
+    private void LandJob()
+    {
+        if (_job == null || !_job.IsCompleted)
+            return;
+
+        var job = _job;
+        _job = null;
+
+        if (job.IsFaulted)
+        {
+            // An exception on a worker is otherwise swallowed whole and the surface simply
+            // stops updating — a blank console with nothing in the log to explain it.
+            ScriptedScreensVectorPlugin.Log?.LogError(
+                $"vector \"{_sceneId}\": tessellation failed: {job.Exception?.GetBaseException()}");
+            return;
+        }
+
+        // Timed separately because they are different animals: Emit is our managed code,
+        // while Apply and SetMesh are native calls that push the whole vertex buffer at the
+        // engine. Lumping them together hid which one costs, and three theories were tested
+        // against the combined figure before anyone thought to split it.
+        var tessellateMs = job.Result.Wall;
+
+        if (job.Result.Cpu >= 0d)
+            _tessellateCpuMs += job.Result.Cpu;
+
+        _stopwatch.Restart();
+
+        _builder.Apply(_mesh!);
+        canvasRenderer.SetMesh(_mesh);
+
+        _stopwatch.Stop();
+
+        _lastShapeCount = _stats.Shapes;
+
+        for (var i = 0; i < _opMs.Length; i++)
+        {
+            _opMs[i] += _stats.OpMilliseconds[i];
+            _opCount[i] = _stats.OpCounts[i];
+        }
+
+        _bandSampleMs += _stats.BandSampleMs;
+        _bandStripMs += _stats.BandStripMs;
+        _bandFeatherMs += _stats.BandFeatherMs;
+        _bandQuads = _stats.BandQuads;
+
+        _rebuilds++;
+        _milliseconds += tessellateMs + _stopwatch.Elapsed.TotalMilliseconds;
+        _tessellateMs += tessellateMs;
+        _uploadMs += _stopwatch.Elapsed.TotalMilliseconds;
+        _peakVertices = Mathf.Max(_peakVertices, _builder.currentVertCount);
+        _screenPixels = _jobScreenPixels;
+    }
+
+    /// <inheritdoc />
+    protected override void OnDestroy()
+    {
+        if (_mesh != null)
+        {
+            Destroy(_mesh);
+            _mesh = null;
+        }
+
+        base.OnDestroy();
+    }
+}
