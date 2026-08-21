@@ -108,3 +108,10 @@ feathering, and a full expression grammar with deterministic hashing.
 Not supported, deliberately: text (use ScriptedScreens' own labels over the artwork), blur and
 drop shadow (both need an offscreen pass), non-convex clipping (needs a stencil buffer), and
 self-intersecting fills.
+
+---
+
+## Licence
+
+[MIT](LICENSE). ScriptedScreens itself is a separate, third-party mod and is not covered by
+it — this repository contains no code from it.
