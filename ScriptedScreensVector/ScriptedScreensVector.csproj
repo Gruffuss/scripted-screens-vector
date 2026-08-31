@@ -44,9 +44,13 @@
     </ItemGroup>
     <ItemGroup>
         <CopyItemsAbout Include="$(ProjectDir)\About\**\*.*" />
+        <CopyItemsExamples Include="$(ProjectDir)\examples\**\*.lua" />
+        <CopyItemsDocs Include="$(ProjectDir)\README.md;$(ProjectDir)\REFERENCE.md;$(ProjectDir)\Patterns.lua" />
     </ItemGroup>
     <Target Name="CopyAssetsToMods" AfterTargets="PostBuild">
         <Copy SourceFiles="@(CopyItemsAbout)" DestinationFolder="$(StationeersDocumentsDirectory)\mods\$(ModName)\About\%(RecursiveDir)" ContinueOnError="true" />
+        <Copy SourceFiles="@(CopyItemsExamples)" DestinationFolder="$(StationeersDocumentsDirectory)\mods\$(ModName)\examples\%(RecursiveDir)" ContinueOnError="true" />
+        <Copy SourceFiles="@(CopyItemsDocs)" DestinationFolder="$(StationeersDocumentsDirectory)\mods\$(ModName)" ContinueOnError="true" />
     </Target>
     <Target Name="GenerateVersionConst" BeforeTargets="CoreCompile">
         <PropertyGroup>
