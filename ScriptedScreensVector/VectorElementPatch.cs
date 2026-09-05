@@ -1,4 +1,6 @@
 using System;
+using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
@@ -60,7 +62,14 @@ internal static class VectorElementPatch
             ReportProbe(element);
 
             var sceneId = ReadString(element.Props, "scene") ?? element.Id;
-            var key = surface + "/" + sceneId;
+
+            // Keyed by BOARD as well as surface and scene. Every console names its
+            // surface "main", so two consoles running the same script both hashed to
+            // "main/gas": whichever registered last owned the entry and the other's
+            // data went to the wrong graphic. Presented as one console's clipping
+            // breaking when the other started, and swapping on restart.
+            var key = RuntimeHelpers.GetHashCode(state).ToString(CultureInfo.InvariantCulture)
+                      + "/" + surface + "/" + sceneId;
 
             if (HasProp(element.Props, "data"))
             {

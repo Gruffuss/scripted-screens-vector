@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.1.0.0</Version>
+	<Version>0.2.1.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -51,6 +51,30 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [*] Turn on Diagnostics in the settings to see exactly what a scene costs
 [/list]
 
+[h2]Changelog[/h2]
+[b]0.2.1[/b]
+[list]
+[*] The eight worked examples, the authoring guide and the full reference now install with the mod, in the mod's own folder. Previously only the DLL was copied, so there was nothing to read or paste.
+[*] Fixed: two consoles running the same script fought over one scene registration. Every console names its surface "main", so both hashed to the same key and one console's data reached the other's artwork — seen as clipping breaking on whichever console was started second, and swapping over on restart. Scenes are now keyed per board.
+[/list]
+
+[b]0.2.0[/b]
+[list]
+[*] Tessellation moved to a worker thread. A console with 800 animated shapes at 30 Hz now costs about 0.4% of a frame on the main thread — switching one on is no longer measurably different from switching it off.
+[*] New [b]fo2[/b] on sampled bands: an opacity ramp along each column, from the sampled edge to the far one. This is how you fade from a surface that moves; a gradient cannot, because it is anchored to the bounding box rather than the wave.
+[*] Gradients gained [b]units = "bbox"[/b] — a ramp that spans whatever shape references it, and follows that shape when it moves or resizes.
+[*] Curve level of detail: sampled bands and lines are walked with a longer step when drawn small. Nothing is dropped, the same curve is simply traced with fewer segments.
+[*] Circles now tessellate by on-screen radius instead of a flat 32 segments, so particles are cheap and large dials are smooth.
+[*] Shapes that resolve to zero opacity are skipped rather than tessellated, which makes opacity usable as a visibility switch.
+[*] Clipping no longer allocates per boundary edge, and gained bounds fast paths. Much faster on clipped scenes.
+[*] Feathering survives a clip and can ramp one edge only ([b]fea_edge[/b]).
+[*] Clip paths are interpreted in scene coordinates, so a clip keeps clipping the same area however the groups under it are transformed.
+[*] A scene that draws nothing now shows a magenta hatched border instead of an empty console, with the reason in the log.
+[/list]
+
+[h2]Source[/h2]
+[url=https://github.com/Gruffuss/scripted-screens-vector]github.com/Gruffuss/scripted-screens-vector[/url] — MIT licensed. Issues and pull requests welcome.
+
 [h2]Requirements[/h2]
 [list]
 [*] [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3666779631]ScriptedScreens[/url] — [b]required[/b]; load before this mod
@@ -58,7 +82,7 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [*] [url=https://github.com/BepInEx/BepInEx]BepInEx 5.x[/url]
 [/list]
 	</Description>
-	<WorkshopHandle>0</WorkshopHandle>
+	<WorkshopHandle>3787517570</WorkshopHandle>
 	<Tags>
 		<Tag>Mod</Tag>
 		<Tag>BepInEx</Tag>
