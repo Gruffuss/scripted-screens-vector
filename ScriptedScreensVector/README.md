@@ -376,6 +376,22 @@ in viewbox units rather than console pixels so no number is converted twice, and
 and rotates with the artwork it belongs to. A readout attached to a moving needle is a sane
 thing to draw; as a label element it is not.
 
+Two things do cut real Lua work, though:
+
+```lua
+-- a whole list as one node and one array
+{ op = "RP", n = 30, c = {
+    { op = "T", y = "=6+i*20", text = "$lines[i]", f = "$tints[i]", ... },
+} }
+
+-- a number formatted here, so the chip does no string work at all
+{ op = "T", text = "$press", fmt = "%.1f", unit = " kPa", ... }
+```
+
+And on the data element, `keep = 1` makes a payload a patch rather than the whole truth, so a
+string sent once stays until it is changed. Without it every string on screen has to be resent
+every tick or it disappears.
+
 Three things it cannot do, because TMP builds its own geometry on its own object:
 
 - It updates at the **rebuild rate**, not instantly. In practice that is 30 Hz.

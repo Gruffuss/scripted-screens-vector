@@ -112,3 +112,78 @@ internal struct ScrollRegion
     /// <summary>A fifth of the viewport per wheel notch, so the step suits the container.</summary>
     internal float WheelStep => Mathf.Max(1f, View * 0.2f);
 }
+
+
+/// <summary>Translates a printf conversion into the .NET format string it corresponds to.</summary>
+/// <remarks>
+/// A Lua author already knows printf, because that is what <c>string.format</c> takes. Asking
+/// them to learn a second dialect for the same job would be gratuitous, so <c>fmt = "%.1f"</c>
+/// is what a `T` node accepts and this turns it into <c>{0:F1}</c>.
+///
+/// Only the numeric conversions are handled, with their precision. Width and flags are not: a
+/// console lays text out with <c>align</c> inside a box, not by padding with spaces. A spec
+/// this cannot read is returned unchanged, so it reaches <c>string.Format</c> and fails there
+/// as a caught FormatException rather than silently formatting the wrong thing.
+/// </remarks>
+internal static class Printf
+{
+    private static readonly System.Collections.Generic.Dictionary<string, string> Cache =
+        new(System.StringComparer.Ordinal);
+
+    internal static string ToNet(string spec)
+    {
+        lock (Cache)
+        {
+            if (Cache.TryGetValue(spec, out var cached))
+                return cached;
+        }
+
+        var result = Translate(spec);
+
+        lock (Cache)
+        {
+            // Bounded and cleared wholesale: a scene inventing a new format every tick is not
+            // what this is for, and tracking use order would cost more than the translation.
+            if (Cache.Count > 64)
+                Cache.Clear();
+
+            Cache[spec] = result;
+        }
+
+        return result;
+    }
+
+    private static string Translate(string spec)
+    {
+        var percent = spec.IndexOf('%', System.StringComparison.Ordinal);
+        if (percent < 0 || percent + 1 >= spec.Length)
+            return spec;
+
+        // "%%" is a literal percent sign and carries no conversion.
+        if (spec[percent + 1] == '%')
+            return spec;
+
+        var end = percent + 1;
+        while (end < spec.Length && !char.IsLetter(spec[end]))
+            end++;
+
+        if (end >= spec.Length)
+            return spec;
+
+        var body = spec[(percent + 1)..end];
+        var dot = body.IndexOf('.', System.StringComparison.Ordinal);
+        var precision = dot >= 0 ? body[(dot + 1)..] : null;
+
+        var net = spec[end] switch
+        {
+            'f' or 'F' => "F" + (precision ?? "2"),
+            'e' or 'E' => "E" + (precision ?? "2"),
+            'g' or 'G' => "G" + precision,
+            'd' or 'i' => "F0",
+            'x' or 'X' => "X",
+            _ => null,
+        };
+
+        return net == null ? spec : spec[..percent] + "{0:" + net + "}" + spec[(end + 1)..];
+    }
+}

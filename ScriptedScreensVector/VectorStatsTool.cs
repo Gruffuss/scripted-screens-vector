@@ -78,6 +78,11 @@ internal static class VectorStatsTool
             var report = new StringBuilder();
             var found = 0;
 
+            // First line, always. Asked for after a console port could not tell from in here
+            // which build was actually running -- and "is the fix I just made even loaded"
+            // is the first question anyone has when a report looks wrong.
+            report.AppendLine($"ScriptedScreensVector {PluginInfo.PLUGIN_VERSION}");
+
             foreach (var graphic in VectorElementPatch.LiveSurfaces())
             {
                 if (graphic == null)
@@ -94,7 +99,10 @@ internal static class VectorStatsTool
             }
 
             if (found == 0)
-                return "No vector surfaces are live. Load a console running a vector scene.";
+            {
+                report.AppendLine("No vector surfaces are live. Load a console running a vector scene.");
+                return report.ToString();
+            }
 
             return report.ToString();
         }

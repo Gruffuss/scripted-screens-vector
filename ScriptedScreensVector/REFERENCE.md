@@ -29,6 +29,7 @@ A scene is **two elements** sharing a `scene` name.
 | `scene` | string | matching scene id |
 | `data` | map | named numbers, arrays of numbers, and colour strings |
 | `nodes` | map | geometry patches by node `id` — see below |
+| `keep` | number | `1` makes the payload a patch: names it omits keep their values |
 
 **Node patching.** Any node may carry an `id`, anywhere in the tree. The data element can then
 change that node's attributes without resending the scene:
@@ -44,6 +45,18 @@ Children are not patchable and are kept, so patching a group costs nothing for i
 Use it for a change no expression can express — a different op, a new gradient reference, a
 count. For anything that is only a *value*, prefer `data` and an expression: that path needs
 no re-parse at all.
+
+**`keep = 1` turns a payload into a patch.** By default `data` is the whole truth and a name
+the payload omits is gone — which means every string a scene displays has to be resent every
+tick or it vanishes. A real console was shipping about a hundred strings a tick for that
+reason alone. With `keep = 1`, send a name once and then send only what changed:
+
+```lua
+props = { scene = "log", keep = 1, data = { … } }
+```
+
+Off by default, deliberately. With merging always on there would be no way to clear a value,
+and the missing-name diagnostic would go quiet for any name ever sent once.
 
 Give it a 1×1 rect at negative coordinates so it draws nothing.
 
@@ -130,6 +143,9 @@ animated or scroll-driven, and **the problems and unresolved data names above**.
 vector_stats            -- all surfaces
 vector_stats scene=gas  -- one
 ```
+
+The first line is the addon's version, so "is the build I just made the one that is running"
+is answerable from inside the editor.
 
 Bound by reflection, so the mod loads normally without StationeersLua and simply does not
 register the tool.
@@ -353,7 +369,10 @@ container, where it will be clipped away and look like nothing happened.
 | Key | Meaning |
 |-----|---------|
 | `x`, `y`, `w`, `h` | the box the text is laid out in |
-| `text` | a literal, or `"$name"` bound to a data string |
+| `text` | a literal, `"$name"`, or `"$rows[i]"` for one slot of a data array |
+| `fmt` | printf spec for a bound **number**, e.g. `"%.1f"` |
+| `unit` | literal suffix appended after the text |
+| `missing` | what to draw when the name has no value; default `"--"` |
 | `size` | font size in scene units; scales with the transform |
 | `f` | colour, as on any shape |
 | `fo` | opacity `0..1`, as on any shape; multiplied by the enclosing group's `o` |
@@ -400,6 +419,40 @@ Objects are pooled by index and reused across rebuilds; surplus labels are disab
 than destroyed, so a scene alternating between two pages does not churn objects. **A fully
 transparent `T` is still placed**, deliberately: the pool is keyed by placement order, so
 skipping one would hand every later label the wrong text.
+
+**One node for a whole list.** `text = "$rows[i]"` inside a repeat takes its string from a
+data array, so thirty rows are one `T` and one array rather than thirty nodes:
+
+```lua
+{ op = "RP", n = 30, c = {
+    { op = "T", x = 8, y = "=6+i*20", w = 160, h = 16, text = "$lines[i]", f = "$tints[i]" },
+} }
+```
+
+```lua
+data:set_props({ data = {
+    lines = { "O2 low", "pump 3 offline", ... },
+    tints = { "#F59E0B", "#E23D3D", ... },
+} })
+```
+
+The index is a full expression, not just `i` — `$rows[n-1-i]` reverses a list and
+`$cols[mod(i,4)]` cycles a palette. Out of range draws `missing` rather than failing.
+
+**Formatting a number, so the chip does no string work.** Most console text is a number with a
+unit, and formatting it in Lua costs a `string.format` per label per tick:
+
+```lua
+{ op = "T", x = 8, y = 8, w = 90, h = 16, text = "$press", fmt = "%.1f", unit = " kPa" }
+```
+
+The chip then sends the number it already had. `fmt` takes the printf spec you would have
+passed to `string.format`: `f`, `e`, `g`, `d`, `i`, `x`, `X`, with precision. Width and flags
+are ignored — lay text out with `align` and a box instead. A spec that cannot be read renders
+`missing`.
+
+A name may hold a string or a number. The string wins, so a payload that deliberately sends
+`"OFFLINE"` for a numeric readout shows that word rather than a formatted zero.
 
 **Why use it over a `label` element:** it changes its text without re-declaring an element,
 it is written in viewbox units rather than console pixels, and it moves, clips and scrolls with
@@ -494,6 +547,18 @@ travels as the event's *value* rather than its id. One handler serves the whole 
 `click = 1` is opt-in and separate from `id`, because an id is also how a node is patched and
 patch targets are common; making all of them swallow clicks would be a surprise. A scene with
 no clickable node stays transparent to the pointer exactly as before.
+
+**A clickable node inside a repeat reports its index.** One node stands for n rows, so the id
+alone cannot say which was hit; the value becomes `id:i`:
+
+```lua
+on_click = function(nodeId, player)
+    local id, index = nodeId:match("^(.-):(%d+)$")
+    ...
+end
+```
+
+Outside a repeat it is the bare id, unchanged.
 
 **Hit testing is against the node's bounding box**, in draw order, last match wins. For a row,
 a tile or a button — what carries `click` — the bounds are the shape. A thin diagonal or a
@@ -645,6 +710,29 @@ longer string it splices textually, which is what makes it work in expressions �
 Substitution happens once, at parse time, not through a scope in the evaluator: symbol
 parameters are structure, not animation, so an instance costs exactly what writing the nodes
 out would have.
+
+### Inherited defaults in the text format
+
+`style` is a map and the text format has no map syntax, so a text-form `G` carries its
+defaults as ordinary attributes instead — the same shape as `SYM`'s parameter defaults:
+
+```
+G fea=0 f=#c6c6c8 {
+    R x=0  y=0 w=40 h=12
+    R x=44 y=0 w=40 h=12
+}
+```
+
+Only **paint** keys are inherited this way: `f fo fea fea_edge fr sh so sw cap join ml dash
+dofs` and the text keys `size font weight cspace align valign fit min_size`. A group's own
+`t r s a o clip` are not, because it uses those itself and inheriting them would apply every
+transform twice.
+
+**Stroke colour is `s_`, not `s`, when written as a group default.** On a shape `s` is the
+stroke colour; on a group it is the scale. `s_` says the former without breaking the latter.
+
+Both forms work in the table form too, and an explicit `style` wins over a bare attribute on
+the same group.
 
 ### `CP` — clip path
 

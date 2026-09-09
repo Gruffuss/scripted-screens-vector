@@ -96,6 +96,12 @@ internal static class Program
         ScrollTests.StepSizes(run);
 
         Console.WriteLine();
+        PrintfTests.NumericConversions(run);
+        PrintfTests.KeepsSurroundingText(run);
+        PrintfTests.UnreadableSpecsAreLeftAlone(run);
+        PrintfTests.RepeatedCallsAgree(run);
+
+        Console.WriteLine();
         GradientTests.LinearParameter(run);
         GradientTests.RadialParameter(run);
         GradientTests.TwoStopInterpolation(run);

@@ -122,6 +122,11 @@ internal sealed class VecNode
     internal Color Fill = Color.white;
     internal Expression FillOpacity = Expression.Constant(1f);
 
+    /// <summary>Index expressions for `f`/`s` bound to a colour ARRAY; null for a scalar.</summary>
+    internal Expression? FillIndex;
+
+    internal Expression? StrokeIndex;
+
     internal bool HasStroke;
     internal string? StrokeGradient;
 
@@ -168,6 +173,18 @@ internal sealed class VecNode
     // --- T only -------------------------------------------------------------
     internal string? TextLiteral;
     internal string? TextData;
+
+    /// <summary>Index expression for `text = "$rows[i]"`; null for a plain `$name`.</summary>
+    internal Expression? TextIndex;
+
+    /// <summary>printf-style numeric format for a bound NUMBER, e.g. "%.1f".</summary>
+    internal string? TextFormat;
+
+    /// <summary>Literal suffix appended after the formatted number.</summary>
+    internal string? TextUnit;
+
+    /// <summary>What to render when the bound value is absent. Defaults to "--".</summary>
+    internal string TextMissing = "--";
     internal Expression? TextSize;
     internal string? FontFamily;
     internal bool Bold;
@@ -422,6 +439,9 @@ internal static class SceneParser
         into.Arrays.Clear();
         into.Colours.Clear();
         into.Strings.Clear();
+        into.StringArrays.Clear();
+        into.ColourArrays.Clear();
+        into.KeepUnmentioned = PropNumber(props, "keep", 0f) > 0.5f;
 
         var data = PropValue(props, "data");
         if (data == null || data.Value.Type != SS.UiValueType.Map || data.Value.Map == null)
@@ -451,6 +471,37 @@ internal static class SceneParser
                 case SS.UiValueType.Array when entry.Value.Array != null:
                 {
                     var source = entry.Value.Array;
+
+                    // An array of strings is a different animal from an array of numbers and
+                    // is stored separately. Deciding by the FIRST element rather than
+                    // per-element: a payload mixing the two is a mistake in the script, and
+                    // guessing per slot would make it render as half a list.
+                    if (source.Length > 0 && source[0].Type == SS.UiValueType.String)
+                    {
+                        var text = new string[source.Length];
+                        var colours = new Color[source.Length];
+                        var anyColour = false;
+
+                        for (var i = 0; i < source.Length; i++)
+                        {
+                            text[i] = source[i].String ?? string.Empty;
+
+                            // Stored as both, exactly as a scalar string is: a scene may want
+                            // to paint with "#FF0000" and another to print it.
+                            if (ColorUtility.TryParseHtmlString(text[i], out var parsed))
+                            {
+                                colours[i] = parsed;
+                                anyColour = true;
+                            }
+                        }
+
+                        into.StringArrays[entry.Key] = text;
+                        if (anyColour)
+                            into.ColourArrays[entry.Key] = colours;
+
+                        break;
+                    }
+
                     var values = new float[source.Length];
                     for (var i = 0; i < source.Length; i++)
                         values[i] = source[i].Type == SS.UiValueType.Number ? source[i].Number : 0f;
@@ -590,13 +641,59 @@ internal static class SceneParser
     }
 
     /// <summary>A group's `style` map, merged onto whatever it inherited.</summary>
+    /// <summary>Paint keys a `G` may carry directly, as defaults for its subtree.</summary>
+    /// <remarks>
+    /// The text format has no map syntax, so `style = { … }` cannot be written there at all.
+    /// Rather than invent one, a text-form group carries its defaults as ordinary attributes,
+    /// exactly the way `SYM` already carries its parameter defaults:
+    ///
+    /// <code>G fea=0 f=#c6c6c8 { … }</code>
+    ///
+    /// This is a whitelist, not "every key on the group": a `G` legitimately owns `t`, `r`,
+    /// `s`, `a`, `o` and `clip`, and inheriting those to every child would apply each
+    /// transform twice. Only paint keys, which a group has no use for itself, are eligible.
+    /// </remarks>
+    private static readonly string[] GroupPaintDefaults =
+    {
+        "f", "fo", "fea", "fea_edge", "fr", "sh",
+        "s_", "so", "sw", "cap", "join", "ml", "dash", "dofs",
+        "size", "font", "weight", "cspace", "align", "valign", "fit", "min_size",
+    };
+
     private static SS.UiProp[]? ParseStyle(SS.UiProp[] map, SS.UiProp[]? inherited)
     {
         var style = PropValue(map, "style");
-        if (style?.Type != SS.UiValueType.Map || style.Value.Map == null)
+        var declared = style?.Type == SS.UiValueType.Map ? style.Value.Map : null;
+
+        // Paint keys written straight on the group, for the text format's benefit. Collected
+        // even when `style` is also present, with `style` winning: it is the explicit form.
+        List<SS.UiProp>? direct = null;
+        foreach (var prop in map)
+        {
+            if (string.IsNullOrEmpty(prop.Key))
+                continue;
+
+            var key = prop.Key;
+
+            // `s` is stroke colour on a shape and SCALE on a group, so it cannot be
+            // inherited from a bare attribute without breaking every scaled group that
+            // exists. `s_` is the way to say stroke colour as a group default.
+            if (string.Equals(key, "s_", StringComparison.Ordinal))
+                key = "s";
+            else if (System.Array.IndexOf(GroupPaintDefaults, key) < 0)
+                continue;
+
+            (direct ??= new List<SS.UiProp>()).Add(new SS.UiProp { Key = key, Value = prop.Value });
+        }
+
+        var own = direct == null
+            ? declared
+            : declared == null ? direct.ToArray() : Merge(direct.ToArray(), declared);
+
+        if (own == null)
             return inherited;
 
-        return inherited == null ? style.Value.Map : Merge(inherited, style.Value.Map);
+        return inherited == null ? own : Merge(inherited, own);
     }
 
     /// <summary>
@@ -612,11 +709,12 @@ internal static class SceneParser
     {
         "op", "id", "c", "style", "click", "lod",
         "x", "y", "w", "h", "cx", "cy", "rx", "ry", "x1", "y1", "x2", "y2", "y2",
-        "n", "p", "d", "seg", "t", "r", "s", "a", "o", "clip", "ref", "params", "ch",
+        "n", "p", "d", "seg", "t", "r", "s", "s_", "a", "o", "clip", "ref", "params", "ch",
         "f", "fo", "fo2", "fr", "fea", "fea_edge", "sh",
         "sw", "so", "cap", "join", "ml", "dash", "dofs", "sd", "sdo",
         "grad", "at", "units", "stops", "fx", "fy",
         "text", "size", "align", "valign", "font", "weight", "cspace", "fit", "min_size",
+        "fmt", "unit", "missing",
     };
 
     private static void Validate(SS.UiProp[] map, VecScene scene, string? op, string? id)
@@ -784,9 +882,24 @@ internal static class SceneParser
                 // `text` is either a literal or a $name binding, resolved per rebuild.
                 var body = PropString(map, "text");
                 if (!string.IsNullOrEmpty(body) && body![0] == '$')
-                    node.TextData = body[1..];
+                {
+                    var bound = SplitBinding(body[1..]);
+                    node.TextData = bound.Name;
+                    node.TextIndex = bound.Index;
+                }
                 else
+                {
                     node.TextLiteral = body;
+                }
+
+                // `fmt` turns the node into a NUMBER formatter: the chip sends the value it
+                // already has in the payload and does no string work at all.
+                node.TextFormat = PropString(map, "fmt");
+                node.TextUnit = PropString(map, "unit");
+
+                var missing = PropString(map, "missing");
+                if (missing != null)
+                    node.TextMissing = missing;
 
                 node.FontFamily = PropString(map, "font");
                 node.Align = TextAlign.Horizontal(PropString(map, "align"));
@@ -930,8 +1043,10 @@ internal static class SceneParser
         // $name binds the colour to the data payload, re-read every tick.
         if (fill[0] == '$')
         {
+            var bound = SplitBinding(fill[1..]);
             node.HasFill = true;
-            node.FillData = fill[1..];
+            node.FillData = bound.Name;
+            node.FillIndex = bound.Index;
             node.FillOpacity = Attr(map, "fo", 1f);
             node.Feather = Attr(map, "fea", -1f);
 
@@ -1117,7 +1232,9 @@ internal static class SceneParser
         else if (stroke[0] == '$')
         {
             node.HasStroke = true;
-            node.StrokeData = stroke[1..];
+            var boundStroke = SplitBinding(stroke[1..]);
+            node.StrokeData = boundStroke.Name;
+            node.StrokeIndex = boundStroke.Index;
         }
         else if (ColorUtility.TryParseHtmlString(stroke, out var colour))
         {
@@ -1181,6 +1298,27 @@ internal static class SceneParser
     }
 
     /// <summary>Compiles one attribute: a number stays constant, a string is parsed.</summary>
+    /// <summary>Splits a `$` binding into its name and, when present, its index expression.</summary>
+    /// <remarks>
+    /// `rows[i]` becomes ("rows", i). `row` becomes ("row", null). The `$` is already gone by
+    /// the time this is called.
+    ///
+    /// The index is parsed with the ordinary expression parser, so it is not limited to a
+    /// bare `i` -- `$rows[n-1-i]` reverses a list, and `$cols[mod(i,4)]` cycles a palette.
+    /// </remarks>
+    private static (string Name, Expression? Index) SplitBinding(string body)
+    {
+        var open = body.IndexOf('[', StringComparison.Ordinal);
+        if (open <= 0 || body.Length < 3 || body[^1] != ']')
+            return (body, null);
+
+        var inner = body[(open + 1)..^1];
+        if (inner.Length == 0)
+            return (body, null);
+
+        return (body[..open], Expression.Parse(inner, 0f));
+    }
+
     private static Expression Attr(SS.UiProp[] map, string key, float fallback)
     {
         var value = PropValue(map, key);

@@ -502,7 +502,14 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         _dataInterval = Mathf.Clamp(now - _dataArrived, MinBlendSeconds, MaxBlendSeconds);
         _dataArrived = now;
 
-        _context.Scalars.Clear();
+        // `keep = 1` means a payload is a PATCH: names it does not mention hold their last
+        // value. Without it a payload is the whole truth and anything absent is gone, which
+        // is what forces a console to resend every string it displays on every tick.
+        var keep = source.KeepUnmentioned;
+
+        if (!keep)
+            _context.Scalars.Clear();
+
         foreach (var pair in source.Scalars)
             _context.Scalars[pair.Key] = pair.Value;
 
@@ -512,7 +519,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         foreach (var pair in _context.Arrays)
             _context.PreviousArrays[pair.Key] = pair.Value;
 
-        _context.Arrays.Clear();
+        if (!keep)
+            _context.Arrays.Clear();
+
         foreach (var pair in source.Arrays)
             _context.Arrays[pair.Key] = pair.Value;
 
@@ -520,13 +529,32 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // copy did not exist, so `f = "$name"` never resolved and every data-bound fill fell
         // back to node.Fill, which is white. Not blended like scalars are -- a colour is not
         // a scalar, and easing one would need a per-channel lerp with no way to say "snap".
-        _context.Colours.Clear();
+        if (!keep)
+            _context.Colours.Clear();
+
         foreach (var pair in source.Colours)
             _context.Colours[pair.Key] = pair.Value;
 
-        _context.Strings.Clear();
+        if (!keep)
+            _context.Strings.Clear();
+
         foreach (var pair in source.Strings)
             _context.Strings[pair.Key] = pair.Value;
+
+        // String and colour ARRAYS, which ReadData fills and this method used to drop on the
+        // floor -- exactly the fault the comment above records for Colours, repeated the day
+        // indexed bindings were added. `text = "$rows[i]"` resolved to nothing without it.
+        if (!keep)
+            _context.StringArrays.Clear();
+
+        foreach (var pair in source.StringArrays)
+            _context.StringArrays[pair.Key] = pair.Value;
+
+        if (!keep)
+            _context.ColourArrays.Clear();
+
+        foreach (var pair in source.ColourArrays)
+            _context.ColourArrays[pair.Key] = pair.Value;
 
         SetVerticesDirty();
     }

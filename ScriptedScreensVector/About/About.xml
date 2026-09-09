@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.9.1.0</Version>
+	<Version>0.10.0.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -66,6 +66,15 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.10.0[/b]
+[list]
+[*] [b]A whole list is one node.[/b] Text and colours can be bound to an array slot -- text="$rows[i]" and f="$tints[i]" inside a repeat -- so thirty rows are one node and one array instead of thirty nodes. A clickable node in a repeat now reports which instance was hit.
+[*] [b]Text can format a number itself[/b], with fmt="%.1f" and unit=" kPa", so the chip sends the number it already had and does no string work at all.
+[*] [b]keep=1 on the data element[/b] makes a payload a patch: names it does not mention hold their values. Without it every string on screen had to be resent every tick or it vanished.
+[*] Groups in the text scene format can carry paint defaults directly, since that format has no map syntax for style.
+[*] vector_stats reports the addon version on its first line.
+[*] Fixed: a label with no font of its own could inherit the face of whichever label used that pooled object before it. Fixed: string and colour arrays were parsed out of the payload and then dropped before the renderer saw them.
+[/list]
 [b]0.9.1[/b]
 [list]
 [*] Text now fades with its group. A T node takes fo, and the enclosing group's o reaches it -- so a row's text fades at the edge of a scroll container along with the artwork around it, which it previously did not.

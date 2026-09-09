@@ -11,10 +11,15 @@ namespace ScriptedScreensVector;
 /// <remarks>
 /// Main thread only, driven when a tessellation job lands.
 ///
-/// **Objects are pooled by index, not rebuilt.** A scene's text nodes are stable — the same
-/// labels in the same order, with different strings — so the nth placement reuses the nth
-/// object. Destroying and recreating them would give up TMP's own caching and put a
-/// per-frame allocation where the point of the exercise was removing one.
+/// **Objects are pooled by index, not rebuilt.** The nth placement reuses the nth object.
+/// Destroying and recreating them would give up TMP's own caching and put a per-frame
+/// allocation where the point of the exercise was removing one.
+///
+/// Pooling by index is safe because <see cref="Show"/> reassigns **every** property of the
+/// label it takes, so an object that served a different placement last rebuild carries
+/// nothing forward. That is load bearing: without it, a node that stops being emitted would
+/// shift every later placement onto an object still configured for something else. The font
+/// was the one property that leaked, and it is reset explicitly below.
 ///
 /// It is also why this is worth having at all: a ScriptedScreens `label` element costs about
 /// 300 Lua instructions to declare and has to be re-declared to change its text, against a
@@ -23,6 +28,9 @@ namespace ScriptedScreensVector;
 internal sealed class TextLayer
 {
     private readonly List<TextMeshProUGUI> _pool = new();
+
+    /// <summary>The face a fresh label starts with, restored when a placement names none.</summary>
+    private TMP_FontAsset? _defaultFont;
     private readonly List<RectTransform> _masks = new();
     private readonly Transform _parent;
 
@@ -105,8 +113,14 @@ internal sealed class TextLayer
 
         label.rectTransform.localRotation = Quaternion.Euler(0f, 0f, placement.Rotation);
 
+        // Reset rather than "leave it alone", because the pool is by index: a placement with
+        // no `font` must not inherit the face of whatever used this object last rebuild. This
+        // was a real leak whenever placement ORDER changed -- a repeat whose count grew, a
+        // scroll container gaining a row -- not only when a node disappeared.
         if (!string.IsNullOrEmpty(placement.Font))
             ApplyFont(label, placement.Font!);
+        else if (_defaultFont != null && label.font != _defaultFont)
+            label.font = _defaultFont;
     }
 
     /// <summary>
@@ -159,6 +173,8 @@ internal sealed class TextLayer
         label.rectTransform.SetParent(mask, worldPositionStays: false);
         label.raycastTarget = false;
         label.richText = true;
+
+        _defaultFont ??= label.font;
 
         _masks.Add(mask);
         _pool.Add(label);

@@ -89,6 +89,30 @@ internal sealed class EvalContext
     /// </remarks>
     internal Dictionary<string, string> Strings { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Arrays of strings, for `text = "$rows[i]"` inside a repeat.</summary>
+    /// <remarks>
+    /// Separate from <see cref="Arrays"/> rather than a variant of it, because the numeric
+    /// arrays are interpolated between payloads and these cannot be: there is no halfway
+    /// point between two strings, and a chart that scrolls smoothly and a label that reads
+    /// half of one word are different requirements.
+    /// </remarks>
+    internal Dictionary<string, string[]> StringArrays { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Arrays of colours, for `f = "$cols[i]"` inside a repeat.</summary>
+    internal Dictionary<string, Color[]> ColourArrays { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>`keep = 1` on the data element: names this payload omits keep their values.</summary>
+    /// <remarks>
+    /// Off by default, so nothing that works today changes. It exists because strings cannot
+    /// be interpolated and so are not blended, which meant every string a scene showed had to
+    /// be resent every tick or it vanished -- a real console was shipping about a hundred
+    /// strings a tick for that reason alone.
+    ///
+    /// Opt-in rather than the new default: with merging always on there is no way to clear a
+    /// value, and the missing-name diagnostic would go quiet for any name ever sent once.
+    /// </remarks>
+    internal bool KeepUnmentioned { get; set; }
+
     /// <summary>
     /// Data names a scene asked for and did not get, gathered during a rebuild.
     /// </summary>
@@ -111,6 +135,9 @@ internal sealed class EvalContext
         _indices.RemoveAt(_indices.Count - 1);
         _counts.RemoveAt(_counts.Count - 1);
     }
+
+    /// <summary>How many repeats enclose the node being walked. 0 outside any.</summary>
+    internal int RepeatDepth => _indices.Count;
 
     /// <summary>Repeat index <paramref name="depth"/> levels out; 0 is innermost.</summary>
     internal float Index(int depth)
@@ -136,6 +163,38 @@ internal sealed class EvalContext
             return value;
 
         return previous + (value - previous) * Blend;
+    }
+
+    /// <summary>One string from a data array, or null when there is nothing there.</summary>
+    internal string? StringElement(string name, float index)
+    {
+        if (!StringArrays.TryGetValue(name, out var array) || array == null)
+        {
+            Missing.Add(name);
+            return null;
+        }
+
+        var at = Mathf.RoundToInt(index);
+        return at >= 0 && at < array.Length ? array[at] : null;
+    }
+
+    /// <summary>One colour from a data array. False when the name or the slot is absent.</summary>
+    internal bool ColourElement(string name, float index, out Color colour)
+    {
+        colour = default;
+
+        if (!ColourArrays.TryGetValue(name, out var array) || array == null)
+        {
+            Missing.Add(name);
+            return false;
+        }
+
+        var at = Mathf.RoundToInt(index);
+        if (at < 0 || at >= array.Length)
+            return false;
+
+        colour = array[at];
+        return true;
     }
 
     internal float Element(string name, float index)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Diagnostics;
 using UnityEngine;
 
@@ -73,6 +74,7 @@ internal static class Tessellator
     [ThreadStatic] internal static List<HitRegion>? HitsFound;
 
     [ThreadStatic] internal static List<ScrollRegion>? ScrollsFound;
+
 
     [ThreadStatic] internal static double BandSampleMs;
     [ThreadStatic] internal static double BandStripMs;
@@ -511,7 +513,7 @@ internal static class Tessellator
         // the saving is a TMP update, the cost is a scene that shows the wrong numbers.
         var body = node.TextLiteral;
         if (node.TextData != null)
-            context.Strings.TryGetValue(node.TextData, out body);
+            body = BindText(node, context);
 
         if (string.IsNullOrEmpty(body))
             return;
@@ -532,6 +534,13 @@ internal static class Tessellator
         // the readable part -- at full strength, which is the opposite of what was asked for.
         Color colour = paint.At(new Vector2(x, y));
         colour.a *= frame.Opacity * Mathf.Clamp01(node.FillOpacity.Evaluate(context));
+
+        // A label faded to nothing is not placed at all. TMP work is main-thread work, and
+        // the two-shapes-with-opposing-opacity idiom means a scene showing one of two states
+        // carries both. Safe because the pool reassigns every property of the object it
+        // takes, so a shifted placement inherits nothing from the previous occupant.
+        if (colour.a <= 0.002f)
+            return;
 
         Rect? clip = null;
         if (frame.Clip != null)
@@ -660,7 +669,7 @@ internal static class Tessellator
     private static void FillAndStroke(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame, List<Vector2> outline, bool closed)
     {
         if (node.Clickable && !string.IsNullOrEmpty(node.Id))
-            RecordHit(node.Id!, outline, frame.Matrix);
+            RecordHit(node.Id!, outline, frame.Matrix, context);
 
         // Shadows first: they sit beneath the shape, and in declaration order like CSS.
         if (node.Shadows != null && closed)
@@ -1240,10 +1249,80 @@ internal static class Tessellator
     }
 
     /// <summary>Records a clickable node's canvas-space bounds.</summary>
-    private static void RecordHit(string id, List<Vector2> outline, Matrix4x4 matrix)
+    /// <summary>Records a clickable node's bounds, tagging it with its repeat index.</summary>
+    /// <remarks>
+    /// A clickable node inside a repeat is ONE node standing for n rows, so the id alone
+    /// cannot say which was hit. Inside a repeat the value becomes `id:i`, which the handler
+    /// splits. Outside one it is the bare id, so nothing that already works changes.
+    /// </remarks>
+    /// <summary>Resolves a `T` node's bound text: a string, or a formatted number.</summary>
+    /// <remarks>
+    /// **`fmt` exists because most console text is a number with a unit.** Without it the chip
+    /// formats a string per label per tick and ships it; with it the chip sends the number it
+    /// already had in the payload, and the formatting happens here -- off the main thread and
+    /// off the instruction budget entirely.
+    ///
+    /// A name may hold a string or a number, so both are tried, string first: a payload that
+    /// deliberately sends "OFFLINE" for a numeric readout should show that word rather than a
+    /// formatted zero.
+    /// </remarks>
+    private static string? BindText(VecNode node, EvalContext context)
+    {
+        var name = node.TextData!;
+
+        if (node.TextIndex != null)
+        {
+            var at = node.TextIndex.Evaluate(context);
+            var element = context.StringElement(name, at);
+            if (element != null)
+                return element + node.TextUnit;
+
+            // A numeric array formats exactly as a scalar does.
+            if (context.Arrays.ContainsKey(name))
+                return Format(node, context.Element(name, at));
+
+            return node.TextMissing;
+        }
+
+        if (context.Strings.TryGetValue(name, out var text))
+            return text + node.TextUnit;
+
+        if (context.Scalars.ContainsKey(name))
+            return Format(node, context.Scalar(name));
+
+        // Neither a string nor a number under that name. Reported once per rebuild, and the
+        // node renders its placeholder rather than vanishing: an empty box on a console is
+        // indistinguishable from a layout mistake.
+        context.Missing.Add(name);
+        return node.TextMissing;
+    }
+
+    private static string Format(VecNode node, float value)
+    {
+        if (node.TextFormat == null)
+            return value.ToString("0.##", CultureInfo.InvariantCulture) + node.TextUnit;
+
+        try
+        {
+            return string.Format(CultureInfo.InvariantCulture, Printf.ToNet(node.TextFormat), value)
+                   + node.TextUnit;
+        }
+        catch (FormatException)
+        {
+            return node.TextMissing;
+        }
+    }
+
+    private static void RecordHit(string id, List<Vector2> outline, Matrix4x4 matrix, EvalContext context)
     {
         if (HitsFound == null || outline.Count == 0)
             return;
+
+        if (context.RepeatDepth > 0)
+        {
+            id = id + ":" + Mathf.RoundToInt(context.Index(0))
+                     .ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
 
         var min = (Vector2)matrix.MultiplyPoint3x4(outline[0]);
         var max = min;
@@ -1639,6 +1718,16 @@ internal static class Tessellator
         var bound = stroke ? node.StrokeData : node.FillData;
         if (!string.IsNullOrEmpty(bound))
         {
+            // `f = "$cols[i]"`: one node inside a repeat, one array in the payload.
+            var index = stroke ? node.StrokeIndex : node.FillIndex;
+            if (index != null)
+            {
+                if (context.ColourElement(bound!, index.Evaluate(context), out var element))
+                    return new Paint(element, null, opacity);
+
+                return new Paint(Magenta, null, opacity);
+            }
+
             if (context.Colours.TryGetValue(bound!, out var supplied))
                 return new Paint(supplied, null, opacity);
 
