@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using SS = ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem;
 
@@ -19,7 +20,7 @@ namespace ScriptedScreensVector;
 /// reference <c>t</c> is tessellated once and then costs nothing per frame. Only
 /// time-varying scenes mark themselves dirty in <see cref="Update"/>.
 /// </remarks>
-internal sealed class VectorGraphic : MaskableGraphic
+internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler
 {
     /// <summary>
     /// Per-surface rebuild cost, reported periodically.
@@ -203,6 +204,10 @@ internal sealed class VectorGraphic : MaskableGraphic
 
     private TextLayer? _text;
 
+    private readonly List<HitRegion> _hits = new();
+    private SS.UiPointerDownForwarder? _forwarder;
+    private string _elementId = string.Empty;
+
     private ScrollRect? _scroll;
     private bool _scrollSearched;
     private float _lastScrollY = float.NaN;
@@ -278,6 +283,61 @@ internal sealed class VectorGraphic : MaskableGraphic
     }
 
     /// <summary>Replaces the data bindings referenced as <c>$name</c>. Cheap; called per tick.</summary>
+    /// <summary>
+    /// Gives the graphic what it needs to dispatch a click through ScriptedScreens.
+    /// </summary>
+    /// <remarks>
+    /// The forwarder is ScriptedScreens' own <c>UiPointerDownForwarder</c>, put on a CHILD
+    /// object with no graphic. Unity therefore never routes a pointer event to it, and it
+    /// only ever fires when this class calls it — which is what lets the node id be resolved
+    /// by hit test first and passed as the event's value. Left on this object it would also
+    /// receive the click itself, and its 0.25 s debounce would swallow whichever of the two
+    /// arrived second, at random.
+    /// </remarks>
+    internal void SetClickTarget(SS.UiPointerDownForwarder forwarder, string elementId)
+    {
+        _forwarder = forwarder;
+        _elementId = elementId;
+    }
+
+    /// <summary>
+    /// Routes a click to the node under the pointer, as the element's own click event.
+    /// </summary>
+    /// <remarks>
+    /// The node id travels as the event's VALUE, not as its id: Lua registers handlers per
+    /// element, and a vector node is not an element. So a scene declares `on_click` once on
+    /// its structure element and receives `(nodeId, playerName)`.
+    ///
+    /// Last match wins, because the list is in draw order and the thing drawn last is the
+    /// thing on top.
+    /// </remarks>
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (_forwarder == null || eventData == null || _hits.Count == 0)
+            return;
+
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                rectTransform, eventData.position, eventData.pressEventCamera, out var local))
+        {
+            return;
+        }
+
+        string? hit = null;
+        for (var i = 0; i < _hits.Count; i++)
+        {
+            if (_hits[i].Rect.Contains(local))
+                hit = _hits[i].Id;
+        }
+
+        if (hit == null)
+            return;
+
+        _forwarder.Value = hit;
+        _forwarder.Id = _elementId;
+        _forwarder.EventName = "click";
+        _forwarder.OnPointerClick(eventData);
+    }
+
     /// <summary>Applies a `nodes = { id = { ... } }` patch from the data element.</summary>
     internal void PatchScene(SS.UiProp[] props)
     {
@@ -829,6 +889,13 @@ internal sealed class VectorGraphic : MaskableGraphic
         _bandStripMs += _stats.BandStripMs;
         _bandFeatherMs += _stats.BandFeatherMs;
         _bandQuads = _stats.BandQuads;
+
+        _hits.Clear();
+        _hits.AddRange(_stats.Hits);
+
+        // Only take clicks when the scene actually has something clickable, so a plain
+        // decorative surface stays transparent to the pointer as it always was.
+        raycastTarget = _hits.Count > 0;
 
         _rebuilds++;
         _milliseconds += tessellateMs + _stopwatch.Elapsed.TotalMilliseconds;

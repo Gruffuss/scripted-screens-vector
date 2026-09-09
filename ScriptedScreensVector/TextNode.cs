@@ -70,3 +70,17 @@ internal static class TextAlign
         };
     }
 }
+
+
+/// <summary>A clickable node's bounds, in canvas space, in draw order.</summary>
+/// <remarks>
+/// Bounds rather than the tessellated shape. The walk knows each node's outline, but keeping
+/// every contour alive past the rebuild to hit-test against later is a lot of memory for a
+/// test that is only ever run on a click — and a row, a button and a tile, which is what
+/// carries `click`, are rectangles whose bounds are their shape.
+/// </remarks>
+internal struct HitRegion
+{
+    internal string Id;
+    internal Rect Rect;
+}

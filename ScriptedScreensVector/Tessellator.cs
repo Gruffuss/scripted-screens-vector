@@ -69,6 +69,9 @@ internal static class Tessellator
     /// </remarks>
     [ThreadStatic] internal static List<TextPlacement>? TextFound;
 
+    /// <summary>Clickable node bounds found during the walk, in draw order.</summary>
+    [ThreadStatic] internal static List<HitRegion>? HitsFound;
+
     [ThreadStatic] internal static double BandSampleMs;
     [ThreadStatic] internal static double BandStripMs;
     [ThreadStatic] internal static double BandFeatherMs;
@@ -176,6 +179,10 @@ internal static class Tessellator
         if (TextFound != null)
             stats.Text.AddRange(TextFound);
 
+        stats.Hits.Clear();
+        if (HitsFound != null)
+            stats.Hits.AddRange(HitsFound);
+
         return shapes;
     }
 
@@ -195,6 +202,7 @@ internal static class Tessellator
         BandQuads = 0;
 
         (TextFound ??= new List<TextPlacement>(16)).Clear();
+        (HitsFound ??= new List<HitRegion>(16)).Clear();
 
         NoFill = scene.DebugNoFill;
         NoFeather = scene.DebugNoFeather;
@@ -617,6 +625,9 @@ internal static class Tessellator
 
     private static void FillAndStroke(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame, List<Vector2> outline, bool closed)
     {
+        if (node.Clickable && !string.IsNullOrEmpty(node.Id))
+            RecordHit(node.Id!, outline, frame.Matrix);
+
         // Shadows first: they sit beneath the shape, and in declaration order like CSS.
         if (node.Shadows != null && closed)
         {
@@ -1192,6 +1203,25 @@ internal static class Tessellator
 
         for (var i = 1; i < piece.Count - 1; i++)
             vh.AddTriangle(origin, origin + i, origin + i + 1);
+    }
+
+    /// <summary>Records a clickable node's canvas-space bounds.</summary>
+    private static void RecordHit(string id, List<Vector2> outline, Matrix4x4 matrix)
+    {
+        if (HitsFound == null || outline.Count == 0)
+            return;
+
+        var min = (Vector2)matrix.MultiplyPoint3x4(outline[0]);
+        var max = min;
+
+        foreach (var point in outline)
+        {
+            var p = (Vector2)matrix.MultiplyPoint3x4(point);
+            min = Vector2.Min(min, p);
+            max = Vector2.Max(max, p);
+        }
+
+        HitsFound.Add(new HitRegion { Id = id, Rect = Rect.MinMaxRect(min.x, min.y, max.x, max.y) });
     }
 
     private static double Elapsed(long mark)

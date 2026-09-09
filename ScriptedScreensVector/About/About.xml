@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.6.0.0</Version>
+	<Version>0.7.0.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -52,6 +52,10 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.7.0[/b]
+[list]
+[*] [b]Clickable nodes.[/b] A node marked click=1 becomes a hit region, and the click arrives at the vector element's own on_click with the node id as its value. A list of tappable rows no longer needs a transparent button element over every one of them.
+[/list]
 [b]0.6.0[/b]
 [list]
 [*] [b]Symbols.[/b] Declare a subtree once with SYM and stamp it with USE, passing parameters — a row, an LED, a duct segment written once and placed twenty times. Substitution happens at parse time, so an instance costs exactly what writing the nodes out would have.

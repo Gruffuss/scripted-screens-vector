@@ -27,4 +27,7 @@ internal sealed class TessellationStats
 
     /// <summary>Text nodes found by the walk, for the main thread to realise as TMP.</summary>
     internal readonly System.Collections.Generic.List<TextPlacement> Text = new();
+
+    /// <summary>Clickable node bounds, in draw order, for hit testing on the main thread.</summary>
+    internal readonly System.Collections.Generic.List<HitRegion> Hits = new();
 }

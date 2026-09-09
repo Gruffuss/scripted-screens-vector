@@ -177,6 +177,16 @@ internal sealed class VecNode
     /// Per-corner radii from `rx = [tl, tr, br, bl]`, CSS order. Null for a uniform `rx`.
     /// </summary>
     internal Expression[]? CornerRadii;
+
+    /// <summary>
+    /// True when the node opts into hit testing with <c>click = 1</c>.
+    /// </summary>
+    /// <remarks>
+    /// Explicit rather than "any node with an id", because an id is also how a node is
+    /// patched, and patch targets are common — making every one of them swallow clicks would
+    /// be a surprise.
+    /// </remarks>
+    internal bool Clickable;
 }
 
 /// <summary>A parsed scene: viewbox plus node tree.</summary>
@@ -769,6 +779,7 @@ internal static class SceneParser
         }
 
         node.Id = PropString(map, "id");
+        node.Clickable = PropNumber(map, "click", 0f) > 0.5f;
         if (!string.IsNullOrEmpty(node.Id))
             node.SourceProps = map;
 

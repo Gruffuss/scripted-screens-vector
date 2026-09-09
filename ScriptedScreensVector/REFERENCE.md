@@ -345,6 +345,33 @@ Joins are a **clamped miter** rather than inserted bevel or round geometry — i
 stroke widths, visible on very wide strokes at sharp corners. `join` is closer to a hint than
 a guarantee.
 
+### Clicks — `click`
+
+A node with an `id` and `click = 1` becomes a hit region. The click arrives at the **vector
+element's own `on_click`**, with the node id as the value:
+
+```lua
+ui:element({
+    id = "menu", type = "vector",
+    props = { scene = "menu", src = [[
+        R id=row1 click=1 x=0 y=0  w=200 h=24 f=#12202F
+        R id=row2 click=1 x=0 y=26 w=200 h=24 f=#12202F
+    ]] },
+    on_click = function(nodeId, player) ... end,
+})
+```
+
+Lua registers handlers **per element**, and a vector node is not an element — so the node id
+travels as the event's *value* rather than its id. One handler serves the whole scene.
+
+`click = 1` is opt-in and separate from `id`, because an id is also how a node is patched and
+patch targets are common; making all of them swallow clicks would be a surprise. A scene with
+no clickable node stays transparent to the pointer exactly as before.
+
+**Hit testing is against the node's bounding box**, in draw order, last match wins. For a row,
+a tile or a button — what carries `click` — the bounds are the shape. A thin diagonal or a
+ring will claim more than it draws.
+
 ### Shadows
 
 | Key | Meaning |

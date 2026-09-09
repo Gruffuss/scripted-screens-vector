@@ -6,6 +6,9 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.UI;
 using SS = ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem;
+using Motherboard = Assets.Scripts.Objects.Items.Motherboard;
+using CartridgeIntegratedCircuitLua = ScriptedScreens.CartridgeIntegratedCircuitLua;
+using ProgrammableVisorGlasses = ScriptedScreens.ProgrammableVisorGlasses;
 
 namespace ScriptedScreensVector;
 
@@ -43,7 +46,8 @@ internal static class VectorElementPatch
     /// <summary>Data that arrived before its structure. Spec §1: either order must work.</summary>
     private static readonly Dictionary<string, EvalContext> PendingData = new(StringComparer.Ordinal);
 
-    private static void Postfix(SS.BoardState state, string surface, SS.UiElement element)
+    private static void Postfix(Motherboard? board, CartridgeIntegratedCircuitLua? cartridge,
+        ProgrammableVisorGlasses? visor, SS.BoardState state, string surface, SS.UiElement element)
     {
         try
         {
@@ -78,7 +82,7 @@ internal static class VectorElementPatch
             }
 
             if (HasProp(element.Props, "root") || HasProp(element.Props, "src"))
-                ApplyStructure(key, host, element);
+                ApplyStructure(key, host, element, board, cartridge, visor, surface);
         }
         catch (Exception ex)
         {
@@ -86,7 +90,9 @@ internal static class VectorElementPatch
         }
     }
 
-    private static void ApplyStructure(string key, GameObject host, SS.UiElement element)
+    private static void ApplyStructure(string key, GameObject host, SS.UiElement element,
+        Motherboard? board, CartridgeIntegratedCircuitLua? cartridge,
+        ProgrammableVisorGlasses? visor, string surface)
     {
         // `src` is the text form. It is converted to the same props the table form
         // arrives as and parsed by the same code, so the two cannot diverge.
@@ -106,6 +112,21 @@ internal static class VectorElementPatch
             fallback.color = Color.clear;
 
         var graphic = EnsureSurface(host);
+
+        // ScriptedScreens' own forwarder, on a child with no graphic of its own so Unity
+        // never routes a pointer event straight to it -- see VectorGraphic.SetClickTarget.
+        var clicks = EnsureForwarder(host);
+        if (clicks != null)
+        {
+            if (board != null)
+                clicks.Configure(board, surface, element.Id, "click", string.Empty);
+            else if (visor != null)
+                clicks.Configure(visor, surface, element.Id, "click", string.Empty);
+            else if (cartridge != null)
+                clicks.Configure(cartridge, surface, element.Id, "click", string.Empty);
+
+            graphic.SetClickTarget(clicks, element.Id);
+        }
         graphic.SetScene(scene);
         Scenes[key] = graphic;
 
@@ -132,6 +153,27 @@ internal static class VectorElementPatch
             graphic.SetData(context);
         else
             PendingData[key] = context;
+    }
+
+    /// <summary>
+    /// The click forwarder, parked on a child that draws nothing.
+    /// </summary>
+    /// <remarks>
+    /// On the host it would receive pointer events itself as well as through the graphic, and
+    /// its 0.25 s debounce would drop whichever arrived second — so the node id resolved by
+    /// hit test would be a coin flip against a stale one. A child with no Graphic is never a
+    /// raycast target, so it only ever fires when we call it.
+    /// </remarks>
+    private static SS.UiPointerDownForwarder? EnsureForwarder(GameObject host)
+    {
+        var existing = host.transform.Find("VecClicks");
+        if (existing != null)
+            return existing.GetComponent<SS.UiPointerDownForwarder>();
+
+        var carrier = new GameObject("VecClicks", typeof(RectTransform));
+        carrier.transform.SetParent(host.transform, worldPositionStays: false);
+
+        return carrier.AddComponent<SS.UiPointerDownForwarder>();
     }
 
     private static VectorGraphic EnsureSurface(GameObject host)
