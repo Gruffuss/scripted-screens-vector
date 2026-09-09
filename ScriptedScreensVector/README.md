@@ -48,6 +48,10 @@ Then read the examples in order — each one introduces exactly one idea and run
 | [`07-clip.lua`](examples/07-clip.lua) | clip paths and their one restriction |
 | [`08-console.lua`](examples/08-console.lua) | everything, assembled into a real console |
 | [`09-scroll.lua`](examples/09-scroll.lua) | `SC`, a list longer than the console, scrolled for free |
+| [`10-text.lua`](examples/10-text.lua) | `T` nodes, fonts, fitting, text from the data payload |
+| [`11-symbols.lua`](examples/11-symbols.lua) | `SYM` / `USE`, inherited `style`, per-corner radii |
+| [`12-click.lua`](examples/12-click.lua) | clickable nodes, and patching a node by id from the handler |
+| [`13-src.lua`](examples/13-src.lua) | the same scene as tables and as text, side by side |
 
 [`Patterns.lua`](Patterns.lua) holds the same building blocks as copy-paste functions.
 
@@ -89,7 +93,65 @@ element's existing props and then resends the *whole* element. A `data` prop liv
 large `scene` prop would resend the entire scene tree every tick, forever. Splitting them is
 the only way to make data updates cheap.
 
+**`data` is one prop, so it is replaced wholesale, not merged key by key.** Send every value
+the scene still needs on every tick. A name that quietly disappears from the payload is
+reported as missing and, if a colour was bound to it, draws magenta.
+
 Coordinates are **top-left origin, +Y down**, like the old canvas.
+
+### Writing the scene as text instead of tables
+
+Nested tables cost roughly a dozen Lua instructions per node, and a page of a few hundred
+nodes is a serious fraction of the 50,000 a chip gets per tick. That is what forces consoles
+to build their screens across several frames.
+
+**A string literal costs nothing.** It is already in the compiled chunk. So a scene can be
+given as `src` in place of `root` and `defs`:
+
+```lua
+props = { scene = "tank", src = [==[
+SCENE w=100 h=200 fit=stretch
+DEFS {
+    GL id=liquid units=bbox x1=0 y1=0 x2=0 y2=1 stops=[[0,#5FD9A8],[1,#2E8B6E]]
+    CP id=tank { R x=10 y=10 w=44 h=60 rx=8 }
+}
+R x=10 y=10 w=44 h=60 rx=8 f=#0B1622
+G clip=tank {
+    YS n=24 x==8+i*1.75 y==64-$fill*52 y2=72 f=@liquid
+}
+]==] }
+```
+
+**Wrap the string in `[==[ … ]==]`, not `[[ … ]]`.** An array value ends in `]]`, and Lua's
+long-string bracket closes at the first one it sees — so a scene containing
+`stops=[[0,#5FD9A8],[1,#2E8B6E]]` is silently truncated at that point and everything after it
+vanishes. A longer level of bracket has no such collision.
+
+One node per line, `OP` then `key=value`, braces for children, `#` for comments. Same op
+names, same keys, same expressions. A bare word is a flag, so `lod` means `lod=1`.
+
+**The one rule the format imposes:** an unquoted value is read to the next space, so an
+expression cannot contain one. `y==64-$fill*52` is fine; `y="=64 - $fill * 52"` needs the
+quotes. Expressions are full of commas and brackets, so whitespace is the only separator left.
+
+One element takes either `src` or `root`, not both. When a layout depends on how many devices
+turned up, build the string with `string.format` or `table.concat` — that is still far cheaper
+than building tables, since the cost is in the table constructors rather than in the text.
+
+### Changing one node without resending the scene
+
+Any node may carry an `id`, and the data element can patch it:
+
+```lua
+data:set_props({ nodes = { hv_bar = { w = 42, f = "#E23D3D" } } })
+```
+
+The patch merges onto the node's original props and re-parses that node, so keys you leave out
+keep their values, and children are untouched.
+
+Reach for this only when an expression cannot say it — a different op, a new gradient
+reference, a changed count. Anything that is merely a *value* belongs in `data` with an
+expression reading it, because that path re-parses nothing at all.
 
 ---
 
@@ -274,23 +336,104 @@ Keep the window small but non-zero. At exactly zero a value crossing the boundar
 0.001 window plus the renderer's own easing between payloads turns it into a quick transition
 with no per-frame work.
 
-### Layering text over artwork
+### Text in the scene — `T`
 
-The vector layer draws no text, so labels are ScriptedScreens' own `label` elements on top.
-Write the artwork in viewbox units and convert for the labels, so one set of numbers drives
-both:
+Text is a node like any other, so it moves, scales, rotates and scrolls with the group it is
+in, and its content comes from the data payload:
 
 ```lua
-local VB = 460                       -- viewbox
-local function px(v) return v * SW / VB end
-
-ui:element({ id = "eta", type = "label",
-    rect = { unit = "px", x = px(224), y = px(42), w = px(220), h = px(30) },
-    props = { text = eta },
-    style = { font_size = px(24), color = accent, align = "right" } })
+{ op = "T", x = 8, y = 8, w = 120, h = 20, text = "$eta",
+  size = 14, f = "#EAF4F8", align = "right", valign = "middle", fit = "ellipsis" }
 ```
 
+```lua
+data:set_props({ data = { eta = "4h 12m" } })
+```
+
+**Prefer this to a `label` element over the artwork.** A ScriptedScreens label costs roughly
+300 instructions to declare, must be re-declared to change its text, and sits in console pixels
+rather than viewbox units — so every number has to be converted twice and a moving readout has
+to be re-declared as it moves. A `T` node costs a string in the data payload.
+
+Three things it cannot do, because TMP builds its own geometry on its own object:
+
+- It updates at the **rebuild rate**, not instantly. In practice that is 30 Hz.
+- It clips to an **axis-aligned rectangle** only. A rounded or rotated clip cuts the geometry
+  around it but not the text.
+- It cannot be part of a gradient fill — `f` is a flat colour sampled at the node's origin.
+
+`font` takes any family TMP knows, which is what the companion fonts mod registers. `fit` is
+`ellipsis` or `shrink`, and both are TMP's own overflow modes, so the fitting is done by the
+engine that has the glyph metrics rather than estimated in Lua.
+
+A label element is still the right answer for text that must update the instant a value
+changes, and for anything the player has to select or copy.
+
+### Reusing a subtree — `SYM` and `USE`
+
+A row, an LED, a duct segment: written once, stamped anywhere.
+
+```lua
+defs = {
+    { op = "SYM", id = "led", params = { r = 4, col = "#5FD9A8" }, c = {
+        { op = "C", cx = 0, cy = 0, rx = "%r", ry = "%r", f = "%col" },
+        { op = "C", cx = 0, cy = 0, rx = "=%r*1.8", ry = "=%r*1.8", f = "%col", fo = 0.2 },
+    } },
+},
+root = {
+    { op = "USE", ref = "led", x = 20, y = 20 },
+    { op = "USE", ref = "led", x = 40, y = 20, r = 6, col = "#E23D3D" },
+},
+```
+
+**Every attribute on the `USE` is a parameter.** `params` only supplies defaults for the ones
+an instance leaves out. `%name` on its own keeps the parameter's type, so a number stays a
+number; inside a longer string it splices textually, which is what makes `y = "=%top+i*4"`
+work.
+
+Substitution happens once, at parse time. An instance therefore costs exactly what writing the
+nodes out would have cost — this saves *authoring*, not drawing.
+
+Two smaller conveniences worth knowing in the same breath:
+
+```lua
+{ op = "G", style = { f = "#5FD9A8", fea = 0, sw = 1 }, c = { ... } }   -- inherited defaults
+{ op = "R", x = 0, y = 0, w = 60, h = 24, rx = { 12, 12, 0, 0 } }       -- per-corner radii
+```
+
+`style` nests and anything a node states itself wins, so a group of twenty shapes that all
+want `fea = 0` says it once. Corner radii are CSS order, `tl tr br bl`, and a zero corner is a
+sharp point.
+
+### Making a node clickable
+
+```lua
+ui:element({
+    id = "menu", type = "vector",
+    props = { scene = "menu", src = [==[
+        R id=row1 click=1 x=0 y=0  w=200 h=24 f=#12202F
+        R id=row2 click=1 x=0 y=26 w=200 h=24 f=#12202F
+    ]==] },
+    on_click = function(nodeId, player)
+        -- nodeId is "row1" or "row2"
+    end,
+})
+```
+
+The node id arrives as the event's **value**, because Lua registers handlers per element and a
+node is not an element. One handler serves the whole scene.
+
+`click = 1` is opt-in and separate from having an `id`, since an id is also a patch target.
+A scene with no clickable node stays transparent to the pointer exactly as before, so
+decoration never steals a click from a button underneath it.
+
+Hit testing is against the node's **bounding box**, in draw order, last match wins. For the
+rows and tiles that carry `click` the bounds are the shape; a thin diagonal or a ring will
+claim more than it draws. An invisible `R` with `fo = 0` and `click = 1` makes a hit area of
+any size and costs no geometry.
+
 ### Varying size convincingly
+
 
 Two things matter, and the second is the one that is easy to miss.
 
@@ -434,12 +577,45 @@ constant. They are in scene coordinates and stay put when the group using them i
 **`Y` fills concave outlines but not self-intersecting ones.** A bow-tie renders wrong rather
 than gracefully.
 
-**A scene that draws nothing says so.** A missing clip id, a rejected non-convex clip or an
-unknown op draws a magenta hatched border instead of an empty console, one stripe per distinct
-problem. The detail is in `BepInEx/LogOutput.log`.
+**A scene that draws wrong says so.** An unknown op or attribute name, a malformed expression,
+a missing clip or gradient id, or a `$name` the data never supplied — each puts a magenta
+hatched border around the surface, one stripe per distinct problem, and a colour bound to a
+missing name draws **magenta** rather than white. See "When something looks wrong" below.
 
-**Text is not supported.** Use ScriptedScreens' own `label` elements layered over the artwork
-— they get the game's fonts, which the companion fonts mod makes available by name.
+---
+
+## When something looks wrong
+
+The surface tells you first. A magenta hatched border means the scene has faults; magenta
+*fill* on a shape means a colour was bound to a data name that never arrived.
+
+| symptom | usual cause |
+|---------|-------------|
+| magenta border | unknown op or attribute, bad expression, missing clip or gradient id |
+| magenta fill | `f = "$name"` and no `name` in the data payload |
+| a flat end-stop colour | gradient coordinates in a different place from the shape |
+| one shape missing | a non-convex clip, or a self-intersecting `Y` |
+| a value stuck at zero | array index off by one — expressions are 0-based |
+| nothing at all | the two elements' `scene` ids do not match |
+
+The detail goes to `BepInEx/LogOutput.log`. **A typo in an attribute name is the one worth
+knowing about**, because unknown keys are ignored by design — `fille` used to vanish silently
+and now names itself and the node it is on.
+
+If [StationeersLua](https://github.com/OrbitalFoundryModTeam) is installed, ask the editor
+instead:
+
+```
+vector_stats            -- every live surface
+vector_stats scene=gas  -- one of them
+```
+
+It reports node and shape counts, vertices, rebuild rate, tessellation and upload cost,
+on-screen size, whether the scene is animated or scroll-driven, and the same problems and
+unresolved names. It is bound by reflection, so the mod is perfectly happy without it.
+
+For measuring rather than debugging, turn on `Diagnostics` in the mod settings and read the
+log line each surface prints every five seconds.
 
 ---
 

@@ -1,0 +1,121 @@
+-- 10 - Text in the scene
+--
+-- Text used to be out of scope here, and the advice was to layer ScriptedScreens `label`
+-- elements over the artwork. It is a node now, and that changes the arithmetic:
+--
+--   a label element   ~300 instructions to declare, re-declared to change its text, placed
+--                     in console pixels, and it does not move or clip with the scene
+--   a T node          one string in the data payload
+--
+-- T MOVES WITH ITS GROUP. Rotate the group and the text rotates. Scale it and the type
+-- scales. Put it in a scroll container and it scrolls. That is the part a label cannot do at
+-- any price, and it is why a readout attached to a moving needle is now a sane thing to draw.
+--
+-- WHAT IT CANNOT DO, because TMP builds its own geometry on its own object:
+--   * it updates at the REBUILD rate, ~30 Hz, not the instant a value changes
+--   * it clips to an AXIS-ALIGNED RECTANGLE only -- a rounded clip cuts the shapes around
+--     the text but not the text
+--   * `f` is a flat colour, sampled at the node's origin. No gradient fills on type.
+--
+-- Fonts come from the companion fonts mod: any family TMP knows can be named here.
+
+local ui = ss.ui.surface("main")
+ss.ui.activate("main")
+
+local size = ui:size()
+local W, H = 480, 480
+if size then W, H = size.w, size.h end
+
+ui:clear()
+
+ui:element({
+    id = "bg", type = "panel",
+    rect = { unit = "px", x = 0, y = 0, w = W, h = H },
+    style = { bg = "#0A121C" },
+})
+
+ui:element({
+    id = "text_s", type = "vector",
+    rect = { unit = "px", x = 12, y = 12, w = W - 24, h = H - 24 },
+    props = {
+        scene = "text",
+        w = 200, h = 200,
+
+        root = {
+
+            -- 1. THE PLAIN CASE. `text` takes a literal, or "$name" to bind a data string.
+            { op = "T", x = 10, y = 8, w = 180, h = 12,
+              text = "TEXT NODES", size = 8, cspace = 4, f = "#5A7085" },
+
+            { op = "R", x = 10, y = 24, w = 180, h = 34, rx = 4, f = "#0B1622" },
+
+            { op = "T", x = 18, y = 30, w = 80, h = 10,
+              text = "PRESSURE", size = 7, cspace = 2, f = "#5A7085" },
+
+            -- Alignment is horizontal (align) and vertical (valign), both optional.
+            { op = "T", x = 100, y = 28, w = 84, h = 24,
+              text = "$pressure", size = 18, align = "right", valign = "middle",
+              f = "#EAF4F8" },
+
+            -- 2. FITTING. `ellipsis` truncates, `shrink` scales down to `min_size`. Both are
+            --    TMP's own overflow modes, so the engine that owns the glyph metrics does
+            --    the work rather than Lua estimating it.
+            { op = "R", x = 10, y = 64, w = 180, h = 44, rx = 4, f = "#0B1622" },
+
+            { op = "T", x = 18, y = 70, w = 164, h = 12,
+              text = "$long", size = 10, f = "#8FA6B8", fit = "ellipsis" },
+
+            { op = "T", x = 18, y = 88, w = 164, h = 14,
+              text = "$long", size = 10, f = "#8FA6B8", fit = "shrink", min_size = 5 },
+
+            -- 3. TEXT THAT MOVES WITH THE ARTWORK. The group carries both the needle and its
+            --    readout, so one rotation expression places both -- and the label stays put
+            --    relative to the needle however it swings.
+            { op = "C", cx = 100, cy = 150, rx = 34, ry = 34, f = "#0B1622" },
+            { op = "C", cx = 100, cy = 150, rx = 34, ry = 34,
+              f = "none", s = "#1E3247", sw = 1.5 },
+
+            { op = "G", t = { 100, 150 }, r = "=-120+240*clamp($fill,0,1)", c = {
+                { op = "R", x = -1, y = -30, w = 2, h = 30, rx = 1, f = "#F59E0B" },
+
+                -- Written upright at the tip; the group's rotation carries it round.
+                { op = "T", x = -20, y = -44, w = 40, h = 10,
+                  text = "$pct", size = 7, align = "center", f = "#F59E0B" },
+            } },
+
+            { op = "C", cx = 100, cy = 150, rx = 3, ry = 3, f = "#F59E0B" },
+
+            -- 4. A REGISTERED FONT, and rich text. Both are real TMP, so anything TMP
+            --    understands works -- but an unknown family silently keeps the current face
+            --    rather than blanking the label, so check the fonts mod's log if a name has
+            --    no effect.
+            { op = "T", x = 10, y = 192, w = 180, h = 10,
+              text = "code face: <b>0123</b> 456", size = 7, font = "code",
+              align = "center", f = "#3A5570" },
+        },
+    },
+})
+
+-- Strings live in `data` beside the numbers. A colour string is stored as both -- the scene
+-- may want to print "#FF0000" as well as paint with it.
+local data = ui:element({
+    id = "text_d", type = "vector",
+    rect = { unit = "px", x = -4, y = -4, w = 1, h = 1 },
+    props = { scene = "text", data = { fill = 0.5, pressure = "--", pct = "--", long = "" } },
+})
+
+local phase = 0
+
+function tick(dt)
+    phase = phase + (dt or 0.5)
+    local fill = 0.5 + 0.5 * math.sin(phase * 0.4)
+
+    data:set_props({ data = {
+        fill     = fill,
+        pressure = string.format("%.1f kPa", 40 + fill * 60),
+        pct      = string.format("%d%%", math.floor(fill * 100 + 0.5)),
+        long     = "a line long enough to need trimming in a narrow box",
+    } })
+
+    ui:commit()
+end

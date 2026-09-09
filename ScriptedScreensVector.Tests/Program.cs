@@ -88,6 +88,7 @@ internal static class Program
         SceneTextTests.ValueTyping(run);
         SceneTextTests.MalformedIsReported(run);
         SceneTextTests.ScrollContainerParses(run);
+        SceneTextTests.ShippedExampleParses(run);
 
         Console.WriteLine();
         ScrollTests.Clamps(run);

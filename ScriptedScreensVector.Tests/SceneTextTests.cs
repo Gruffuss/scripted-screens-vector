@@ -200,4 +200,46 @@ YS n=12 x==6+i*3 y==64-$fill*52 y2=72 f=@liquid fo=0 fo2=0.62
         run.Check("scenetext: SC keeps its id", text.Contains("\"list\"") ? 1d : 0d, 1d, 0.001d, 0, 0);
         run.Check("scenetext: SC keeps its children", text.Contains("\"RP\"") ? 1d : 0d, 1d, 0.001d, 0, 0);
     }
+
+    /// <summary>The scene text that ships in `examples/13-src.lua`, parsed here.</summary>
+    /// <remarks>
+    /// A documented example that does not parse is worse than no example, and this format is
+    /// exactly where that happens: values are read to whitespace, a bare word is a flag, and
+    /// nested arrays sit inside a Lua long string. Pinning the shipped text means the file
+    /// cannot rot quietly.
+    /// </remarks>
+    internal static void ShippedExampleParses(TestRun run)
+    {
+        var props = SceneText.ToProps(string.Join(Nl, new[]
+        {
+            "# viewbox and fit live on SCENE, not on the element props",
+            "SCENE w=100 h=200 fit=stretch",
+            "",
+            "DEFS {",
+            "    GL id=liquid units=bbox x1=0 y1=0 x2=0 y2=1 stops=[[0,#5FD9A8],[1,#2E8B6E]]",
+            "    CP id=tank { R x=20 y=20 w=60 h=160 rx=10 }",
+            "}",
+            "",
+            "R x=20 y=20 w=60 h=160 rx=10 f=#0B1622",
+            "",
+            "G clip=tank {",
+            "    YS n=24 x==18+i*2.8 y==180-clamp($fill,0,1)*152+3*sin(i*0.5+t*1.6) y2=184 f=@liquid fea_edge=0",
+            "}",
+            "",
+            "R x=20 y=20 w=60 h=160 rx=10 f=none s=#1E3247 sw=2",
+            "",
+            "T x=20 y=190 w=60 h=10 text=TEXT size=7 cspace=2 align=center f=#3A5570",
+        }), null);
+
+        var text = Dump(props);
+
+        run.Check("scenetext: example parses", props != null ? 1d : 0d, 1d, 0.001d, 0, 0);
+        run.Check("scenetext: SCENE sets the viewbox", text.Contains("w = 100") ? 1d : 0d, 1d, 0.001d, 0, 0);
+        run.Check("scenetext: nested stops survive",
+            text.Contains("[[0, \"#5FD9A8\"], [1, \"#2E8B6E\"]]") ? 1d : 0d, 1d, 0.001d, 0, 0);
+        run.Check("scenetext: the band expression is whole",
+            text.Contains("=180-clamp($fill,0,1)*152+3*sin(i*0.5+t*1.6)") ? 1d : 0d, 1d, 0.001d, 0, 0);
+        run.Check("scenetext: text=TEXT is a value, not a flag",
+            text.Contains("text = \"TEXT\"") ? 1d : 0d, 1d, 0.001d, 0, 0);
+    }
 }

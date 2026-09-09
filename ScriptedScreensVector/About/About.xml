@@ -26,6 +26,11 @@ Tessellation runs on a worker thread. A console with 800 shapes animating at 30 
 [*] Antialiased edges, sized in screen pixels so they look right at any distance
 [*] Convex clipping, so a liquid stays in its tank
 [*] Opacity ramps along a surface, for gas fades that follow a moving edge
+[*] Soft drop shadows and inner shadows, evaluated analytically -- no offscreen pass
+[*] Text that moves, scales, rotates and scrolls with the artwork, in any font the game has
+[*] Scrolling containers for lists longer than the console -- the wheel costs the chip nothing
+[*] Clickable nodes, so a row of tiles no longer needs a transparent button over every one
+[*] Reusable symbols: write a row or a lamp once, stamp it with different parameters
 [/list]
 
 [h2]How it animates[/h2]
@@ -37,6 +42,14 @@ Send [i]fill[/i] twice a second and the bar moves smoothly at display rate. Valu
 
 [b]hash(i)[/b] gives each instance of a repeat stable pseudo-random values, identical on every client with nothing transmitted — which is what makes a 400-mote particle field cost one node instead of four hundred.
 
+[h2]It also gives your chip its instructions back[/h2]
+Building a scene as nested Lua tables costs about a dozen instructions per node, and a chip only gets 50,000 per tick. A scene can instead be written as a [b]string[/b] -- one node per line -- and a string literal costs [b]nothing[/b] to build, because it is already in the compiled script.
+
+[code]R x=10 y=10 w=44 h=60 rx=8 f=#0B1622
+G clip=tank { YS n=24 x==8+i*1.75 y==64-$fill*52 y2=72 f=@liquid }[/code]
+
+Labels are the other half of that. A ScriptedScreens label costs around 300 instructions to declare and has to be re-declared to change its text; a text node in the scene costs a string in the data payload.
+
 [h2]Resolution independent[/h2]
 Artwork is written in a viewbox and mapped onto whatever size the element is. The same scene fits a 128 px console and a 760 px one, and stays sharp on both.
 
@@ -45,8 +58,9 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 
 [h2]Notes[/h2]
 [list]
-[*] Text is not drawn by this layer — use ScriptedScreens' own label elements over the artwork
-[*] Clip shapes must be convex
+[*] Clip shapes must be convex, and text clips to a rectangle rather than to rounded corners
+[*] Text updates at the redraw rate rather than instantly, so a label element is still the better choice for something that must change the moment a value does
+[*] A broken scene says so: it draws a magenta border and names the fault, rather than looking switched off
 [*] Level of detail is automatic -- update rate and curve smoothness both follow on-screen size; consoles off screen or in a paused game cost nothing
 [*] Turn on Diagnostics in the settings to see exactly what a scene costs
 [/list]

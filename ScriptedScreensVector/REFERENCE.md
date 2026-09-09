@@ -52,7 +52,7 @@ Give it a 1×1 rect at negative coordinates so it draws nothing.
 A scene may be given as one string instead of nested tables, in place of `root` and `defs`:
 
 ```lua
-props = { scene = "tank", src = [[
+props = { scene = "tank", src = [==[
 SCENE w=200 h=200 fit=stretch
 DEFS {
     GL id=liquid units=bbox x1=0 y1=0 x2=0 y2=1 stops=[[0,#5FD9A8],[1,#2E8B6E]]
@@ -62,12 +62,17 @@ R x=10 y=10 w=44 h=60 rx=8 f=#0B1622
 G clip=tank {
     YS n=24 x==8+i*1.75 y==64-$fill*52 y2=72 f=@liquid
 }
-]] }
+]==] }
 ```
 
 **Why it exists: a Lua string literal costs zero instructions to build.** Nested tables cost
 roughly a dozen per node, and a page of a few hundred nodes is a serious fraction of the
 50,000 per tick — which is what forces consoles to split their build across frames.
+
+**Wrap the string in `[==[ … ]==]`, not `[[ … ]]`.** An array value ends in `]]`, and Lua's
+long-string bracket closes at the first one it sees — so a scene containing
+`stops=[[0,#5FD9A8],[1,#2E8B6E]]` is silently truncated at that point and everything after it
+vanishes. A longer level of bracket has no such collision.
 
 Grammar: one node per line, `OP` then `key=value`, `{` … `}` for children, `#` comments to
 end of line. `SCENE` carries the viewbox; `DEFS { … }` holds gradients and clips. Same op
@@ -445,10 +450,10 @@ element's own `on_click`**, with the node id as the value:
 ```lua
 ui:element({
     id = "menu", type = "vector",
-    props = { scene = "menu", src = [[
+    props = { scene = "menu", src = [==[
         R id=row1 click=1 x=0 y=0  w=200 h=24 f=#12202F
         R id=row2 click=1 x=0 y=26 w=200 h=24 f=#12202F
-    ]] },
+    ]==] },
     on_click = function(nodeId, player) ... end,
 })
 ```
@@ -736,9 +741,10 @@ according to `fit`.
 
 | | Why |
 |---|---|
-| text | needs child TMP objects; use ScriptedScreens' own `label` elements over the artwork |
-| blur, drop shadow, glow | need an offscreen pass or custom shader; `fea` approximates them |
-| non-convex clipping | needs a stencil buffer |
+| blur and backdrop effects | need an offscreen pass or a custom shader. Drop shadows **are** supported — see `sh` |
+| text in a gradient, or clipped to a rounded shape | `T` is a real TMP child, so its fill is flat and its clip is an axis-aligned rect |
+| horizontal scrolling | `SC` is vertical only |
+| non-convex clipping | needs a stencil buffer; convex covers every layout so far |
 | self-intersecting fills | ear clipping is undefined on them; detection costs more than the fill |
 | holes inside a clipped fill | needs boolean subtraction |
 | expressions in `d` or in gradient coordinates | both are static; use `units = "bbox"` |
