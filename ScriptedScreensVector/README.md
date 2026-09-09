@@ -47,11 +47,11 @@ Then read the examples in order — each one introduces exactly one idea and run
 | [`06-paint.lua`](examples/06-paint.lua) | gradients, alpha, feathering, animated colour |
 | [`07-clip.lua`](examples/07-clip.lua) | clip paths and their one restriction |
 | [`08-console.lua`](examples/08-console.lua) | everything, assembled into a real console |
-| [`09-scroll.lua`](examples/09-scroll.lua) | `SC`, a list longer than the console, scrolled for free |
-| [`10-text.lua`](examples/10-text.lua) | `T` nodes, fonts, fitting, text from the data payload |
+| [`09-scroll.lua`](examples/09-scroll.lua) | `SC`, and a whole list as one repeat over `$rows[i]` |
+| [`10-text.lua`](examples/10-text.lua) | `T` nodes, fonts, fitting, and `fmt` so the chip ships numbers |
 | [`11-symbols.lua`](examples/11-symbols.lua) | `SYM` / `USE`, inherited `style`, per-corner radii |
-| [`12-click.lua`](examples/12-click.lua) | clickable nodes, and patching a node by id from the handler |
-| [`13-src.lua`](examples/13-src.lua) | the same scene as tables and as text, side by side |
+| [`12-click.lua`](examples/12-click.lua) | clickable rows in a repeat, the `id:i` index, node patching |
+| [`13-src.lua`](examples/13-src.lua) | the same scene as tables and as text, and group defaults |
 
 [`Patterns.lua`](Patterns.lua) holds the same building blocks as copy-paste functions.
 
@@ -273,13 +273,11 @@ both clamp so a container whose content fits cannot move at all.
 Inside one, `sy` and `vh` report **that container**, which is what pins a header, an edge fade
 or a scrollbar thumb. `sy` is the offset and is **zero at rest**, so pinned artwork goes at the
 container's own `y` plus `sy` -- `y = "=30+sy"` for a container at 30. Writing `y = "=sy"`
-puts it at the top of the viewbox instead, where the container clips it away. Vertical only, one level deep, and no scrollbar is drawn for you — see
-[`09-scroll.lua`](examples/09-scroll.lua), where the thumb is two expressions.
+puts it at the top of the viewbox instead, where the container clips it away.
 
-One thing to plan around: a `T` node binds a data string **by name**, and there is no
-`$name[i]` for strings. Row backgrounds come from one `RP`; row *labels* have to be generated,
-one node each. That is a few hundred instructions paid once, since structure is only resent
-when the list changes.
+Vertical only, one level deep, and no scrollbar is drawn for you — see
+[`09-scroll.lua`](examples/09-scroll.lua), where the thumb is two expressions and the whole
+list, backgrounds and labels alike, is a single repeat over `$rows[i]`.
 
 ### Pinning artwork inside a scroll view
 

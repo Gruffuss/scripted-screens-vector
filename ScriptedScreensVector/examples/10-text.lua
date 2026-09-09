@@ -13,6 +13,8 @@
 --   * its text changes WITHOUT re-declaring an element
 --   * it is written in viewbox units, so no number is converted into console pixels twice
 --   * it moves, scales, rotates and scrolls with the group it is in
+--   * it can FORMAT A NUMBER itself, so the chip sends the value it already had and does no
+--     string work at all -- see section 2 below
 --
 -- T MOVES WITH ITS GROUP. Rotate the group and the text rotates. Scale it and the type
 -- scales. Put it in a scroll container and it scrolls. That is the part a label cannot do at
@@ -64,39 +66,59 @@ ui:element({
               text = "$pressure", size = 18, align = "right", valign = "middle",
               f = "#EAF4F8" },
 
-            -- 2. FITTING. `ellipsis` truncates, `shrink` scales down to `min_size`. Both are
+            -- 2. THE SAME READOUT, WITH NO STRING WORK ON THE CHIP. `fmt` takes the printf
+            --    spec you would have passed to string.format -- because that is the one you
+            --    already know -- and `unit` is a literal suffix. The payload then carries the
+            --    NUMBER, which the script had anyway, instead of a formatted string.
+            --
+            --    Supported: f e g d i x X, with precision. Width and flags are ignored: lay
+            --    text out with `align` inside a box, not by padding with spaces.
+            { op = "R", x = 10, y = 114, w = 180, h = 30, rx = 4, f = "#0B1622" },
+
+            { op = "T", x = 18, y = 120, w = 60, h = 18,
+              text = "RAW", size = 7, valign = "middle", f = "#5A7085" },
+
+            { op = "T", x = 78, y = 118, w = 104, h = 22,
+              text = "$kpa", fmt = "%.1f", unit = " kPa",
+              size = 14, align = "right", valign = "middle", f = "#5FD9A8" },
+
+            --    `missing` is what a name with no value renders. It defaults to "--", which
+            --    is why a console that has not had its first payload yet reads as pending
+            --    rather than as an empty box that looks like a layout mistake.
+            { op = "T", x = 78, y = 140, w = 104, h = 12,
+              text = "$never_sent", fmt = "%.0f", unit = " kPa", missing = "no data",
+              size = 7, align = "right", f = "#3A5570" },
+
+            -- 3. FITTING. `ellipsis` truncates, `shrink` scales down to `min_size`. Both are
             --    TMP's own overflow modes, so the engine that owns the glyph metrics does
             --    the work rather than Lua estimating it.
-            { op = "R", x = 10, y = 64, w = 180, h = 44, rx = 4, f = "#0B1622" },
+            { op = "R", x = 10, y = 88, w = 180, h = 22, rx = 4, f = "#0B1622" },
 
-            { op = "T", x = 18, y = 70, w = 164, h = 12,
-              text = "$long", size = 10, f = "#8FA6B8", fit = "ellipsis" },
+            { op = "T", x = 18, y = 92, w = 164, h = 14,
+              text = "$long", size = 9, valign = "middle", f = "#8FA6B8", fit = "ellipsis" },
 
-            { op = "T", x = 18, y = 88, w = 164, h = 14,
-              text = "$long", size = 10, f = "#8FA6B8", fit = "shrink", min_size = 5 },
-
-            -- 3. TEXT THAT MOVES WITH THE ARTWORK. The group carries both the needle and its
+            -- 4. TEXT THAT MOVES WITH THE ARTWORK. The group carries both the needle and its
             --    readout, so one rotation expression places both -- and the label stays put
             --    relative to the needle however it swings.
-            { op = "C", cx = 100, cy = 150, rx = 34, ry = 34, f = "#0B1622" },
-            { op = "C", cx = 100, cy = 150, rx = 34, ry = 34,
+            { op = "C", cx = 100, cy = 168, rx = 26, ry = 26, f = "#0B1622" },
+            { op = "C", cx = 100, cy = 168, rx = 26, ry = 26,
               f = "none", s = "#1E3247", sw = 1.5 },
 
-            { op = "G", t = { 100, 150 }, r = "=-120+240*clamp($fill,0,1)", c = {
-                { op = "R", x = -1, y = -30, w = 2, h = 30, rx = 1, f = "#F59E0B" },
+            { op = "G", t = { 100, 168 }, r = "=-120+240*clamp($fill,0,1)", c = {
+                { op = "R", x = -1, y = -23, w = 2, h = 23, rx = 1, f = "#F59E0B" },
 
                 -- Written upright at the tip; the group's rotation carries it round.
-                { op = "T", x = -20, y = -44, w = 40, h = 10,
+                { op = "T", x = -20, y = -35, w = 40, h = 10,
                   text = "$pct", size = 7, align = "center", f = "#F59E0B" },
             } },
 
-            { op = "C", cx = 100, cy = 150, rx = 3, ry = 3, f = "#F59E0B" },
+            { op = "C", cx = 100, cy = 168, rx = 3, ry = 3, f = "#F59E0B" },
 
-            -- 4. A REGISTERED FONT, and rich text. Both are real TMP, so anything TMP
+            -- 5. A REGISTERED FONT, and rich text. Both are real TMP, so anything TMP
             --    understands works -- but an unknown family silently keeps the current face
             --    rather than blanking the label, so check the fonts mod's log if a name has
             --    no effect.
-            { op = "T", x = 10, y = 192, w = 180, h = 10,
+            { op = "T", x = 10, y = 76, w = 180, h = 10,
               text = "code face: <b>0123</b> 456", size = 7, font = "code",
               align = "center", f = "#3A5570" },
         },
@@ -108,7 +130,10 @@ ui:element({
 local data = ui:element({
     id = "text_d", type = "vector",
     rect = { unit = "px", x = -4, y = -4, w = 1, h = 1 },
-    props = { scene = "text", data = { fill = 0.5, pressure = "--", pct = "--", long = "" } },
+    props = { scene = "text", keep = 1, data = {
+        fill = 0.5, pressure = "--", pct = "--",
+        long = "a line long enough to need trimming in a narrow box",
+    } },
 })
 
 local phase = 0
@@ -119,9 +144,15 @@ function tick(dt)
 
     data:set_props({ data = {
         fill     = fill,
+
+        -- The old way: the chip formats and ships a string, every tick, per label.
         pressure = string.format("%.1f kPa", 40 + fill * 60),
         pct      = string.format("%d%%", math.floor(fill * 100 + 0.5)),
-        long     = "a line long enough to need trimming in a narrow box",
+
+        -- The new way: ship the number. `fmt` and `unit` on the node do the rest.
+        kpa      = 40 + fill * 60,
+
+        -- `long` is not resent: `keep = 1` means it holds its value from the declaration.
     } })
 
     ui:commit()

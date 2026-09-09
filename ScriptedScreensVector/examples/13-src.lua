@@ -38,6 +38,16 @@
 --
 -- Note `y==...` is not a typo: the first `=` separates key from value, the second begins the
 -- expression.
+--
+-- INHERITED DEFAULTS. `style = { ... }` is a map, and this format has no map syntax, so a
+-- text-form G carries its defaults as ordinary attributes instead:
+--
+--     G fea=0 f=#c6c6c8 { R ... R ... }
+--
+-- Only PAINT keys are inherited that way. A group owns t, r, s, a, o and clip itself, and
+-- inheriting those would apply every transform twice. One wrinkle worth knowing: `s` is
+-- stroke colour on a shape but SCALE on a group, so a group default for stroke colour is
+-- spelled `s_`.
 
 local ui = ss.ui.surface("main")
 ss.ui.activate("main")
@@ -82,8 +92,11 @@ ui:element({
                   f  = "@liquid", fea_edge = 0 },
             } },
 
-            { op = "R", x = 20, y = 20, w = 60, h = 160, rx = 10,
-              f = "none", s = "#1E3247", sw = 2 },
+            -- The table form's inherited defaults, for comparison with the text form's.
+            { op = "G", style = { f = "none", s = "#1E3247", sw = 2, fea = 0 }, c = {
+                { op = "R", x = 20, y = 20, w = 60, h = 160, rx = 10 },
+                { op = "R", x = 26, y = 26, w = 48, h = 6, rx = 3 },
+            } },
 
             { op = "T", x = 20, y = 190, w = 60, h = 10,
               text = "TABLES", size = 7, cspace = 2, align = "center", f = "#3A5570" },
@@ -116,7 +129,12 @@ G clip=tank {
     YS n=24 x==18+i*2.8 y==180-clamp($fill,0,1)*152+3*sin(i*0.5+t*1.6) y2=184 f=@liquid fea_edge=0
 }
 
-R x=20 y=20 w=60 h=160 rx=10 f=none s=#1E3247 sw=2
+# Paint defaults on the group, since this format has no map syntax for `style`.
+# Stroke colour is s_ here, because plain `s` on a group means scale.
+G f=none s_=#1E3247 sw=2 fea=0 {
+    R x=20 y=20 w=60 h=160 rx=10
+    R x=26 y=26 w=48 h=6 rx=3
+}
 
 T x=20 y=190 w=60 h=10 text=TEXT size=7 cspace=2 align=center f=#3A5570
 ]==],

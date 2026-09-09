@@ -32,7 +32,9 @@ local VB = 200
 -- ---------------------------------------------------------------------------- builders
 
 -- A tank: shell, clipped liquid with a rippling surface, drifting motes, rim and label bar.
--- `key` names the 0..1 fill level in the data payload.
+-- `key` names a PERCENTAGE in the data payload, 0..100, because the readout beside each tank
+-- prints the same number with `fmt = "%.0f"` and a `%` unit. One value serves both; the
+-- geometry divides by 100 where it needs a fraction.
 local function tank(x, y, w, h, key, clipId)
     local inner_top    = y + 3
     local inner_bottom = y + h - 3
@@ -47,7 +49,7 @@ local function tank(x, y, w, h, key, clipId)
             -- Liquid. YS, not RP: the surface has to read as one continuous edge.
             { op = "YS", n = 24,
               x  = string.format("=%f+i*%f", inner_left, inner_w / 23),
-              y  = string.format("=%f-clamp($%s,0,1)*%f + %f*sin(i*0.5+t*1.5) + %f*sin(i*0.31-t*2.1)",
+              y  = string.format("=%f-clamp($%s/100,0,1)*%f + %f*sin(i*0.5+t*1.5) + %f*sin(i*0.31-t*2.1)",
                                  inner_bottom, key, inner_bottom - inner_top,
                                  h * 0.02, h * 0.012),
               y2 = inner_bottom,
@@ -137,6 +139,19 @@ local TANK_X    = { 10, 54, 98, 142 }
 
 for k = 1, 4 do
     add(tank(TANK_X[k], 14, 38, 92, TANK_KEYS[k], "tank" .. k))
+
+    -- Caption and readout are SCENE nodes, in viewbox units like everything else. They used
+    -- to be `label` elements laid over the artwork, which meant converting every coordinate
+    -- into console pixels and re-declaring an element to change a number.
+    add({ op = "T", x = TANK_X[k], y = 108, w = 38, h = 12,
+          text = string.upper(TANK_KEYS[k]),
+          size = 8, cspace = 1, align = "center", f = "#5FD9A8" })
+
+    -- `fmt` formats a bound NUMBER here, so the payload below carries the value the script
+    -- already had and does no string work per tank per tick.
+    add({ op = "T", x = TANK_X[k], y = 96, w = 38, h = 11,
+          text = "$" .. TANK_KEYS[k], fmt = "%.0f", unit = "%",
+          size = 9, align = "center", valign = "middle", f = "#EAF4F8" })
 end
 
 add(dial(48, 152, 34, "pressure"))
@@ -183,24 +198,11 @@ ui:element({
               defs = defs, root = root },
 })
 
--- Labels stay as ScriptedScreens' own text elements, layered over the artwork. The vector
--- layer does not draw text; this is deliberate, and it means labels get the game's fonts.
-for k = 1, 4 do
-    ui:element({
-        id = "lbl" .. k, type = "label",
-        rect = { unit = "px", x = (TANK_X[k] / VB) * (W - 12) + 6,
-                 y = (109 / VB) * (H - 12) + 6,
-                 w = (38 / VB) * (W - 12), h = 18 },
-        props = { text = string.upper(TANK_KEYS[k]) },
-        style = { font_size = 11, color = "#5FD9A8", align = "center" },
-    })
-end
-
 local data = ui:element({
     id = "console_d", type = "vector",
     rect = { unit = "px", x = -4, y = -4, w = 1, h = 1 },
-    props = { scene = "console", data = {
-        o2 = 0.5, n2 = 0.5, co2 = 0.2, vol = 0.7,
+    props = { scene = "console", keep = 1, data = {
+        o2 = 50, n2 = 50, co2 = 20, vol = 70,
         pressure = 0.4, alarm = 0, rate = 0.5,
         history = {},
     } },
@@ -239,8 +241,10 @@ function tick(dt)
     end
     history[#history] = s.pressure
 
+    -- One number per gas serves both the liquid level and the readout: the tank geometry
+    -- divides by 100 in its expressions, and `fmt = "%.0f"` prints it as it stands.
     data:set_props({ data = {
-        o2 = s.o2, n2 = s.n2, co2 = s.co2, vol = s.vol,
+        o2 = s.o2 * 100, n2 = s.n2 * 100, co2 = s.co2 * 100, vol = s.vol * 100,
         pressure = s.pressure,
         alarm = s.pressure,             -- drives lamp colour through the status ramp
         rate  = 0.4 + s.pressure * 2,   -- and its pulse rate

@@ -226,7 +226,11 @@ YS n=12 x==6+i*3 y==64-$fill*52 y2=72 f=@liquid fo=0 fo2=0.62
             "    YS n=24 x==18+i*2.8 y==180-clamp($fill,0,1)*152+3*sin(i*0.5+t*1.6) y2=184 f=@liquid fea_edge=0",
             "}",
             "",
-            "R x=20 y=20 w=60 h=160 rx=10 f=none s=#1E3247 sw=2",
+            "# Paint defaults on the group, since this format has no map syntax for `style`.",
+            "G f=none s_=#1E3247 sw=2 fea=0 {",
+            "    R x=20 y=20 w=60 h=160 rx=10",
+            "    R x=26 y=26 w=48 h=6 rx=3",
+            "}",
             "",
             "T x=20 y=190 w=60 h=10 text=TEXT size=7 cspace=2 align=center f=#3A5570",
         }), null);
@@ -241,5 +245,12 @@ YS n=12 x==6+i*3 y==64-$fill*52 y2=72 f=@liquid fo=0 fo2=0.62
             text.Contains("=180-clamp($fill,0,1)*152+3*sin(i*0.5+t*1.6)") ? 1d : 0d, 1d, 0.001d, 0, 0);
         run.Check("scenetext: text=TEXT is a value, not a flag",
             text.Contains("text = \"TEXT\"") ? 1d : 0d, 1d, 0.001d, 0, 0);
+
+        // The group's paint defaults have to arrive as ordinary keys on the G, which is the
+        // whole mechanism: there is no map syntax here for `style` to use.
+        run.Check("scenetext: group carries s_ as a default",
+            text.Contains("s_ = \"#1E3247\"") ? 1d : 0d, 1d, 0.001d, 0, 0);
+        run.Check("scenetext: bare fea=0 is a value, not a flag",
+            text.Contains("fea = 0") ? 1d : 0d, 1d, 0.001d, 0, 0);
     }
 }

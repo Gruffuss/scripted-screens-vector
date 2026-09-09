@@ -11,6 +11,14 @@
 -- element, so one handler serves the whole scene rather than one per row. It replaces the
 -- old workaround of laying a transparent `button` element over every clickable thing.
 --
+-- A CLICKABLE NODE INSIDE A REPEAT REPORTS ITS INDEX. One node stands for n rows, so the id
+-- alone cannot say which was hit -- the value becomes "id:i". That is what lets the five rows
+-- below be a single R:
+--
+--     local id, index = nodeId:match("^(.-):(%d+)$")
+--
+-- Outside a repeat it is the bare id, unchanged.
+--
 --   * `click = 1` is OPT-IN and separate from having an id -- an id is also a patch target,
 --     and making every patch target swallow clicks would be a nasty surprise.
 --   * A scene with nothing clickable stays transparent to the pointer, so decoration never
@@ -37,7 +45,33 @@ local W, H = 480, 480
 if size then W, H = size.w, size.h end
 
 local ROWS = { "OXYGEN", "NITROGEN", "CARBON DIOXIDE", "VOLATILES", "POLLUTANT" }
-local ROW_H, ROW_Y = 24, 40
+local ACCENTS = { "#5FD9A8", "#4E8FD9", "#F59E0B", "#E23D3D", "#9B7FD9" }
+local ROW_H, ROW_Y, GAP = 24, 40, 4
+local STRIDE = ROW_H + GAP
+
+local data
+local picked = "nothing selected"
+
+local function on_row(nodeId, player)
+    -- "row:3" -> the fourth row, since a repeat's `i` is 0-based.
+    local index = tonumber((nodeId or ""):match("^row:(%d+)$"))
+    if not index then return end
+
+    local k = index + 1
+    picked = ROWS[k] .. "  //  " .. (player or "?")
+
+    -- One set_props carrying both patches and the data payload. `nodes` and `data` are
+    -- separate props, so a patch does not disturb the values and vice versa.
+    data:set_props({
+        nodes = {
+            sel    = { y = ROW_Y + index * STRIDE - 2 },
+            accent = { y = ROW_Y + index * STRIDE - 2, f = ACCENTS[k] },
+        },
+        data = { picked = picked },
+    })
+
+    ui:commit()
+end
 
 ui:clear()
 
@@ -46,52 +80,6 @@ ui:element({
     rect = { unit = "px", x = 0, y = 0, w = W, h = H },
     style = { bg = "#0A121C" },
 })
-
-local rows = {}
-for k = 1, #ROWS do
-    local y = ROW_Y + (k - 1) * (ROW_H + 4)
-
-    -- The plate. `click = 1` plus an id is the whole of it.
-    rows[#rows + 1] = {
-        op = "R", id = "row" .. k, click = 1,
-        x = 16, y = y, w = 168, h = ROW_H, rx = 4, f = "#12202F",
-    }
-
-    rows[#rows + 1] = {
-        op = "T", x = 26, y = y, w = 120, h = ROW_H,
-        text = ROWS[k], size = 8, valign = "middle", f = "#8FA6B8",
-    }
-
-    -- A per-row value, driven by `data` -- no patch, no re-parse.
-    rows[#rows + 1] = {
-        op = "R", x = 150, y = y + 9, w = 26, h = 6, rx = 3, f = "#5FD9A8",
-        fo = "=0.25+0.75*$v" .. (k - 1),
-    }
-end
-
-local ACCENTS = { "#5FD9A8", "#4E8FD9", "#F59E0B", "#E23D3D", "#9B7FD9" }
-local data
-local picked = "nothing selected"
-
-local function on_row(nodeId, player)
-    local k = tonumber((nodeId or ""):match("^row(%d+)$"))
-    if not k then return end
-
-    local y = ROW_Y + (k - 1) * (ROW_H + 4) - 2
-    picked = ROWS[k] .. "  //  " .. (player or "?")
-
-    -- One set_props carrying both patches and the data payload. `nodes` and `data` are
-    -- separate props, so a patch does not disturb the values and vice versa.
-    data:set_props({
-        nodes = {
-            sel    = { y = y },
-            accent = { y = y, f = ACCENTS[k] },
-        },
-        data = { picked = picked },
-    })
-
-    ui:commit()
-end
 
 ui:element({
     id = "click_s", type = "vector",
@@ -107,11 +95,27 @@ ui:element({
 
             -- The selection highlight, drawn UNDER the rows. Its `y` is patched when the
             -- selection changes: a value an expression could carry too, but patching is
-            -- shown here because the SHAPE also changes -- see the accent bar below.
+            -- shown here because the accent bar below also changes COLOUR, which no
+            -- expression can return.
             { op = "R", id = "sel", x = 14, y = ROW_Y - 2, w = 172, h = ROW_H + 4, rx = 5,
               f = "#1E3247" },
 
-            { op = "G", c = rows },
+            -- FIVE ROWS, ONE REPEAT. The plate carries `click = 1` and its id becomes
+            -- "row:0" .. "row:4"; the label and the bar read their own slot of the payload.
+            { op = "RP", n = #ROWS, c = {
+                { op = "R", id = "row", click = 1,
+                  x = 16, y = "=" .. ROW_Y .. "+i*" .. STRIDE,
+                  w = 168, h = ROW_H, rx = 4, f = "#12202F" },
+
+                { op = "T", x = 26, y = "=" .. ROW_Y .. "+i*" .. STRIDE,
+                  w = 120, h = ROW_H,
+                  text = "$names[i]", size = 8, valign = "middle", f = "#8FA6B8" },
+
+                -- A per-row value, driven by `data` -- no patch, no re-parse.
+                { op = "R", x = 150, y = "=" .. (ROW_Y + 9) .. "+i*" .. STRIDE,
+                  w = 26, h = 6, rx = 3, f = "#5FD9A8",
+                  fo = "=0.25+0.75*$levels[i]" },
+            } },
 
             -- The accent bar's colour is patched, because a colour is not a number and an
             -- expression has nothing to return for it. (A gradient sampled at an expression
@@ -125,10 +129,12 @@ ui:element({
     },
 })
 
+-- `keep = 1`, so the row NAMES and the picked line are sent once and the per-tick payload
+-- carries only the levels that actually change.
 data = ui:element({
     id = "click_d", type = "vector",
     rect = { unit = "px", x = -4, y = -4, w = 1, h = 1 },
-    props = { scene = "click", data = { picked = "nothing selected" } },
+    props = { scene = "click", keep = 1, data = { names = ROWS, picked = picked } },
 })
 
 local phase = 0
@@ -136,13 +142,12 @@ local phase = 0
 function tick(dt)
     phase = phase + (dt or 0.5)
 
-    -- `data` is ONE prop, so it is replaced wholesale rather than merged key by key.
-    -- Anything the scene still needs has to be resent with it -- here, the picked line.
-    local values = { picked = picked }
+    local levels = {}
     for k = 1, #ROWS do
-        values["v" .. (k - 1)] = 0.5 + 0.5 * math.sin(phase * (0.2 + k * 0.07))
+        levels[k] = 0.5 + 0.5 * math.sin(phase * (0.2 + k * 0.07))
     end
 
-    data:set_props({ data = values })
+    -- Only the levels. `names` and `picked` are still there from before, because of `keep`.
+    data:set_props({ data = { levels = levels } })
     ui:commit()
 end

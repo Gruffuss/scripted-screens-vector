@@ -8,12 +8,17 @@
 -- of the 50,000 the chip gets. Put the same list in a ScriptedScreens `scrollview` and every
 -- scroll is a round trip, so it keeps up with the half-second tick rather than with the mouse.
 --
--- WHAT YOU WRITE. Children are in CONTENT coordinates, measured from the container's own y.
--- A row at y = TOP + k*ROW sits where you would draw it if the box were tall enough to hold
--- everything, and the container works out what is visible.
+-- WHAT YOU WRITE. Children are in the same coordinates as everything around them -- put the
+-- first row at the container's own y and the last `ch` below it -- and the container
+-- translates them by the offset.
 --
 --   ch    total content height. At or below h, nothing scrolls and the wheel is ignored.
 --   id    REQUIRED -- it is the key the scroll position is stored under.
+--
+-- THE WHOLE LIST IS ONE REPEAT. Backgrounds, pips and labels: one RP, one T, one array of
+-- strings in the payload. `text = "$rows[i]"` takes the string for this instance, so 24 rows
+-- cost 3 nodes rather than 72. The index is a full expression, so "$rows[n-1-i]" would show
+-- the newest entry at the top without touching the data.
 --
 -- INSIDE A CONTAINER, `sy` AND `vh` REPORT THAT CONTAINER. `sy` is the scroll OFFSET and is
 -- zero at rest; `vh` is the container's height. So the top of what is showing is the
@@ -46,6 +51,8 @@ local CONTENT = ROWS * ROW + 8
 local THUMB  = BOX * BOX / CONTENT
 local TRAVEL = (BOX - THUMB) / (CONTENT - BOX)
 
+local PIN = "=" .. TOP .. "+sy"
+
 ui:clear()
 
 ui:element({
@@ -53,40 +60,6 @@ ui:element({
     rect = { unit = "px", x = 0, y = 0, w = W, h = H },
     style = { bg = "#0A121C" },
 })
-
--- The container's children, built once. Stripes come from one RP, but the LABELS have to be
--- generated: a text node binds a data string by NAME, and there is no `$name[i]` for strings
--- the way there is for numbers. 24 small tables is a few hundred instructions, paid once --
--- the structure element is only resent when the list itself changes, not every tick.
-local body = {
-    { op = "RP", n = ROWS, c = {
-        { op = "R", x = 16, y = "=" .. (TOP + 6) .. "+i*" .. ROW,
-          w = 168, h = ROW - 4, rx = 3,
-          f = "#12202F", fo = "=0.35+0.4*mod(i,2)" },
-
-        -- A severity pip, lit for the ~18% of rows whose hash clears the step.
-        { op = "C", cx = 24, cy = "=" .. (TOP + 6 + (ROW - 4) / 2) .. "+i*" .. ROW,
-          rx = 2.5, ry = 2.5, f = "#5FD9A8",
-          fo = "=0.2+0.8*step(0.82,hash(i))" },
-    } },
-}
-
-for k = 0, ROWS - 1 do
-    body[#body + 1] = {
-        op = "T", x = 34, y = TOP + 6 + k * ROW, w = 130, h = ROW - 4,
-        text = "$row" .. k, size = 8, valign = "middle", f = "#8FA6B8",
-        fit = "ellipsis",
-    }
-end
-
--- Pinned last, so it draws over the rows.
-local PIN = "=" .. TOP .. "+sy"
-
-body[#body + 1] = { op = "R", x = 10, y = PIN, w = 180, h = 10, f = "@fadeDown" }
-body[#body + 1] = { op = "R", x = 10, y = PIN .. "+vh-10", w = 180, h = 10, f = "@fadeUp" }
-body[#body + 1] = { op = "R", x = 180, y = PIN, w = 3, h = BOX, rx = 1.5, f = "#12202F" }
-body[#body + 1] = { op = "R", x = 180, w = 3, h = THUMB, rx = 1.5, f = "#3A5570",
-                    y = PIN .. "+sy*" .. TRAVEL }
 
 ui:element({
     id = "scroll_s", type = "vector",
@@ -113,7 +86,38 @@ ui:element({
             { op = "R", x = 10, y = TOP, w = 180, h = BOX, rx = 6, f = "#0B1622" },
 
             { op = "SC", id = "log",
-              x = 10, y = TOP, w = 180, h = BOX, ch = CONTENT, rx = 6, c = body },
+              x = 10, y = TOP, w = 180, h = BOX, ch = CONTENT, rx = 6, c = {
+
+                { op = "RP", n = ROWS, c = {
+
+                    -- Stripe.
+                    { op = "R", x = 16, y = "=" .. (TOP + 6) .. "+i*" .. ROW,
+                      w = 168, h = ROW - 4, rx = 3,
+                      f = "#12202F", fo = "=0.35+0.4*mod(i,2)" },
+
+                    -- Severity pip, coloured from an array. A colour is not a number, so an
+                    -- expression has nothing to return for it -- but "$tints[i]" does.
+                    { op = "C", cx = 24, cy = "=" .. (TOP + 6 + (ROW - 4) / 2) .. "+i*" .. ROW,
+                      rx = 2.5, ry = 2.5, f = "$tints[i]" },
+
+                    -- ONE text node for the whole list. Out of range draws `missing`, so a
+                    -- payload shorter than n leaves blanks rather than repeating the last row.
+                    { op = "T", x = 34, y = "=" .. (TOP + 6) .. "+i*" .. ROW,
+                      w = 130, h = ROW - 4,
+                      text = "$rows[i]", size = 8, valign = "middle", f = "#8FA6B8",
+                      fit = "ellipsis", missing = "" },
+                } },
+
+                -- PINNED INSIDE THE CONTAINER, and drawn last so it sits over the rows.
+                { op = "R", x = 10, y = PIN, w = 180, h = 10, f = "@fadeDown" },
+                { op = "R", x = 10, y = PIN .. "+vh-10", w = 180, h = 10, f = "@fadeUp" },
+
+                -- A scrollbar is not built in, because it is four numbers and everybody
+                -- wants a different one. The track is pinned; the thumb rides `sy` twice.
+                { op = "R", x = 180, y = PIN, w = 3, h = BOX, rx = 1.5, f = "#12202F" },
+                { op = "R", x = 180, w = 3, h = THUMB, rx = 1.5, f = "#3A5570",
+                  y = PIN .. "+sy*" .. TRAVEL },
+            } },
 
             { op = "T", x = 10, y = TOP + BOX + 10, w = 180, h = 12,
               text = "wheel or drag the list", size = 7, align = "center", f = "#3A5570" },
@@ -121,25 +125,32 @@ ui:element({
     },
 })
 
--- Row text is one data element: 24 strings in one payload, and no element re-declared to
--- change a line. Strings live in `data` alongside the numbers.
+-- `keep = 1` makes a payload a PATCH: names it does not mention hold their last value. Without
+-- it, `data` is the whole truth, so this list would have to resend all 24 strings on every
+-- tick or watch them vanish. With it, they go out once and only changes cost anything.
 local data = ui:element({
     id = "scroll_d", type = "vector",
     rect = { unit = "px", x = -4, y = -4, w = 1, h = 1 },
-    props = { scene = "scroll", data = {} },
+    props = { scene = "scroll", keep = 1, data = {} },
 })
+
+local SEVERITY = { "#3A5570", "#5FD9A8", "#F59E0B", "#E23D3D" }
 
 local sent = false
 
 function tick(dt)
-    -- A real log would resend when it changes. This one is fixed, so it goes out once.
+    -- A real log resends when it changes. This one is fixed, so it goes out once -- which is
+    -- only safe because of `keep = 1` above.
     if sent then return end
     sent = true
 
-    local payload = {}
-    for k = 0, ROWS - 1 do
-        payload["row" .. k] = string.format("%02d:%02d  event %d", (k * 7) % 24, (k * 13) % 60, k + 1)
+    local rows, tints = {}, {}
+    for k = 1, ROWS do
+        rows[k]  = string.format("%02d:%02d  event %d", (k * 7) % 24, (k * 13) % 60, k)
+        tints[k] = SEVERITY[(k % #SEVERITY) + 1]
     end
 
-    data:set_props({ data = payload })
+    -- Arrays are 0-based in expressions and 1-based in Lua, but that lines up by itself
+    -- here: a repeat's `i` runs 0..n-1, so $rows[i] is rows[i+1].
+    data:set_props({ data = { rows = rows, tints = tints } })
 end
