@@ -11,9 +11,9 @@ namespace ScriptedScreensVector;
 /// </remarks>
 internal sealed class TessellationStats
 {
-    internal readonly double[] OpMilliseconds = new double[9];
+    internal readonly double[] OpMilliseconds = new double[12];
 
-    internal readonly int[] OpCounts = new int[9];
+    internal readonly int[] OpCounts = new int[12];
 
     internal double BandSampleMs;
 
@@ -30,6 +30,9 @@ internal sealed class TessellationStats
 
     /// <summary>Clickable node bounds, in draw order, for hit testing on the main thread.</summary>
     internal readonly System.Collections.Generic.List<HitRegion> Hits = new();
+
+    /// <summary>Scroll containers the walk found, for wheel and drag to hit-test against.</summary>
+    internal readonly System.Collections.Generic.List<ScrollRegion> Scrolls = new();
 
     /// <summary>Data names the scene asked for and did not get, this rebuild.</summary>
     internal readonly System.Collections.Generic.List<string> Missing = new();

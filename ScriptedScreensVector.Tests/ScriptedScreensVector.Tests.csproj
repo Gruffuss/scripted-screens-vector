@@ -31,12 +31,14 @@
         <Compile Include="..\ScriptedScreensVector\Gradient.cs" />
         <Compile Include="..\ScriptedScreensVector\Expression.cs" />
         <Compile Include="..\ScriptedScreensVector\SceneText.cs" />
+        <Compile Include="..\ScriptedScreensVector\TextNode.cs" />
         <Compile Include="ScriptedScreensStubs.cs" />
         <Compile Include="Stubs.cs" />
         <Compile Include="TriangulatorTests.cs" />
         <Compile Include="ClipTests.cs" />
         <Compile Include="GradientTests.cs" />
         <Compile Include="SceneTextTests.cs" />
+        <Compile Include="ScrollTests.cs" />
         <Compile Include="Benchmark.cs" />
         <Compile Include="Program.cs" />
     </ItemGroup>

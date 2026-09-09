@@ -276,6 +276,59 @@ the *same* curve. Nothing is dropped, unlike count LOD on a repeat.
 Same sampling rule as `YS` (`n`, `x`, `y`), stroked rather than filled. The line-chart and
 waveform primitive.
 
+### `SC` — scroll container
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `id` | string | **required** — the scroll position is stored under it |
+| `x`, `y`, `w`, `h` | number/expr | the viewport box, in the enclosing coordinates |
+| `ch` | number/expr | total content height; at or below `h` nothing scrolls |
+| `rx` / `ry` | number/expr | corner radii, same rules and per-corner form as `R` |
+| `o` | number/expr | container opacity, multiplied into all descendants |
+| `c` | array | children, drawn in content coordinates |
+
+A group that clips to its own box and slides its children inside it. Children are written in
+content coordinates starting at the container's `y`, so the first row sits where the box does
+and the last sits `ch` below it.
+
+```lua
+{ op = "SC", id = "log", x = 4, y = 20, w = 192, h = 120, ch = 480, rx = 6, c = {
+    { op = "RP", n = 12, c = {
+        { op = "R", x = 8, y = "=20 + i*40", w = 176, h = 34, rx = 4, f = "#12202F" },
+        { op = "T", x = 16, y = "=28 + i*40", w = 160, h = 20,
+          text = "$line", size = 11, f = "#8FA6B8" },
+    } },
+} }
+```
+
+**The scroll position never leaves the client.** A wheel notch moves the offset and triggers
+one rebuild — no tick, no network, no instructions. That is the whole reason this exists as a
+node rather than as a ScriptedScreens `scrollview` with a scene inside it: routing a scroll
+through the chip makes it cost half a second and a slice of the instruction budget.
+
+Wheel is a fifth of the viewport per notch; drag moves content with the pointer. Both clamp to
+`0 .. ch - h`, so a container whose content fits cannot be moved at all.
+
+**`sy` and `vh` report *this* container inside it.** So the pattern that pins a header or a
+fade to a ScriptedScreens scroll view works identically here:
+
+```lua
+{ op = "R", x = 4, y = "=sy", w = 192, h = 18, f = "#0B1622" }   -- pinned header
+{ op = "R", x = 4, y = "=sy + vh - 12", w = 192, h = 12, f = "@fade" }  -- bottom fade
+```
+
+**Limits worth knowing:**
+
+- **Vertical only.** Horizontal scrolling has no console in this repo asking for it, and it
+  doubles the state, the clamping and the input handling.
+- **Containers do not nest usefully.** An inner one would need its own wheel target inside the
+  outer one's and the pointer cannot be in both; the inner container clips and draws correctly
+  but the wheel always finds the innermost box under the pointer.
+- **No scrollbar is drawn.** Draw one: `R x=… y="=sy + sy/(ch-h)*(h-thumb)"` is the whole
+  thing, and a scene that wants a different indicator is not fighting a built-in one.
+- **A text node inside is clipped by the container's box**, which is the case RectMask2D
+  handles. Rounded corners cut geometry but not text; see `T`.
+
 ### `T` — text
 
 | Key | Meaning |
@@ -587,8 +640,8 @@ Any numeric attribute may be a string beginning with `=`.
 | `n` | current repeat count |
 | `$name` | scalar from the data payload |
 | `$name[expr]` | array element, **0-based**; out of range yields `0` |
-| `sy` | scroll offset of the enclosing scroll view, in scene units; `0` when there is none |
-| `vh` | viewport height of that scroll view, in scene units; `0` when there is none |
+| `sy` | scroll offset of the enclosing scroll view or `SC`, in scene units; `0` when there is none |
+| `vh` | viewport height of that scroll view or `SC`, in scene units; `0` when there is none |
 
 **Arrays are 0-based in expressions and 1-based in Lua.** `$history[0]` is the value your
 script stored at `history[1]`. A repeat's `i` runs `0..n-1`, so `$history[i]` lines up with a

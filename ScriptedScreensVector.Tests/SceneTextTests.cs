@@ -19,6 +19,8 @@ namespace ScriptedScreensVector.Tests;
 /// </remarks>
 internal static class SceneTextTests
 {
+    private const string Nl = "\n";
+
     /// <summary>Renders a prop tree as text so two can be compared and a diff read.</summary>
     private static string Dump(SS.UiProp[]? props, int depth = 0)
     {
@@ -176,5 +178,26 @@ YS n=12 x==6+i*3 y==64-$fill*52 y2=72 f=@liquid fo=0 fo2=0.62
 
         var empty = SceneText.ToProps("   \n # nothing \n ", null);
         run.Check("scenetext: blank source returns null", empty == null ? 1d : 0d, 1d, 0.001d, 0, 0);
+    }
+
+    /// <summary>`SC` needs no special case in the text format, and this proves it.</summary>
+    /// <remarks>
+    /// The grammar is op plus key/value pairs plus braces, so a new container op costs the
+    /// front end nothing. Worth pinning anyway: `ch` is a key nothing else uses, and a
+    /// container whose children were dropped would render as an empty box rather than as an
+    /// error.
+    /// </remarks>
+    internal static void ScrollContainerParses(TestRun run)
+    {
+        var props = SceneText.ToProps(
+            "SC id=list x=4 y=20 w=192 h=120 ch=480 rx=6 {" + Nl +
+            "    RP n=12 { R x=8 y=\"=i*40\" w=176 h=34 f=#12202F }" + Nl +
+            "}", null);
+
+        var text = Dump(props);
+
+        run.Check("scenetext: SC carries ch", text.Contains("ch = 480") ? 1d : 0d, 1d, 0.001d, 0, 0);
+        run.Check("scenetext: SC keeps its id", text.Contains("\"list\"") ? 1d : 0d, 1d, 0.001d, 0, 0);
+        run.Check("scenetext: SC keeps its children", text.Contains("\"RP\"") ? 1d : 0d, 1d, 0.001d, 0, 0);
     }
 }

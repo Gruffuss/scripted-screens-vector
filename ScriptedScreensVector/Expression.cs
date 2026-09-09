@@ -30,6 +30,14 @@ internal sealed class EvalContext
     /// <summary>Viewport height of the enclosing ScrollRect, in scene units. 0 when none.</summary>
     internal float ViewportH { get; set; }
 
+    /// <summary>Where each `SC` container is scrolled to, in scene units, by node id.</summary>
+    /// <remarks>
+    /// Written by the main thread at dispatch and only read on the worker, the same contract
+    /// as everything else Unity-sourced in here. Inside a container, `sy` and `vh` report that
+    /// container rather than the enclosing ScrollRect.
+    /// </remarks>
+    internal Dictionary<string, float> ScrollOffsets { get; } = new(StringComparer.Ordinal);
+
     /// <summary>Named values from the paired data element. Never null.</summary>
     internal Dictionary<string, float> Scalars { get; } = new(StringComparer.Ordinal);
 

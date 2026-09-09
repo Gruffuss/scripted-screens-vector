@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.8.0.0</Version>
+	<Version>0.9.0.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -52,6 +52,11 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.9.0[/b]
+[list]
+[*] [b]Scroll containers.[/b] SC is a box that clips to itself and slides its children inside it: wheel over it or drag it and a list longer than the console moves. The scroll position stays on the client, so a wheel notch costs one mesh rebuild and nothing else -- no tick, no network message, and none of the chip's instruction budget.
+[*] Inside a container, the sy and vh expression variables report that container, so a pinned header, an edge fade or a scrollbar thumb is written exactly as it is for a scroll view.
+[/list]
 [b]0.8.0[/b]
 [list]
 [*] [b]Scenes report their own faults.[/b] An unknown op or attribute, a malformed expression, a data name with no value, a missing gradient or clip — each is reported once with the node it came from, and the surface shows a magenta border rather than looking switched off. A colour bound to a name the payload never supplied now draws magenta instead of white, so an unresolved binding looks like a fault rather than a design decision.

@@ -17,6 +17,7 @@ internal enum VecOp
     Spline,
     Path,
     Text,
+    Scroll,
 }
 
 internal enum FitMode
@@ -40,6 +41,9 @@ internal sealed class VecNode
     internal Expression Y = Expression.Constant(0f);
     internal Expression W = Expression.Constant(0f);
     internal Expression H = Expression.Constant(0f);
+
+    /// <summary>`SC` content height, in scene units. Below `H` means nothing scrolls.</summary>
+    internal Expression ContentH = Expression.Constant(0f);
     internal Expression Rx = Expression.Constant(0f);
     internal Expression Ry = Expression.Constant(0f);
 
@@ -608,7 +612,7 @@ internal static class SceneParser
     {
         "op", "id", "c", "style", "click", "lod",
         "x", "y", "w", "h", "cx", "cy", "rx", "ry", "x1", "y1", "x2", "y2", "y2",
-        "n", "p", "d", "seg", "t", "r", "s", "a", "o", "clip", "ref", "params",
+        "n", "p", "d", "seg", "t", "r", "s", "a", "o", "clip", "ref", "params", "ch",
         "f", "fo", "fo2", "fr", "fea", "fea_edge", "sh",
         "sw", "so", "cap", "join", "ml", "dash", "dofs", "sd", "sdo",
         "grad", "at", "units", "stops", "fx", "fy",
@@ -704,6 +708,22 @@ internal static class SceneParser
 
                 break;
             }
+
+            // A group that clips to its own box and slides its children inside it. Scroll
+            // position is client-side state keyed by `id`, so an SC without one draws but
+            // never moves -- reported at rebuild, since that is where the offset is read.
+            case "SC":
+                node.Op = VecOp.Scroll;
+                node.X = Attr(map, "x", 0f);
+                node.Y = Attr(map, "y", 0f);
+                node.W = Attr(map, "w", 0f);
+                node.H = Attr(map, "h", 0f);
+                node.ContentH = Attr(map, "ch", 0f);
+                node.CornerRadii = ParseCorners(map);
+                node.Rx = node.CornerRadii != null ? node.CornerRadii[0] : Attr(map, "rx", 0f);
+                node.Ry = HasKey(map, "ry") ? Attr(map, "ry", 0f) : node.Rx;
+                node.Opacity = Attr(map, "o", 1f);
+                break;
 
             case "R":
                 node.Op = VecOp.Rect;

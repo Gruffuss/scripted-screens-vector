@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -20,7 +21,7 @@ namespace ScriptedScreensVector;
 /// reference <c>t</c> is tessellated once and then costs nothing per frame. Only
 /// time-varying scenes mark themselves dirty in <see cref="Update"/>.
 /// </remarks>
-internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler
+internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, IScrollHandler, IBeginDragHandler, IDragHandler
 {
     /// <summary>
     /// Per-surface rebuild cost, reported periodically.
@@ -112,7 +113,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler
 
                 // Where the time actually went, biggest first. Six inferences about this
                 // have been wrong; this is measured per node type.
-                var names = new[] { "G", "RP", "R", "C", "YS", "L/Y", "LS", "SP", "P" };
+                var names = new[] { "G", "RP", "R", "C", "YS", "L/Y", "LS", "SP", "P", "T", "SC", "-" };
                 var order = new int[names.Length];
                 for (var i = 0; i < order.Length; i++)
                     order[i] = i;
@@ -208,6 +209,14 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler
     internal string SceneId => _sceneId;
 
     private readonly List<HitRegion> _hits = new();
+
+    /// <summary>Where each `SC` container landed last rebuild, for wheel and drag to find.</summary>
+    private readonly List<ScrollRegion> _scrolls = new();
+
+    /// <summary>How far each `SC` is scrolled, in scene units. Survives rebuilds.</summary>
+    private readonly Dictionary<string, float> _offsets = new(StringComparer.Ordinal);
+
+    private Vector2 _dragLast;
     private SS.UiPointerDownForwarder? _forwarder;
     private string _elementId = string.Empty;
 
@@ -258,8 +267,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler
     private double _milliseconds;
     private double _tessellateMs;
     private double _uploadMs;
-    private readonly double[] _opMs = new double[9];
-    private readonly int[] _opCount = new int[9];
+    private readonly double[] _opMs = new double[12];
+    private readonly int[] _opCount = new int[12];
     private int _peakVertices;
     private float _screenPixels = -1f;
     private int _lastShapeCount;
@@ -339,6 +348,81 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler
         _forwarder.Id = _elementId;
         _forwarder.EventName = "click";
         _forwarder.OnPointerClick(eventData);
+    }
+
+
+    /// <summary>Wheel over an <c>SC</c> container scrolls it.</summary>
+    /// <remarks>
+    /// **Nothing is sent anywhere.** The offset is client-side state, so a wheel notch costs
+    /// one rebuild and no network traffic, and the list keeps up with the mouse rather than
+    /// with the 0.5 s tick. That is the whole reason this is a scene node and not a
+    /// ScriptedScreens `scrollview` with the scene inside it.
+    /// </remarks>
+    public void OnScroll(PointerEventData eventData)
+    {
+        if (eventData == null || !Locate(eventData.position, eventData.pressEventCamera, out var region))
+            return;
+
+        // Wheel up is away from the reader, which shows earlier content, which is a smaller
+        // offset -- scenes are +Y down and the offset counts downward from the top.
+        Move(region, -eventData.scrollDelta.y * region.WheelStep);
+    }
+
+    public void OnBeginDrag(PointerEventData eventData)
+    {
+        if (eventData != null)
+            _dragLast = eventData.position;
+    }
+
+    /// <summary>Dragging inside a container moves the content with the pointer.</summary>
+    public void OnDrag(PointerEventData eventData)
+    {
+        if (eventData == null || !Locate(eventData.position, eventData.pressEventCamera, out var region))
+            return;
+
+        // Screen pixels, not canvas: the delta is only ever compared against itself and
+        // scaled into scene units, and the canvas conversion is already in ToScene.
+        var moved = eventData.position - _dragLast;
+        _dragLast = eventData.position;
+
+        // Canvas Y is up and scene Y is down, so dragging up reveals later content.
+        Move(region, moved.y * region.ToScene);
+    }
+
+    /// <summary>Finds the container under a screen point, last drawn wins.</summary>
+    private bool Locate(Vector2 screen, Camera? camera, out ScrollRegion region)
+    {
+        region = default;
+
+        if (_scrolls.Count == 0
+            || !RectTransformUtility.ScreenPointToLocalPointInRectangle(rectTransform, screen, camera, out var local))
+        {
+            return false;
+        }
+
+        var found = false;
+        for (var i = 0; i < _scrolls.Count; i++)
+        {
+            if (!_scrolls[i].Rect.Contains(local))
+                continue;
+
+            region = _scrolls[i];
+            found = true;
+        }
+
+        return found && region.Max > 0f;
+    }
+
+    private void Move(ScrollRegion region, float by)
+    {
+        _offsets.TryGetValue(region.Id, out var offset);
+        var next = region.Clamp(offset + by);
+
+        if (Mathf.Approximately(next, offset))
+            return;
+
+        _offsets[region.Id] = next;
+        _needsRebuild = true;
     }
 
     /// <summary>Writes one surface's state into the vector_stats report.</summary>
@@ -789,6 +873,13 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler
 
         SampleScroll(rect);
 
+        // Handed over at dispatch like everything else Unity-sourced: the worker reads this
+        // and the main thread writes it, never at the same time, because only one job for a
+        // surface is ever in flight.
+        _context.ScrollOffsets.Clear();
+        foreach (var pair in _offsets)
+            _context.ScrollOffsets[pair.Key] = pair.Value;
+
         var screenScale = ScreenPixelsPerCanvasUnit();
         var known = screenScale > 0f;
 
@@ -937,9 +1028,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler
         _hits.Clear();
         _hits.AddRange(_stats.Hits);
 
-        // Only take clicks when the scene actually has something clickable, so a plain
-        // decorative surface stays transparent to the pointer as it always was.
-        raycastTarget = _hits.Count > 0;
+        _scrolls.Clear();
+        _scrolls.AddRange(_stats.Scrolls);
+
+        // Only take pointer events when the scene has something that answers them, so a
+        // plain decorative surface stays transparent to the pointer as it always was.
+        raycastTarget = _hits.Count > 0 || _scrolls.Count > 0;
 
         _rebuilds++;
         _milliseconds += tessellateMs + _stopwatch.Elapsed.TotalMilliseconds;

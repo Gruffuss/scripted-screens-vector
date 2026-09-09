@@ -84,3 +84,31 @@ internal struct HitRegion
     internal string Id;
     internal Rect Rect;
 }
+
+/// <summary>Where an <c>SC</c> container landed, and how much room it has to scroll.</summary>
+/// <remarks>
+/// The offset itself is **client-side state and never leaves the client**. Scrolling a list
+/// is not a decision the chip needs to hear about, and routing it through the tick would make
+/// a wheel notch cost half a second and 50,000 instructions' worth of contention. So the
+/// tessellator records where each container ended up, the main thread moves the offset when a
+/// wheel or drag lands inside one, and the next rebuild reads it back.
+///
+/// Heights are scene units; <see cref="Rect"/> is canvas units, which is what a pointer
+/// position arrives in. <see cref="ToScene"/> converts between them for drags.
+/// </remarks>
+internal struct ScrollRegion
+{
+    internal string Id;
+    internal Rect Rect;
+    internal float View;
+    internal float Content;
+    internal float ToScene;
+
+    /// <summary>Scene units of content hidden below the viewport.</summary>
+    internal float Max => Mathf.Max(0f, Content - View);
+
+    internal float Clamp(float offset) => Mathf.Clamp(offset, 0f, Max);
+
+    /// <summary>A fifth of the viewport per wheel notch, so the step suits the container.</summary>
+    internal float WheelStep => Mathf.Max(1f, View * 0.2f);
+}

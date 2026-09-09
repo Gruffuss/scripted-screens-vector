@@ -72,6 +72,8 @@ internal static class Tessellator
     /// <summary>Clickable node bounds found during the walk, in draw order.</summary>
     [ThreadStatic] internal static List<HitRegion>? HitsFound;
 
+    [ThreadStatic] internal static List<ScrollRegion>? ScrollsFound;
+
     [ThreadStatic] internal static double BandSampleMs;
     [ThreadStatic] internal static double BandStripMs;
     [ThreadStatic] internal static double BandFeatherMs;
@@ -80,9 +82,9 @@ internal static class Tessellator
     [ThreadStatic] private static double[]? _opMilliseconds;
     [ThreadStatic] private static int[]? _opCounts;
 
-    internal static double[] OpMilliseconds => _opMilliseconds ??= new double[9];
+    internal static double[] OpMilliseconds => _opMilliseconds ??= new double[12];
 
-    internal static int[] OpCounts => _opCounts ??= new int[9];
+    internal static int[] OpCounts => _opCounts ??= new int[12];
 
     /// <summary>Ablation state for the scene currently being tessellated.</summary>
     [ThreadStatic] private static bool NoFill;
@@ -186,6 +188,10 @@ internal static class Tessellator
         if (HitsFound != null)
             stats.Hits.AddRange(HitsFound);
 
+        stats.Scrolls.Clear();
+        if (ScrollsFound != null)
+            stats.Scrolls.AddRange(ScrollsFound);
+
         stats.Missing.Clear();
         foreach (var name in context.Missing)
             stats.Missing.Add(name);
@@ -212,6 +218,7 @@ internal static class Tessellator
 
         (TextFound ??= new List<TextPlacement>(16)).Clear();
         (HitsFound ??= new List<HitRegion>(16)).Clear();
+        (ScrollsFound ??= new List<ScrollRegion>(4)).Clear();
 
         NoFill = scene.DebugNoFill;
         NoFeather = scene.DebugNoFeather;
@@ -453,6 +460,14 @@ internal static class Tessellator
                 EmitPath(vh, scene, node, context, stack.Peek());
                 emitted++;
                 Charge(node.Op, mark);
+                break;
+            }
+
+            case VecOp.Scroll:
+            {
+                var mark = Stopwatch.GetTimestamp();
+                EmitScroll(vh, scene, node, context, stack, ref emitted);
+                Charge(VecOp.Scroll, mark);
                 break;
             }
 
@@ -1236,6 +1251,96 @@ internal static class Tessellator
     private static double Elapsed(long mark)
     {
         return (Stopwatch.GetTimestamp() - mark) * 1000d / Stopwatch.Frequency;
+    }
+
+    /// <summary>Walks an <c>SC</c>: clip to its box, translate its children by the offset.</summary>
+    /// <remarks>
+    /// It is a group with two extras. The clip is the container's own rounded box intersected
+    /// with whatever it inherited, which stays convex and so stays geometric -- no stencil,
+    /// and text inside gets the same box as a RectMask2D.
+    ///
+    /// The second extra is that <c>sy</c> and <c>vh</c> are rebound to *this* container for
+    /// the duration of the subtree, so the pattern that pins a header or a fade to a
+    /// ScriptedScreens scrollview works identically inside one of these. They are saved and
+    /// restored rather than pushed on a stack because containers do not nest usefully: the
+    /// inner one would need its own wheel target inside the outer one's, and the pointer
+    /// cannot be in both.
+    /// </remarks>
+    private static void EmitScroll(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
+    {
+        var parent = stack.Peek();
+
+        var height = node.H.Evaluate(context);
+        var content = node.ContentH.Evaluate(context);
+        var offset = 0f;
+
+        if (string.IsNullOrEmpty(node.Id))
+        {
+            scene.Problem("SC has no id, so it cannot be scrolled");
+        }
+        else if (context.ScrollOffsets.TryGetValue(node.Id!, out var stored))
+        {
+            offset = Mathf.Clamp(stored, 0f, Mathf.Max(0f, content - height));
+        }
+
+        // The box is written in the parent's coordinates, like any other shape's rect.
+        var box = RectOutline(node, context, parent.Scale * ScreenScale, new List<Vector2>(64));
+        if (box.Count < 3)
+            return;
+
+        var clipped = parent.Clip == null ? box : parent.Clip.ClipPolygon(box);
+        var region = ClipRegion.FromPolygon(clipped);
+
+        if (region == null)
+        {
+            scene.Problem($"SC \"{node.Id}\" is degenerate; its children are not drawn");
+            return;
+        }
+
+        if (ScrollsFound != null && !string.IsNullOrEmpty(node.Id))
+        {
+            var min = (Vector2)parent.Matrix.MultiplyPoint3x4(box[0]);
+            var max = min;
+            foreach (var point in box)
+            {
+                var p = (Vector2)parent.Matrix.MultiplyPoint3x4(point);
+                min = Vector2.Min(min, p);
+                max = Vector2.Max(max, p);
+            }
+
+            ScrollsFound.Add(new ScrollRegion
+            {
+                Id = node.Id!,
+                Rect = Rect.MinMaxRect(min.x, min.y, max.x, max.y),
+                View = height,
+                Content = content,
+                ToScene = parent.Scale > 0.0001f ? 1f / parent.Scale : 1f,
+            });
+        }
+
+        var local = Matrix4x4.Translate(new Vector3(0f, -offset, 0f));
+        var inverse = Matrix4x4.Translate(new Vector3(0f, offset, 0f));
+
+        stack.Push(new Frame
+        {
+            Matrix = parent.Matrix * local,
+            Opacity = parent.Opacity * Mathf.Clamp01(node.Opacity.Evaluate(context)),
+            Clip = region.Transform(inverse),
+            Scale = parent.Scale,
+            SceneToLocal = inverse * parent.SceneToLocal,
+        });
+
+        var savedScroll = context.ScrollY;
+        var savedViewport = context.ViewportH;
+        context.ScrollY = offset;
+        context.ViewportH = height;
+
+        foreach (var child in node.Children)
+            EmitNode(vh, scene, child, context, stack, ref emitted);
+
+        context.ScrollY = savedScroll;
+        context.ViewportH = savedViewport;
+        stack.Pop();
     }
 
     private static void Charge(VecOp op, long mark)

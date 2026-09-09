@@ -47,6 +47,7 @@ Then read the examples in order — each one introduces exactly one idea and run
 | [`06-paint.lua`](examples/06-paint.lua) | gradients, alpha, feathering, animated colour |
 | [`07-clip.lua`](examples/07-clip.lua) | clip paths and their one restriction |
 | [`08-console.lua`](examples/08-console.lua) | everything, assembled into a real console |
+| [`09-scroll.lua`](examples/09-scroll.lua) | `SC`, a list longer than the console, scrolled for free |
 
 [`Patterns.lua`](Patterns.lua) holds the same building blocks as copy-paste functions.
 
@@ -178,10 +179,35 @@ evaluates the real Gaussian and stacks contours across it.
 Two limits: the shadow is not knocked out under the shape, so a **translucent** shape sits
 over its own shadow and reads darker than a CSS mockup; and `inset` is not implemented.
 
+### Scrolling a list — `SC`
+
+A list longer than its box goes in an `SC`. Children are written in content coordinates and
+the container clips and slides them:
+
+```lua
+{ op = "SC", id = "log", x = 10, y = 30, w = 180, h = 130, ch = 24 * 22, rx = 6, c = rows }
+```
+
+**The scroll position never reaches the chip.** A wheel notch is one mesh rebuild: no tick, no
+network, no instructions. The alternative — a ScriptedScreens `scrollview` full of `label`
+elements — pays a round trip per scroll and ~300 instructions per row to change a line of
+text. Wheel is a fifth of the viewport per notch, drag moves content with the pointer, and
+both clamp so a container whose content fits cannot move at all.
+
+Inside one, `sy` and `vh` report **that container**, which is what pins a header, an edge fade
+or a scrollbar thumb. Vertical only, one level deep, and no scrollbar is drawn for you — see
+[`09-scroll.lua`](examples/09-scroll.lua), where the thumb is two expressions.
+
+One thing to plan around: a `T` node binds a data string **by name**, and there is no
+`$name[i]` for strings. Row backgrounds come from one `RP`; row *labels* have to be generated,
+one node each. That is a few hundred instructions paid once, since structure is only resent
+when the list changes.
+
 ### Pinning artwork inside a scroll view
 
-A vector element inside a scroll view scrolls with the content. `sy` (offset) and `vh`
-(viewport height), both in scene units, cancel that out so a header or fade stays put:
+The same two variables work for a ScriptedScreens scroll view holding the whole element. A
+vector element inside one scrolls with the content; `sy` (offset) and `vh` (viewport height),
+both in scene units, cancel that out so a header or fade stays put:
 
 ```lua
 { op = "R", x = 0, y = "=sy", w = W, h = 16, f = "@fadeTop", fo = "=step(1,sy)" },
