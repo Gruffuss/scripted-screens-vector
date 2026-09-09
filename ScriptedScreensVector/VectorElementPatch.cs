@@ -71,7 +71,7 @@ internal static class VectorElementPatch
             var key = RuntimeHelpers.GetHashCode(state).ToString(CultureInfo.InvariantCulture)
                       + "/" + surface + "/" + sceneId;
 
-            if (HasProp(element.Props, "data"))
+            if (HasProp(element.Props, "data") || HasProp(element.Props, "nodes"))
             {
                 ApplyData(key, element);
                 return;
@@ -123,6 +123,10 @@ internal static class VectorElementPatch
     {
         var context = new EvalContext();
         SceneParser.ReadData(element.Props, context);
+
+        // A geometry patch is applied to the live scene; it is not evaluator data.
+        if (Scenes.TryGetValue(key, out var patched) && patched != null)
+            patched.PatchScene(element.Props);
 
         if (Scenes.TryGetValue(key, out var graphic) && graphic != null)
             graphic.SetData(context);

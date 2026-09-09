@@ -150,6 +150,15 @@ internal sealed class VecNode
     internal bool UsesTime;
 
     internal bool UsesScroll;
+
+    /// <summary>The node's <c>id</c>, when it has one. Patch target and, later, hit target.</summary>
+    internal string? Id;
+
+    /// <summary>
+    /// The props this node was built from, kept only for identified nodes so a patch can be
+    /// merged onto them and the node re-parsed exactly.
+    /// </summary>
+    internal SS.UiProp[]? SourceProps;
 }
 
 /// <summary>A parsed scene: viewbox plus node tree.</summary>
@@ -163,6 +172,19 @@ internal sealed class VecScene
     internal bool UsesTime;
 
     internal bool UsesScroll;
+
+    /// <summary>
+    /// Nodes carrying an <c>id</c>, with where they sit and the props they were built from,
+    /// so a patch can re-parse one in place.
+    /// </summary>
+    /// <remarks>
+    /// The props are kept because a patch has to be a MERGE, not a partial apply: re-running
+    /// the shape parser over only the changed keys would reset every key the patch did not
+    /// mention back to its default. Merging onto the original and re-parsing is exact, and it
+    /// costs one prop array per identified node -- not per node.
+    /// </remarks>
+    internal readonly Dictionary<string, (List<VecNode> List, int Index, SS.UiProp[] Props)> Identified
+        = new(StringComparer.Ordinal);
 
     /// <summary>Gradients declared in <c>defs</c>, by id.</summary>
     internal readonly Dictionary<string, Gradient> Gradients = new(StringComparer.Ordinal);
@@ -248,10 +270,110 @@ internal static class SceneParser
             scene.UsesScroll |= node.UsesScroll;
         }
 
+        Reindex(scene);
+
         return scene;
     }
 
     /// <summary>Reads the paired data element's values into an evaluation context.</summary>
+    /// <summary>
+    /// Applies `nodes = { id = { field = value } }` from the data element to a scene.
+    /// </summary>
+    /// <remarks>
+    /// Returns true when anything changed, so the caller can skip a rebuild otherwise.
+    ///
+    /// This is a prop on the DATA element rather than a method on the element handle. The
+    /// handle belongs to ScriptedScreens; this mod is a postfix on ApplyElementInternal and
+    /// sees props, never method calls, so `handle:set_node(...)` is not a thing it can add.
+    ///
+    /// A patch is merged onto the node's original props and the node re-parsed, not applied
+    /// key by key: a partial apply would reset every key the patch did not mention.
+    /// </remarks>
+    internal static bool PatchNodes(SS.UiProp[] props, VecScene scene)
+    {
+        var patch = PropValue(props, "nodes");
+        if (patch?.Type != SS.UiValueType.Map || patch.Value.Map == null)
+            return false;
+
+        var changed = false;
+
+        foreach (var entry in patch.Value.Map)
+        {
+            if (string.IsNullOrEmpty(entry.Key)
+                || entry.Value.Type != SS.UiValueType.Map || entry.Value.Map == null)
+            {
+                continue;
+            }
+
+            if (!scene.Identified.TryGetValue(entry.Key, out var target))
+            {
+                scene.Problems.Add($"patch for unknown node id \"{entry.Key}\"");
+                continue;
+            }
+
+            var merged = Merge(target.Props, entry.Value.Map);
+
+            var replacement = ParseNode(merged, scene);
+            if (replacement == null)
+                continue;
+
+            // Children are not patchable and are kept as they were, so a patch on a group
+            // does not cost a re-parse of everything under it.
+            var previous = target.List[target.Index];
+            if (replacement.Children.Count == 0 && previous.Children.Count > 0)
+                replacement.Children.AddRange(previous.Children);
+
+            replacement.Id = entry.Key;
+            replacement.SourceProps = merged;
+
+            target.List[target.Index] = replacement;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            Reindex(scene);
+
+            // A patch can introduce or remove a `t` or `sy` reference, and the rebuild gate
+            // reads these off the scene.
+            scene.UsesTime = false;
+            scene.UsesScroll = false;
+
+            foreach (var node in scene.Root)
+            {
+                scene.UsesTime |= node.UsesTime;
+                scene.UsesScroll |= node.UsesScroll;
+            }
+        }
+
+        return changed;
+    }
+
+    /// <summary>Patch keys win; everything else is kept from the original.</summary>
+    private static SS.UiProp[] Merge(SS.UiProp[] original, SS.UiProp[] patch)
+    {
+        var merged = new List<SS.UiProp>(original.Length + patch.Length);
+
+        foreach (var prop in original)
+        {
+            var overridden = false;
+            foreach (var change in patch)
+            {
+                if (string.Equals(prop.Key, change.Key, StringComparison.OrdinalIgnoreCase))
+                {
+                    overridden = true;
+                    break;
+                }
+            }
+
+            if (!overridden)
+                merged.Add(prop);
+        }
+
+        merged.AddRange(patch);
+        return merged.ToArray();
+    }
+
     internal static void ReadData(SS.UiProp[] props, EvalContext into)
     {
         into.Scalars.Clear();
@@ -290,6 +412,34 @@ internal static class SceneParser
                     break;
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds the id index by walking the finished tree.
+    /// </summary>
+    /// <remarks>
+    /// Done after the tree is assembled, not during parsing: ParseNodes returns a temporary
+    /// list that callers copy out of, so anything recorded against that list would point at
+    /// a collection nobody keeps, and a patch would silently write nowhere.
+    /// </remarks>
+    private static void Reindex(VecScene scene)
+    {
+        scene.Identified.Clear();
+        Reindex(scene, scene.Root);
+    }
+
+    private static void Reindex(VecScene scene, List<VecNode> list)
+    {
+        for (var i = 0; i < list.Count; i++)
+        {
+            var node = list[i];
+
+            if (!string.IsNullOrEmpty(node.Id) && node.SourceProps != null)
+                scene.Identified[node.Id!] = (list, i, node.SourceProps);
+
+            if (node.Children.Count > 0)
+                Reindex(scene, node.Children);
         }
     }
 
@@ -427,6 +577,10 @@ internal static class SceneParser
             foreach (var child in ParseNodes(children.Value, scene))
                 node.Children.Add(child);
         }
+
+        node.Id = PropString(map, "id");
+        if (!string.IsNullOrEmpty(node.Id))
+            node.SourceProps = map;
 
         node.UsesTime = NodeUsesTime(node);
         node.UsesScroll = NodeUsesScroll(node);

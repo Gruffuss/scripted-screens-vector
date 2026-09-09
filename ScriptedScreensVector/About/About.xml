@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.4.0.0</Version>
+	<Version>0.4.1.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -52,6 +52,12 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.4.1[/b]
+[list]
+[*] Fixed: a fill written as [b]f = "$name"[/b] never worked. The colour was parsed out of the data payload correctly and then dropped before it reached the renderer, so every data-bound fill fell back to white. Colours now arrive like numbers and arrays do.
+[*] New [b]nodes[/b] prop on the data element: patch any node that carries an id, without resending the scene — nodes = { hv_bar = { w = 42, f = "#E23D3D" } }.
+[/list]
+
 [b]0.4.0[/b]
 [list]
 [*] A scene can now be written as one string in a [b]src[/b] prop instead of nested tables — one node per line, braces for children. A Lua string literal costs zero instructions to build, where nested tables cost about a dozen per node; on a busy console that is the difference between a page fitting in a tick and having to be split across frames. Same ops, keys and expressions as the table form, and it goes through the same parser so the two cannot drift.

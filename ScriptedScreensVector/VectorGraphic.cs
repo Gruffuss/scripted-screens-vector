@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
+using SS = ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem;
 
 namespace ScriptedScreensVector;
 
@@ -275,6 +276,16 @@ internal sealed class VectorGraphic : MaskableGraphic
     }
 
     /// <summary>Replaces the data bindings referenced as <c>$name</c>. Cheap; called per tick.</summary>
+    /// <summary>Applies a `nodes = { id = { ... } }` patch from the data element.</summary>
+    internal void PatchScene(SS.UiProp[] props)
+    {
+        if (_scene == null)
+            return;
+
+        if (SceneParser.PatchNodes(props, _scene))
+            _needsRebuild = true;
+    }
+
     internal void SetData(EvalContext source)
     {
         if (_job != null)
@@ -314,6 +325,14 @@ internal sealed class VectorGraphic : MaskableGraphic
         _context.Arrays.Clear();
         foreach (var pair in source.Arrays)
             _context.Arrays[pair.Key] = pair.Value;
+
+        // Colours were parsed into `source` by ReadData and then dropped on the floor: this
+        // copy did not exist, so `f = "$name"` never resolved and every data-bound fill fell
+        // back to node.Fill, which is white. Not blended like scalars are -- a colour is not
+        // a scalar, and easing one would need a per-channel lerp with no way to say "snap".
+        _context.Colours.Clear();
+        foreach (var pair in source.Colours)
+            _context.Colours[pair.Key] = pair.Value;
 
         SetVerticesDirty();
     }

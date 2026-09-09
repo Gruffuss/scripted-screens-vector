@@ -28,6 +28,22 @@ A scene is **two elements** sharing a `scene` name.
 |------|------|---------|
 | `scene` | string | matching scene id |
 | `data` | map | named numbers, arrays of numbers, and colour strings |
+| `nodes` | map | geometry patches by node `id` — see below |
+
+**Node patching.** Any node may carry an `id`, anywhere in the tree. The data element can then
+change that node's attributes without resending the scene:
+
+```lua
+data:set_props({ nodes = { hv_bar = { w = 42, f = "#E23D3D" } } })
+```
+
+The patch is **merged onto the node's original props and the node re-parsed**, so keys the
+patch does not mention keep their values — a partial apply would reset them to defaults.
+Children are not patchable and are kept, so patching a group costs nothing for its subtree.
+
+Use it for a change no expression can express — a different op, a new gradient reference, a
+count. For anything that is only a *value*, prefer `data` and an expression: that path needs
+no re-parse at all.
 
 Give it a 1×1 rect at negative coordinates so it draws nothing.
 
