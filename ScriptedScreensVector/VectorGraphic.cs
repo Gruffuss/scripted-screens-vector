@@ -201,6 +201,8 @@ internal sealed class VectorGraphic : MaskableGraphic
 
     private static Camera? _camera;
 
+    private TextLayer? _text;
+
     private ScrollRect? _scroll;
     private bool _scrollSearched;
     private float _lastScrollY = float.NaN;
@@ -333,6 +335,10 @@ internal sealed class VectorGraphic : MaskableGraphic
         _context.Colours.Clear();
         foreach (var pair in source.Colours)
             _context.Colours[pair.Key] = pair.Value;
+
+        _context.Strings.Clear();
+        foreach (var pair in source.Strings)
+            _context.Strings[pair.Key] = pair.Value;
 
         SetVerticesDirty();
     }
@@ -804,6 +810,13 @@ internal sealed class VectorGraphic : MaskableGraphic
 
         _stopwatch.Stop();
 
+        // Text is realised here, not in the job: TMP is main-thread and builds its own mesh.
+        if (_stats.Text.Count > 0 || _text != null)
+        {
+            _text ??= new TextLayer(rectTransform);
+            _text.Apply(_stats.Text);
+        }
+
         _lastShapeCount = _stats.Shapes;
 
         for (var i = 0; i < _opMs.Length; i++)
@@ -828,6 +841,9 @@ internal sealed class VectorGraphic : MaskableGraphic
     /// <inheritdoc />
     protected override void OnDestroy()
     {
+        _text?.Destroy();
+        _text = null;
+
         if (_mesh != null)
         {
             Destroy(_mesh);

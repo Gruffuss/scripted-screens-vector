@@ -16,6 +16,7 @@ internal enum VecOp
     SampledLine,
     Spline,
     Path,
+    Text,
 }
 
 internal enum FitMode
@@ -159,6 +160,18 @@ internal sealed class VecNode
     /// merged onto them and the node re-parsed exactly.
     /// </summary>
     internal SS.UiProp[]? SourceProps;
+
+    // --- T only -------------------------------------------------------------
+    internal string? TextLiteral;
+    internal string? TextData;
+    internal Expression? TextSize;
+    internal string? FontFamily;
+    internal bool Bold;
+    internal float CharSpacing;
+    internal int Align;
+    internal int VAlign;
+    internal int Fit;
+    internal Expression? MinSize;
 }
 
 /// <summary>A parsed scene: viewbox plus node tree.</summary>
@@ -379,6 +392,7 @@ internal static class SceneParser
         into.Scalars.Clear();
         into.Arrays.Clear();
         into.Colours.Clear();
+        into.Strings.Clear();
 
         var data = PropValue(props, "data");
         if (data == null || data.Value.Type != SS.UiValueType.Map || data.Value.Map == null)
@@ -396,6 +410,10 @@ internal static class SceneParser
                     break;
 
                 case SS.UiValueType.String when !string.IsNullOrEmpty(entry.Value.String):
+                    // Stored as a string whether or not it is also a colour: a scene may
+                    // want to display "#FF0000" as text.
+                    into.Strings[entry.Key] = entry.Value.String!;
+
                     if (ColorUtility.TryParseHtmlString(entry.Value.String, out var dataColour))
                         into.Colours[entry.Key] = dataColour;
 
@@ -544,6 +562,38 @@ internal static class SceneParser
                 node.X = Attr(map, "x", 0f);
                 node.Y = Attr(map, "y", 0f);
                 break;
+
+            case "T":
+            {
+                node.Op = VecOp.Text;
+                node.X = Attr(map, "x", 0f);
+                node.Y = Attr(map, "y", 0f);
+                node.W = Attr(map, "w", 0f);
+                node.H = Attr(map, "h", 0f);
+                node.TextSize = Attr(map, "size", 12f);
+                node.MinSize = Attr(map, "min_size", 6f);
+
+                // `text` is either a literal or a $name binding, resolved per rebuild.
+                var body = PropString(map, "text");
+                if (!string.IsNullOrEmpty(body) && body![0] == '$')
+                    node.TextData = body[1..];
+                else
+                    node.TextLiteral = body;
+
+                node.FontFamily = PropString(map, "font");
+                node.Align = TextAlign.Horizontal(PropString(map, "align"));
+                node.VAlign = TextAlign.Vertical(PropString(map, "valign"));
+                node.Fit = TextFit.Parse(PropString(map, "fit"));
+                node.CharSpacing = PropNumber(map, "cspace", 0f);
+
+                var weight = PropString(map, "weight");
+                node.Bold = weight != null
+                            && (weight.Equals("bold", StringComparison.OrdinalIgnoreCase)
+                                || (float.TryParse(weight, out var numeric) && numeric >= 600f));
+
+                // Text colour comes from `f`, like every other shape.
+                break;
+            }
 
             case "YS":
                 // Sampled band: n samples of x/y/y2, joined as a triangle strip. This is

@@ -72,6 +72,15 @@ internal sealed class EvalContext
     /// </remarks>
     internal Dictionary<string, Color> Colours { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Raw string values from the payload, for <c>text = "$name"</c>.
+    /// </summary>
+    /// <remarks>
+    /// Every string is stored here, including those that also parse as a colour: "#FF0000"
+    /// is a legitimate thing to want to display. The two dictionaries overlap on purpose.
+    /// </remarks>
+    internal Dictionary<string, string> Strings { get; } = new(StringComparer.Ordinal);
+
     internal void PushRepeat(float index, float count)
     {
         _indices.Add(index);

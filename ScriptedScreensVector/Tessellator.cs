@@ -59,6 +59,16 @@ internal static class Tessellator
     // Phase timers inside YS, the largest single op in a real console. Same approach as the
     // per-op timing that found the clip allocation: measure the parts rather than argue
     // about which one is slow.
+    /// <summary>
+    /// Text found during the walk, for the main thread to turn into TMP children.
+    /// </summary>
+    /// <remarks>
+    /// Collected rather than drawn because TMP is main-thread and builds its own mesh. The
+    /// list belongs to the job, so it is [ThreadStatic] like every other scratch here and
+    /// copied into the stats object at the end of Emit.
+    /// </remarks>
+    [ThreadStatic] internal static List<TextPlacement>? TextFound;
+
     [ThreadStatic] internal static double BandSampleMs;
     [ThreadStatic] internal static double BandStripMs;
     [ThreadStatic] internal static double BandFeatherMs;
@@ -162,6 +172,10 @@ internal static class Tessellator
         stats.BandQuads = BandQuads;
         stats.Shapes = shapes;
 
+        stats.Text.Clear();
+        if (TextFound != null)
+            stats.Text.AddRange(TextFound);
+
         return shapes;
     }
 
@@ -179,6 +193,8 @@ internal static class Tessellator
         BandStripMs = 0d;
         BandFeatherMs = 0d;
         BandQuads = 0;
+
+        (TextFound ??= new List<TextPlacement>(16)).Clear();
 
         NoFill = scene.DebugNoFill;
         NoFeather = scene.DebugNoFeather;
@@ -423,6 +439,13 @@ internal static class Tessellator
                 break;
             }
 
+            case VecOp.Text:
+            {
+                CollectText(scene, node, context, stack.Peek());
+                emitted++;
+                break;
+            }
+
             case VecOp.Path:
             {
                 var mark = Stopwatch.GetTimestamp();
@@ -432,6 +455,63 @@ internal static class Tessellator
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// Resolves a text node and records where it landed, in canvas space.
+    /// </summary>
+    /// <remarks>
+    /// The rect's corners go through the frame matrix, so the node moves, scales and scrolls
+    /// with its group exactly like geometry does. Rotation is recovered from the matrix
+    /// rather than tracked separately, since a group's angle is already baked into it.
+    ///
+    /// The clip is passed on as a bounding box only. The geometric clipper reshapes contours
+    /// before triangulation, which a TMP child is not made of; a rect is what RectMask2D can
+    /// enforce, and anything rounder waits for the stencil path.
+    /// </remarks>
+    private static void CollectText(VecScene scene, VecNode node, EvalContext context, Frame frame)
+    {
+        if (TextFound == null || NoFill)
+            return;
+
+        var body = node.TextLiteral;
+        if (node.TextData != null)
+            context.Strings.TryGetValue(node.TextData, out body);
+
+        if (string.IsNullOrEmpty(body))
+            return;
+
+        var x = node.X.Evaluate(context);
+        var y = node.Y.Evaluate(context);
+        var w = node.W.Evaluate(context);
+        var h = node.H.Evaluate(context);
+
+        var a = frame.Matrix.MultiplyPoint3x4(new Vector2(x, y));
+        var b = frame.Matrix.MultiplyPoint3x4(new Vector2(x + w, y + h));
+
+        var paint = ResolvePaint(scene, node, context, frame, stroke: false);
+
+        Rect? clip = null;
+        if (frame.Clip != null)
+            clip = frame.Clip.Bounds(frame.Matrix);
+
+        TextFound.Add(new TextPlacement
+        {
+            Text = body!,
+            Rect = Rect.MinMaxRect(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y),
+                                   Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y)),
+            Size = (node.TextSize?.Evaluate(context) ?? 12f) * frame.Scale,
+            Colour = paint.At(new Vector2(x, y)),
+            Align = node.Align,
+            VAlign = node.VAlign,
+            Font = node.FontFamily,
+            Bold = node.Bold,
+            CharSpacing = node.CharSpacing,
+            Fit = node.Fit,
+            MinSize = (node.MinSize?.Evaluate(context) ?? 6f) * frame.Scale,
+            Rotation = -Mathf.Atan2(frame.Matrix.m10, frame.Matrix.m00) * Mathf.Rad2Deg,
+            ClipRect = clip,
+        });
     }
 
     private static List<Vector2> RectOutline(VecNode node, EvalContext context, float scale)

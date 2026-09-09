@@ -88,6 +88,26 @@ internal sealed class ClipRegion
         _innerMax = new Vector2(centroid.x + halfX * k, centroid.y + halfY * k);
     }
 
+    /// <summary>The region's bounding box, transformed into canvas space.</summary>
+    /// <remarks>
+    /// For text, which cannot go through the geometric clipper: a rect is what RectMask2D
+    /// can enforce on a TMP child, and anything rounder waits for the stencil path.
+    /// </remarks>
+    internal Rect Bounds(Matrix4x4 matrix)
+    {
+        var min = (Vector2)matrix.MultiplyPoint3x4(_boundary[0]);
+        var max = min;
+
+        foreach (var point in _boundary)
+        {
+            var p = (Vector2)matrix.MultiplyPoint3x4(point);
+            min = Vector2.Min(min, p);
+            max = Vector2.Max(max, p);
+        }
+
+        return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+    }
+
     /// <summary>True when every point is proven interior, so clipping would change nothing.</summary>
     /// <remarks>
     /// Lets a caller keep a whole-shape fast path rather than decomposing into pieces that

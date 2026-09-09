@@ -231,6 +231,49 @@ the *same* curve. Nothing is dropped, unlike count LOD on a repeat.
 Same sampling rule as `YS` (`n`, `x`, `y`), stroked rather than filled. The line-chart and
 waveform primitive.
 
+### `T` — text
+
+| Key | Meaning |
+|-----|---------|
+| `x`, `y`, `w`, `h` | the box the text is laid out in |
+| `text` | a literal, or `"$name"` bound to a data string |
+| `size` | font size in scene units; scales with the transform |
+| `f` | colour, as on any shape |
+| `align` | `left` (default), `center`, `right` |
+| `valign` | `top` (default), `middle`, `bottom` |
+| `font` | a registered TMP family, e.g. from the companion fonts mod |
+| `weight` | `bold`, or a number ≥ 600 |
+| `cspace` | character spacing |
+| `fit` | `none` (default), `ellipsis`, `shrink` |
+| `min_size` | floor for `shrink` |
+
+```lua
+{ op = "T", x = 8, y = 8, w = 120, h = 20, text = "$pressure",
+  size = 14, f = "#EAF4F8", align = "right", fit = "ellipsis" }
+```
+
+**Text is not part of the mesh, and that shapes what it can do.** TMP builds its own geometry
+on its own GameObject and is main-thread only, while tessellation runs on a worker — so the
+walk records where each `T` landed and the labels are created and updated when the job lands.
+
+| | |
+|---|---|
+| transform, scale, scroll with the group | **yes** — the rect goes through the frame matrix, rotation included |
+| updates from `data` | **yes** — strings are data values now, so `text = "$name"` works like a number |
+| rich text, registered fonts | **yes** — it is real TMP |
+| clipping | **axis-aligned rect only**, via `RectMask2D`. A rounded or rotated clip does not cut text until stencil clipping lands |
+| update rate | at the **rebuild** rate, not instantly |
+
+`ellipsis` and `shrink` are TMP's own overflow modes, so fitting is done by the engine that
+knows the glyph metrics rather than estimated.
+
+Objects are pooled by index and reused across rebuilds; surplus labels are disabled rather
+than destroyed, so a scene alternating between two pages does not churn objects.
+
+**Why use it over a `label` element:** a ScriptedScreens label costs roughly 300 Lua
+instructions to declare and must be re-declared to change its text, and it cannot move or
+clip with the scene. A `T` node costs a string in the data payload.
+
 ### `SP` — spline
 
 | Key | Meaning |

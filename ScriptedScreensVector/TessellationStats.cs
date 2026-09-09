@@ -24,4 +24,7 @@ internal sealed class TessellationStats
     internal int BandQuads;
 
     internal int Shapes;
+
+    /// <summary>Text nodes found by the walk, for the main thread to realise as TMP.</summary>
+    internal readonly System.Collections.Generic.List<TextPlacement> Text = new();
 }
