@@ -161,6 +161,23 @@ Neither obvious alternative works, which is why it exists:
 Before `fo2`, the only way to get this was a stack of ~20 abutting bands of rising opacity.
 That worked, and it was two thirds of one real console's tessellation cost.
 
+### Shadows
+
+`sh` takes CSS `box-shadow` values, and several compose in order:
+
+```lua
+sh = { { 0, 3, 8, 0, "#0000001f" }, { 0, 3, 1, 0, "#0000000a" } }
+```
+
+`{ dx, dy, blur, spread, colour }`, sigma is half the blur, drawn beneath the shape.
+
+**This is what `fea` cannot do.** Feather ramps *outward* from a solid edge; a blur softens
+both sides of it, which is why a feathered knob reads as a ring rather than a shadow. `sh`
+evaluates the real Gaussian and stacks contours across it.
+
+Two limits: the shadow is not knocked out under the shape, so a **translucent** shape sits
+over its own shadow and reads darker than a CSS mockup; and `inset` is not implemented.
+
 ### Pinning artwork inside a scroll view
 
 A vector element inside a scroll view scrolls with the content. `sy` (offset) and `vh`

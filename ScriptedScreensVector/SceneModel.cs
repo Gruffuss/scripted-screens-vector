@@ -62,6 +62,9 @@ internal sealed class VecNode
     /// </summary>
     internal bool AllowLod;
 
+    /// <summary>CSS-style drop shadows, drawn beneath the shape in declaration order.</summary>
+    internal VecShadow[]? Shadows;
+
     /// <summary>
     /// Fill opacity at a band's <c>y2</c> edge, ramping from <c>fo</c> at the <c>y</c> edge.
     /// Null when absent, which keeps a plain band exactly as it was.
@@ -466,6 +469,8 @@ internal static class SceneParser
     {
         // Map form: f = { grad = "name", at = "=expr" } samples the ramp at an expression
         // rather than by position, which is how a colour is animated or driven by data.
+        node.Shadows = ParseShadows(map);
+
         var paint = PropValue(map, "f");
         if (paint?.Type == SS.UiValueType.Map && paint.Value.Map != null)
         {
@@ -754,6 +759,55 @@ internal static class SceneParser
     }
 
     /// <summary>Reads one component of a two-element array attribute such as <c>t</c> or <c>s</c>.</summary>
+    /// <summary>
+    /// `sh = { { dx, dy, blur, spread, "#rrggbbaa" }, ... }` -- CSS box-shadow order, and a
+    /// list so several compose. A single shadow may be given unwrapped.
+    /// </summary>
+    private static VecShadow[]? ParseShadows(SS.UiProp[] map)
+    {
+        var value = PropValue(map, "sh");
+        if (value?.Type != SS.UiValueType.Array || value.Value.Array == null)
+            return null;
+
+        var entries = value.Value.Array;
+        if (entries.Length == 0)
+            return null;
+
+        // One shadow written without the outer braces: { 0, 3, 8, 0, "#0000001f" }.
+        if (entries[0].Type != SS.UiValueType.Array)
+        {
+            var single = ParseShadow(entries);
+            return single.HasValue ? new[] { single.Value } : null;
+        }
+
+        var list = new List<VecShadow>(entries.Length);
+        foreach (var entry in entries)
+        {
+            if (entry.Type != SS.UiValueType.Array || entry.Array == null)
+                continue;
+
+            var parsed = ParseShadow(entry.Array);
+            if (parsed.HasValue)
+                list.Add(parsed.Value);
+        }
+
+        return list.Count > 0 ? list.ToArray() : null;
+    }
+
+    private static VecShadow? ParseShadow(SS.UiValue[] parts)
+    {
+        if (parts.Length < 5)
+            return null;
+
+        static float Num(SS.UiValue v) => v.Type == SS.UiValueType.Number ? v.Number : 0f;
+
+        var text = parts[4].Type == SS.UiValueType.String ? parts[4].String : null;
+        if (string.IsNullOrEmpty(text) || !ColorUtility.TryParseHtmlString(text, out var colour))
+            return null;
+
+        return new VecShadow(Num(parts[0]), Num(parts[1]), Num(parts[2]), Num(parts[3]), colour);
+    }
+
     private static Expression Pair(SS.UiProp[] map, string key, int index, float fallback)
     {
         var value = PropValue(map, key);

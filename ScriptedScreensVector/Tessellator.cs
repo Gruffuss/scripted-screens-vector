@@ -519,6 +519,13 @@ internal static class Tessellator
 
     private static void FillAndStroke(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame, List<Vector2> outline, bool closed)
     {
+        // Shadows first: they sit beneath the shape, and in declaration order like CSS.
+        if (node.Shadows != null && closed)
+        {
+            foreach (var shadow in node.Shadows)
+                Shadow.Emit(vh, outline, shadow, frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+        }
+
         if (node.HasFill)
             FillContour(vh, node, context, frame, outline, null, ResolvePaint(scene, node, context, frame, stroke: false));
 

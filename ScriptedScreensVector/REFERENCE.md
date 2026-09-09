@@ -242,6 +242,39 @@ Joins are a **clamped miter** rather than inserted bevel or round geometry — i
 stroke widths, visible on very wide strokes at sharp corners. `join` is closer to a hint than
 a guarantee.
 
+### Shadows
+
+| Key | Meaning |
+|-----|---------|
+| `sh` | list of drop shadows, `{ { dx, dy, blur, spread, "#rrggbbaa" }, ... }` |
+
+CSS `box-shadow` semantics and order: the shape offset by `dx`/`dy`, grown by `spread`,
+filled with the colour, blurred with a Gaussian whose sigma is **half** the blur radius,
+drawn beneath the shape. Several compose in declaration order. A single shadow may be
+written unwrapped.
+
+```lua
+{ op = "R", x = 8, y = 8, w = 60, h = 28, rx = 14, f = "#FFFFFF",
+  sh = { { 0, 3, 8, 0, "#0000001f" }, { 0, 3, 1, 0, "#0000000a" } } }
+```
+
+Available on `R`, `C`, and any closed shape. Drawn as geometry — no offscreen pass, no
+shader — by stacking contours from `-3σ` to `+3σ` carrying the closed-form coverage of a
+blurred edge, `0.5·erfc(d / (σ√2))`. Ring count follows the blur's on-screen size.
+
+**Three differences from CSS**, worth knowing rather than discovering:
+
+- The coverage is measured along each vertex's normal rather than by solving the 2-D
+  convolution. Exact on a straight edge, very slightly tight at a sharp corner; under a
+  pixel at UI corner radii.
+- **The shadow is not knocked out under the shape.** CSS clips it to outside the border box
+  so a translucent shape does not darken over its own shadow. That needs a polygon boolean
+  here. Opaque shapes are unaffected; a translucent one will read darker than the mockup.
+- `inset` is not implemented.
+
+Blending is straight source-over on sRGB bytes — the space the colours are written in — so a
+shadow composites at the value the design specifies.
+
 ### Feathering
 
 | Key | Meaning |
