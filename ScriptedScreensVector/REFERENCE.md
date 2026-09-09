@@ -85,6 +85,45 @@ The text is converted to the same props the table form arrives as and parsed by 
 code, so the two cannot drift apart, and parsed scenes are cached by source text so a
 structure element resent unchanged reparses nothing.
 
+### Diagnostics
+
+A scene reports its own faults rather than drawing nothing and leaving you to guess:
+
+| fault | what happens |
+|-------|--------------|
+| unknown op | reported; the node is skipped |
+| unknown attribute name | reported, with the op and the node id |
+| malformed expression | reported; that attribute falls back to its default |
+| `$name` with no data value | reported; a bound **colour** draws **magenta** |
+| missing gradient or clip id | reported; the reference is ignored |
+
+Anything reported also puts a magenta hatched border around the surface, so a broken scene
+looks broken instead of looking switched off. Detail goes to `BepInEx/LogOutput.log`.
+
+Magenta rather than white for an unresolved colour is deliberate: white is a colour somebody
+meant to use, and magenta is not, so an unresolved binding reads as a fault rather than a
+design decision.
+
+**The unknown-attribute check is a union of every key the renderer reads**, so it catches a
+typo — `fille`, `strke` — which otherwise vanishes silently because unknown keys are ignored
+by design. It does not catch a real key on the wrong op. `USE` and `SYM` are exempt, since
+symbol parameters are arbitrary by definition.
+
+### `vector_stats` — the MCP tool
+
+If [StationeersLua](https://steamcommunity.com/workshop/) is installed, the mod registers a
+`vector_stats` tool with its MCP server. It reports every live surface: node and shape counts,
+vertices, rebuild rate, tessellation and upload cost, on-screen size, whether the scene is
+animated or scroll-driven, and **the problems and unresolved data names above**.
+
+```
+vector_stats            -- all surfaces
+vector_stats scene=gas  -- one
+```
+
+Bound by reflection, so the mod loads normally without StationeersLua and simply does not
+register the tool.
+
 ### Debug switches
 
 Set on the **structure** element's props, alongside `root`. Each disables one stage, so

@@ -293,6 +293,9 @@ internal static class SceneParser
             DebugNoEval = PropNumber(props, "noeval", 0f) > 0.5f,
         };
 
+        // Malformed expressions are the parser's business, not the log's alone.
+        Expression.Report = message => scene.Problem(message);
+
         ParseDefs(PropValue(props, "defs"), scene);
 
         foreach (var child in ParseNodes(root.Value, scene))
@@ -305,6 +308,7 @@ internal static class SceneParser
         }
 
         Reindex(scene);
+        Expression.Report = null;
 
         return scene;
     }
@@ -591,6 +595,44 @@ internal static class SceneParser
         return inherited == null ? style.Value.Map : Merge(inherited, style.Value.Map);
     }
 
+    /// <summary>
+    /// Every attribute name the renderer reads, across all ops.
+    /// </summary>
+    /// <remarks>
+    /// One union rather than a set per op. It catches the error that actually happens -- a
+    /// typo, `fille` or `strke` -- which otherwise vanishes silently because unknown keys are
+    /// ignored by design. It does NOT catch a real key on the wrong op, `rx` on a band say;
+    /// that needs per-op sets and risks rejecting combinations that are merely unusual.
+    /// </remarks>
+    private static readonly HashSet<string> KnownKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "op", "id", "c", "style", "click", "lod",
+        "x", "y", "w", "h", "cx", "cy", "rx", "ry", "x1", "y1", "x2", "y2", "y2",
+        "n", "p", "d", "seg", "t", "r", "s", "a", "o", "clip", "ref", "params",
+        "f", "fo", "fo2", "fr", "fea", "fea_edge", "sh",
+        "sw", "so", "cap", "join", "ml", "dash", "dofs", "sd", "sdo",
+        "grad", "at", "units", "stops", "fx", "fy",
+        "text", "size", "align", "valign", "font", "weight", "cspace", "fit", "min_size",
+    };
+
+    private static void Validate(SS.UiProp[] map, VecScene scene, string? op, string? id)
+    {
+        foreach (var prop in map)
+        {
+            if (string.IsNullOrEmpty(prop.Key) || KnownKeys.Contains(prop.Key))
+                continue;
+
+            // Symbol parameters are arbitrary by definition, so a USE is exempt.
+            if (string.Equals(op, "USE", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(op, "SYM", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            scene.Problem($"{op ?? "node"}{(string.IsNullOrEmpty(id) ? "" : " \"" + id + "\"")}: unknown attribute \"{prop.Key}\"");
+        }
+    }
+
     private static VecNode? ParseNode(SS.UiProp[] map, VecScene scene, SS.UiProp[]? inherited = null)
     {
         var op = PropString(map, "op");
@@ -763,6 +805,8 @@ internal static class SceneParser
                 scene.Problem($"op \"{op}\" is not supported");
                 return null;
         }
+
+        Validate(map, scene, op, PropString(map, "id"));
 
         ParseFill(map, node);
         ParseStroke(map, node);

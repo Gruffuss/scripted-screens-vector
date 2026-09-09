@@ -96,6 +96,9 @@ internal static class Tessellator
 
     private const int MaxGradientDepth = 5;
 
+    /// <summary>What an unresolved binding draws in. Deliberately not a design colour.</summary>
+    private static readonly Color Magenta = new(1f, 0f, 1f, 1f);
+
     // Scratch buffers, shared per THREAD rather than per process. Reusing them is the
     // difference between allocating four Lists per shape per frame -- roughly 270,000
     // allocations a second for a mote field -- and allocating none.
@@ -182,6 +185,12 @@ internal static class Tessellator
         stats.Hits.Clear();
         if (HitsFound != null)
             stats.Hits.AddRange(HitsFound);
+
+        stats.Missing.Clear();
+        foreach (var name in context.Missing)
+            stats.Missing.Add(name);
+
+        context.Missing.Clear();
 
         return shapes;
     }
@@ -1513,8 +1522,17 @@ internal static class Tessellator
         // A data-bound colour is re-read every tick, so an alarm can go red without the
         // structure being resent.
         var bound = stroke ? node.StrokeData : node.FillData;
-        if (!string.IsNullOrEmpty(bound) && context.Colours.TryGetValue(bound!, out var supplied))
-            return new Paint(supplied, null, opacity);
+        if (!string.IsNullOrEmpty(bound))
+        {
+            if (context.Colours.TryGetValue(bound!, out var supplied))
+                return new Paint(supplied, null, opacity);
+
+            // A colour the payload never supplied. Magenta rather than the default white,
+            // because white is a colour somebody meant to use and magenta is not -- an
+            // unresolved binding should look like a fault, not like a design decision.
+            context.Missing.Add(bound!);
+            return new Paint(Magenta, null, opacity);
+        }
 
         return new Paint(stroke ? node.StrokeColour : node.Fill, null, opacity);
     }

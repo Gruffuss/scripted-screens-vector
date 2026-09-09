@@ -90,6 +90,12 @@ internal static class VectorElementPatch
         }
     }
 
+    /// <summary>Live surfaces, for the stats tool.</summary>
+    internal static IEnumerable<VectorGraphic> LiveSurfaces()
+    {
+        return Scenes.Values;
+    }
+
     private static void ApplyStructure(string key, GameObject host, SS.UiElement element,
         Motherboard? board, CartridgeIntegratedCircuitLua? cartridge,
         ProgrammableVisorGlasses? visor, string surface)

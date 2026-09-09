@@ -30,4 +30,7 @@ internal sealed class TessellationStats
 
     /// <summary>Clickable node bounds, in draw order, for hit testing on the main thread.</summary>
     internal readonly System.Collections.Generic.List<HitRegion> Hits = new();
+
+    /// <summary>Data names the scene asked for and did not get, this rebuild.</summary>
+    internal readonly System.Collections.Generic.List<string> Missing = new();
 }

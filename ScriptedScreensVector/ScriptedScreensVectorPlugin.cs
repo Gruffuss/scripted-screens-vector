@@ -50,6 +50,7 @@ public sealed class ScriptedScreensVectorPlugin : ModBehaviour
             // base.OnLoaded created Config; LaunchPad surfaces that instance in its
             // settings UI, so binding here is what makes the tunables appear in game.
             VectorConfig.Load(Config);
+            VectorStatsTool.TryRegister();
             Log.LogInfo(Config != null
                 ? "Level-of-detail settings registered with LaunchPad."
                 : "No ConfigFile from LaunchPad; level-of-detail settings use defaults.");

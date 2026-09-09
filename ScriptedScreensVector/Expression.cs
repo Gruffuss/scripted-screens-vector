@@ -81,6 +81,17 @@ internal sealed class EvalContext
     /// </remarks>
     internal Dictionary<string, string> Strings { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Data names a scene asked for and did not get, gathered during a rebuild.
+    /// </summary>
+    /// <remarks>
+    /// A missing value is not an error the parser can see -- the name is well formed and the
+    /// payload simply lacks it, which happens on the first tick of every console and is only
+    /// a fault if it persists. Collected rather than logged so it is reported once per
+    /// rebuild instead of once per node per frame.
+    /// </remarks>
+    internal HashSet<string> Missing { get; } = new(StringComparer.Ordinal);
+
     internal void PushRepeat(float index, float count)
     {
         _indices.Add(index);
@@ -108,7 +119,10 @@ internal sealed class EvalContext
     internal float Scalar(string name)
     {
         if (!Scalars.TryGetValue(name, out var value))
+        {
+            Missing.Add(name);
             return 0f;
+        }
 
         if (Blend >= 1f || !Previous.TryGetValue(name, out var previous))
             return value;
@@ -218,6 +232,13 @@ internal sealed class Expression
     /// expressions. Anything unparseable falls back to <paramref name="fallback"/> so a
     /// typo degrades one attribute instead of killing the scene.
     /// </summary>
+    /// <summary>
+    /// Where a malformed expression is reported, set by the parser for the scene it is
+    /// building. Static because Parse is, and thread-static because scenes may parse
+    /// concurrently.
+    /// </summary>
+    [ThreadStatic] internal static System.Action<string>? Report;
+
     internal static Expression Parse(string source, float fallback)
     {
         try
@@ -229,6 +250,7 @@ internal sealed class Expression
         }
         catch (FormatException ex)
         {
+            Report?.Invoke($"expression \"{source}\": {ex.Message}");
             ScriptedScreensVectorPlugin.Log?.LogWarning($"expression \"{source}\": {ex.Message}");
             return Constant(fallback);
         }

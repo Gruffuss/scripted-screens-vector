@@ -204,6 +204,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler
 
     private TextLayer? _text;
 
+    /// <summary>The scene this surface is showing, for the stats tool.</summary>
+    internal string SceneId => _sceneId;
+
     private readonly List<HitRegion> _hits = new();
     private SS.UiPointerDownForwarder? _forwarder;
     private string _elementId = string.Empty;
@@ -336,6 +339,47 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler
         _forwarder.Id = _elementId;
         _forwarder.EventName = "click";
         _forwarder.OnPointerClick(eventData);
+    }
+
+    /// <summary>Writes one surface's state into the vector_stats report.</summary>
+    internal void Describe(System.Text.StringBuilder into)
+    {
+        into.AppendLine($"scene \"{_sceneId}\"");
+
+        if (_scene == null)
+        {
+            into.AppendLine("  no scene parsed");
+            return;
+        }
+
+        into.AppendLine($"  nodes {_scene.Root.Count} root, {_lastShapeCount} shapes emitted, {_peakVertices} verts");
+
+        var tess = _rebuilds > 0 ? _tessellateMs / _rebuilds : 0d;
+        var up = _rebuilds > 0 ? _uploadMs / _rebuilds : 0d;
+
+        into.AppendLine($"  rebuilds {VectorStatsTool.N(_rebuilds / 5d)}/s, "
+                        + $"{VectorStatsTool.N(tess)} ms tessellate off-thread, "
+                        + $"{VectorStatsTool.N(up)} ms upload on-thread");
+
+        var size = _screenPixels < 0f ? "size unknown" : VectorStatsTool.N(_screenPixels, 0) + " px";
+        into.AppendLine($"  on screen {size}, animated {_scene.UsesTime}, scroll-driven {_scene.UsesScroll}");
+
+        if (_scene.Problems.Count > 0)
+        {
+            into.AppendLine("  PROBLEMS");
+            foreach (var problem in _scene.Problems)
+                into.AppendLine($"    {problem}");
+        }
+
+        if (_stats.Missing.Count > 0)
+        {
+            into.AppendLine("  UNRESOLVED DATA NAMES (drawn magenta)");
+            foreach (var name in _stats.Missing)
+                into.AppendLine($"    ${name}");
+        }
+
+        if (_scene.Problems.Count == 0 && _stats.Missing.Count == 0)
+            into.AppendLine("  no problems");
     }
 
     /// <summary>Applies a `nodes = { id = { ... } }` patch from the data element.</summary>
