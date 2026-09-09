@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.5.0.0</Version>
+	<Version>0.6.0.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -52,6 +52,12 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.6.0[/b]
+[list]
+[*] [b]Symbols.[/b] Declare a subtree once with SYM and stamp it with USE, passing parameters — a row, an LED, a duct segment written once and placed twenty times. Substitution happens at parse time, so an instance costs exactly what writing the nodes out would have.
+[*] [b]Inherited defaults.[/b] A style map on a group or the scene root supplies defaults for everything under it that does not set the key itself.
+[*] [b]Per-corner radii[/b] on rectangles: rx = { tl, tr, br, bl }, CSS order, and a zero corner is a sharp point.
+[/list]
 [b]0.5.0[/b]
 [list]
 [*] New [b]T[/b] node: text inside the scene, drawn with TextMeshPro so registered fonts and rich text work. It moves, scales and scrolls with its group like any other node, updates from the data payload with text = "$name", and supports ellipsis and shrink-to-fit. Text was previously label elements laid over the scene, which cost about 300 Lua instructions each, had to be re-declared to change a word, and could not move with the artwork.

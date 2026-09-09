@@ -172,6 +172,11 @@ internal sealed class VecNode
     internal int VAlign;
     internal int Fit;
     internal Expression? MinSize;
+
+    /// <summary>
+    /// Per-corner radii from `rx = [tl, tr, br, bl]`, CSS order. Null for a uniform `rx`.
+    /// </summary>
+    internal Expression[]? CornerRadii;
 }
 
 /// <summary>A parsed scene: viewbox plus node tree.</summary>
@@ -197,6 +202,12 @@ internal sealed class VecScene
     /// costs one prop array per identified node -- not per node.
     /// </remarks>
     internal readonly Dictionary<string, (List<VecNode> List, int Index, SS.UiProp[] Props)> Identified
+        = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Symbol bodies declared in <c>defs</c>, by id: the children a <c>USE</c> instantiates.
+    /// </summary>
+    internal readonly Dictionary<string, (SS.UiValue[] Body, SS.UiProp[] Params)> Symbols
         = new(StringComparer.Ordinal);
 
     /// <summary>Gradients declared in <c>defs</c>, by id.</summary>
@@ -461,7 +472,7 @@ internal static class SceneParser
         }
     }
 
-    private static List<VecNode> ParseNodes(SS.UiValue array, VecScene scene)
+    private static List<VecNode> ParseNodes(SS.UiValue array, VecScene scene, SS.UiProp[]? inherited = null)
     {
         var nodes = new List<VecNode>();
         if (array.Array == null)
@@ -472,7 +483,11 @@ internal static class SceneParser
             if (item.Type != SS.UiValueType.Map || item.Map == null)
                 continue;
 
-            var node = ParseNode(item.Map, scene);
+            // Inherited defaults lose to anything the node states itself, which is what
+            // makes `style` a default rather than an override.
+            var map = inherited == null ? item.Map : Merge(inherited, item.Map);
+
+            var node = ParseNode(map, scene, inherited);
             if (node != null)
                 nodes.Add(node);
         }
@@ -480,7 +495,93 @@ internal static class SceneParser
         return nodes;
     }
 
-    private static VecNode? ParseNode(SS.UiProp[] map, VecScene scene)
+    /// <summary>
+    /// Replaces `%name` references in a symbol body with the instance's parameters.
+    /// </summary>
+    /// <remarks>
+    /// Textual, at parse time, rather than a scoped variable in the evaluator. A scope would
+    /// mean push/pop around every instance the way repeats do, for something that never
+    /// changes after parsing -- symbol parameters are structure, not animation. Substituting
+    /// once means an instance costs exactly what writing the nodes out would have.
+    ///
+    /// `%name` alone as a value takes the parameter's type, so a number stays a number.
+    /// Inside a longer string it is spliced textually, which is what makes it work in
+    /// expressions: `y="=%top+i*4"`.
+    /// </remarks>
+    private static SS.UiValue[] Substitute(SS.UiValue[] body, SS.UiProp[] args)
+    {
+        var output = new SS.UiValue[body.Length];
+        for (var i = 0; i < body.Length; i++)
+            output[i] = Substitute(body[i], args);
+
+        return output;
+    }
+
+    private static SS.UiValue Substitute(SS.UiValue value, SS.UiProp[] args)
+    {
+        switch (value.Type)
+        {
+            case SS.UiValueType.String when !string.IsNullOrEmpty(value.String):
+            {
+                var text = value.String!;
+
+                // A whole-value reference keeps the parameter's own type.
+                if (text.Length > 1 && text[0] == '%')
+                {
+                    foreach (var arg in args)
+                    {
+                        if (string.Equals(arg.Key, text[1..], StringComparison.OrdinalIgnoreCase))
+                            return arg.Value;
+                    }
+                }
+
+                if (text.IndexOf('%', StringComparison.Ordinal) < 0)
+                    return value;
+
+                foreach (var arg in args)
+                    text = text.Replace("%" + arg.Key, Textual(arg.Value), StringComparison.OrdinalIgnoreCase);
+
+                return new SS.UiValue { Type = SS.UiValueType.String, String = text };
+            }
+
+            case SS.UiValueType.Array when value.Array != null:
+                return new SS.UiValue { Type = SS.UiValueType.Array, Array = Substitute(value.Array, args) };
+
+            case SS.UiValueType.Map when value.Map != null:
+            {
+                var map = new SS.UiProp[value.Map.Length];
+                for (var i = 0; i < map.Length; i++)
+                    map[i] = new SS.UiProp { Key = value.Map[i].Key, Value = Substitute(value.Map[i].Value, args) };
+
+                return new SS.UiValue { Type = SS.UiValueType.Map, Map = map };
+            }
+
+            default:
+                return value;
+        }
+    }
+
+    private static string Textual(SS.UiValue value)
+    {
+        return value.Type switch
+        {
+            SS.UiValueType.Number => value.Number.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture),
+            SS.UiValueType.String => value.String ?? string.Empty,
+            _ => string.Empty,
+        };
+    }
+
+    /// <summary>A group's `style` map, merged onto whatever it inherited.</summary>
+    private static SS.UiProp[]? ParseStyle(SS.UiProp[] map, SS.UiProp[]? inherited)
+    {
+        var style = PropValue(map, "style");
+        if (style?.Type != SS.UiValueType.Map || style.Value.Map == null)
+            return inherited;
+
+        return inherited == null ? style.Value.Map : Merge(inherited, style.Value.Map);
+    }
+
+    private static VecNode? ParseNode(SS.UiProp[] map, VecScene scene, SS.UiProp[]? inherited = null)
     {
         var op = PropString(map, "op");
         if (string.IsNullOrEmpty(op))
@@ -490,6 +591,40 @@ internal static class SceneParser
 
         switch (op!.ToUpperInvariant())
         {
+            // USE instantiates a symbol as a group: the group carries the placement, the
+            // symbol's body becomes its children with params substituted.
+            case "USE":
+            {
+                node.Op = VecOp.Group;
+                node.Tx = Attr(map, "x", 0f);
+                node.Ty = Attr(map, "y", 0f);
+                node.Opacity = Attr(map, "o", 1f);
+                node.ClipRef = PropString(map, "clip");
+
+                var reference = PropString(map, "ref");
+                if (string.IsNullOrEmpty(reference) || !scene.Symbols.TryGetValue(reference!, out var symbol))
+                {
+                    scene.Problems.Add($"unknown symbol \"{reference}\"");
+                    break;
+                }
+
+                // Params: the symbol's declared defaults, overridden by whatever the
+                // instance passes. Everything on the USE is fair game as an override, so a
+                // symbol can take `w` and `f` without declaring them specially.
+                var args = Merge(symbol.Params, map);
+
+                var instantiated = new SS.UiValue
+                {
+                    Type = SS.UiValueType.Array,
+                    Array = Substitute(symbol.Body, args),
+                };
+
+                foreach (var child in ParseNodes(instantiated, scene, inherited))
+                    node.Children.Add(child);
+
+                break;
+            }
+
             case "G":
                 node.Op = VecOp.Group;
                 node.Tx = Pair(map, "t", 0, 0f);
@@ -524,7 +659,8 @@ internal static class SceneParser
                 node.Y = Attr(map, "y", 0f);
                 node.W = Attr(map, "w", 0f);
                 node.H = Attr(map, "h", 0f);
-                node.Rx = Attr(map, "rx", 0f);
+                node.CornerRadii = ParseCorners(map);
+                node.Rx = node.CornerRadii != null ? node.CornerRadii[0] : Attr(map, "rx", 0f);
                 node.Ry = HasKey(map, "ry") ? Attr(map, "ry", 0f) : node.Rx;
                 break;
 
@@ -624,7 +760,11 @@ internal static class SceneParser
         var children = PropValue(map, "c");
         if (children != null && children.Value.Type == SS.UiValueType.Array)
         {
-            foreach (var child in ParseNodes(children.Value, scene))
+            // A group's `style` becomes the default for everything under it, combined with
+            // whatever it inherited itself, so defaults nest.
+            var style = ParseStyle(map, inherited);
+
+            foreach (var child in ParseNodes(children.Value, scene, style))
                 node.Children.Add(child);
         }
 
@@ -751,6 +891,25 @@ internal static class SceneParser
             var map = entry.Map;
             var op = PropString(map, "op")?.ToUpperInvariant();
             var id = PropString(map, "id");
+
+            if (op == "SYM" && !string.IsNullOrEmpty(id))
+            {
+                var body = PropValue(map, "c");
+                if (body?.Type == SS.UiValueType.Array && body.Value.Array != null)
+                {
+                    // Defaults come from a `params` map, or -- since the text format has no
+                    // map syntax -- from the SYM's own attributes, so
+                    // `SYM id=knob w=40 f=#fff { ... }` declares defaults the natural way.
+                    var defaults = PropValue(map, "params");
+                    scene.Symbols[id!] = (
+                        body.Value.Array,
+                        defaults?.Type == SS.UiValueType.Map && defaults.Value.Map != null
+                            ? defaults.Value.Map
+                            : map);
+                }
+
+                continue;
+            }
 
             if (string.IsNullOrEmpty(id))
                 continue;
@@ -1010,6 +1169,20 @@ internal static class SceneParser
             return null;
 
         return new VecShadow(Num(parts[0]), Num(parts[1]), Num(parts[2]), Num(parts[3]), colour);
+    }
+
+    /// <summary>`rx = [tl, tr, br, bl]` in CSS order, or null when `rx` is a single value.</summary>
+    private static Expression[]? ParseCorners(SS.UiProp[] map)
+    {
+        var value = PropValue(map, "rx");
+        if (value?.Type != SS.UiValueType.Array || value.Value.Array == null)
+            return null;
+
+        var corners = new Expression[4];
+        for (var i = 0; i < 4; i++)
+            corners[i] = Pair(map, "rx", i, 0f);
+
+        return corners;
     }
 
     private static Expression Pair(SS.UiProp[] map, string key, int index, float fallback)

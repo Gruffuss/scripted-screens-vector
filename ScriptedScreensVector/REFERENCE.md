@@ -148,6 +148,12 @@ enclosing index is `i1`, the next out `i2`.
 `x`, `y`, `w`, `h`, plus optional `rx` / `ry` corner radii. `rx` alone gives circular
 corners. Radii clamp to half the shorter side. Corners are true arcs.
 
+**Per-corner radii:** `rx = { tl, tr, br, bl }`, CSS order. A zero corner is a sharp point.
+
+```lua
+{ op = "R", x = 0, y = 0, w = 60, h = 24, rx = { 12, 12, 0, 0 }, f = "#12202F" }
+```
+
 ### `C` — ellipse
 
 `cx`, `cy`, `rx`, `ry`.
@@ -372,6 +378,21 @@ blurred edge, `0.5·erfc(d / (σ√2))`. Ring count follows the blur's on-screen
 Blending is straight source-over on sRGB bytes — the space the colours are written in — so a
 shadow composites at the value the design specifies.
 
+### Inherited defaults — `style`
+
+A `style` map on a `G`, or on the scene root, supplies defaults for descendants that do not
+set the key themselves:
+
+```lua
+{ op = "G", style = { f = "#5FD9A8", fea = 0, sw = 1 }, c = { ... } }
+```
+
+Anything a node states itself wins, which is what makes it a default rather than an override.
+Defaults nest: a child group's `style` is merged onto what it inherited.
+
+Use it for the key repeated on every node in a section — `fea = 0` across a stack of abutting
+bands, one accent colour across a control.
+
 ### Feathering
 
 | Key | Meaning |
@@ -433,6 +454,43 @@ makes a gradient follow a moving shape.
 Gradients are baked into vertex colours. A two-stop linear gradient is exact; multi-stop and
 radial are subdivided automatically, and radial fills as concentric bands so vertices land at
 even gradient parameters.
+
+### `SYM` / `USE` — symbols
+
+Declare a reusable subtree in `defs`, instantiate it anywhere:
+
+```lua
+defs = {
+    { op = "SYM", id = "led", params = { r = 4, col = "#5FD9A8" }, c = {
+        { op = "C", cx = 0, cy = 0, rx = "%r", ry = "%r", f = "%col" },
+        { op = "C", cx = 0, cy = 0, rx = "=%r*1.8", ry = "=%r*1.8", f = "%col", fo = 0.2 },
+    } },
+},
+root = {
+    { op = "USE", ref = "led", x = 20, y = 20 },
+    { op = "USE", ref = "led", x = 40, y = 20, r = 6, col = "#E23D3D" },
+},
+```
+
+`USE` becomes a group carrying `x`, `y`, `o` and `clip`; the symbol's body becomes its
+children. **Every attribute on the `USE` is a parameter**, so a symbol takes `r` and `col`
+without declaring them specially; `params` supplies defaults for the ones an instance omits.
+In the text format the `SYM`'s own attributes serve as those defaults, since that format has
+no map syntax:
+
+```
+DEFS { SYM id=led r=4 col=#5FD9A8 { C cx=0 cy=0 rx=%r ry=%r f=%col } }
+USE ref=led x=20 y=20
+USE ref=led x=40 y=20 r=6 col=#E23D3D
+```
+
+`%name` alone as a value **keeps the parameter's type**, so a number stays a number. Inside a
+longer string it splices textually, which is what makes it work in expressions —
+`y = "=%top+i*4"`.
+
+Substitution happens once, at parse time, not through a scope in the evaluator: symbol
+parameters are structure, not animation, so an instance costs exactly what writing the nodes
+out would have.
 
 ### `CP` — clip path
 

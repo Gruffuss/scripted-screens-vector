@@ -545,11 +545,29 @@ internal static class Tessellator
             return outline;
         }
 
-        var segments = CornerSegments(Mathf.Max(rx, ry), scale);
-        Arc(outline, new Vector2(x + w - rx, y + ry), rx, ry, -90f, 0f, segments);
-        Arc(outline, new Vector2(x + w - rx, y + h - ry), rx, ry, 0f, 90f, segments);
-        Arc(outline, new Vector2(x + rx, y + h - ry), rx, ry, 90f, 180f, segments);
-        Arc(outline, new Vector2(x + rx, y + ry), rx, ry, 180f, 270f, segments);
+        // Per-corner radii, CSS order tl/tr/br/bl. The arcs below run tr, br, bl, tl, so the
+        // indices are shuffled rather than the drawing order changed -- the winding matters
+        // to everything downstream and is not worth disturbing for readability here.
+        var tl = rx;
+        var tr = rx;
+        var br = rx;
+        var bl = rx;
+
+        if (node.CornerRadii != null)
+        {
+            var half = Mathf.Min(w, h) * 0.5f;
+            tl = Mathf.Clamp(node.CornerRadii[0].Evaluate(context), 0f, half);
+            tr = Mathf.Clamp(node.CornerRadii[1].Evaluate(context), 0f, half);
+            br = Mathf.Clamp(node.CornerRadii[2].Evaluate(context), 0f, half);
+            bl = Mathf.Clamp(node.CornerRadii[3].Evaluate(context), 0f, half);
+        }
+
+        var segments = CornerSegments(Mathf.Max(Mathf.Max(tl, tr), Mathf.Max(br, bl)), scale);
+
+        Corner(outline, new Vector2(x + w - tr, y + tr), tr, -90f, 0f, segments);
+        Corner(outline, new Vector2(x + w - br, y + h - br), br, 0f, 90f, segments);
+        Corner(outline, new Vector2(x + bl, y + h - bl), bl, 90f, 180f, segments);
+        Corner(outline, new Vector2(x + tl, y + tl), tl, 180f, 270f, segments);
         return outline;
     }
 
@@ -1600,6 +1618,27 @@ internal static class Tessellator
 
         var scale = frameScale * ScreenScale;
         return scale > 0.0001f ? AutoFeatherPixels / scale : 0f;
+    }
+
+    /// <summary>
+    /// One rounded corner, or the sharp point it collapses to at radius zero.
+    /// </summary>
+    /// <remarks>
+    /// A zero-radius corner must emit exactly one vertex. Running the arc anyway would emit
+    /// `segments` coincident points, which the triangulator then has to strip and the feather
+    /// would treat as a run of zero-length edges with no usable normal.
+    /// </remarks>
+    private static void Corner(List<Vector2> outline, Vector2 centre, float radius, float from, float to, int segments)
+    {
+        // At radius zero the arc centre IS the rect corner, so one vertex there is the
+        // whole answer.
+        if (radius < 0.01f)
+        {
+            outline.Add(centre);
+            return;
+        }
+
+        Arc(outline, centre, radius, radius, from, to, segments);
     }
 
     private static int CornerSegments(float radius, float scale)
