@@ -13,7 +13,7 @@
         <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     </PropertyGroup>
 
-    <Import Project="..\StationeersLuaAddonTemplate-main\Stationeers.VS.User.props" />
+    <Import Project="..\Stationeers.VS.User.props" />
 
     <PropertyGroup>
         <UnityManagedDirectory>$(SteamLibraryDirectory)\Stationeers\rocketstation_Data\Managed</UnityManagedDirectory>
