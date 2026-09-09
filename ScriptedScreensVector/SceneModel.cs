@@ -145,6 +145,8 @@ internal sealed class VecNode
 
     /// <summary>True if this node or anything under it references <c>t</c>.</summary>
     internal bool UsesTime;
+
+    internal bool UsesScroll;
 }
 
 /// <summary>A parsed scene: viewbox plus node tree.</summary>
@@ -156,6 +158,8 @@ internal sealed class VecScene
     internal FitMode Fit = FitMode.Stretch;
     internal List<VecNode> Root = new();
     internal bool UsesTime;
+
+    internal bool UsesScroll;
 
     /// <summary>Gradients declared in <c>defs</c>, by id.</summary>
     internal readonly Dictionary<string, Gradient> Gradients = new(StringComparer.Ordinal);
@@ -236,7 +240,10 @@ internal static class SceneParser
             scene.Root.Add(child);
 
         foreach (var node in scene.Root)
+        {
             scene.UsesTime |= node.UsesTime;
+            scene.UsesScroll |= node.UsesScroll;
+        }
 
         return scene;
     }
@@ -419,8 +426,12 @@ internal static class SceneParser
         }
 
         node.UsesTime = NodeUsesTime(node);
+        node.UsesScroll = NodeUsesScroll(node);
         foreach (var child in node.Children)
+        {
             node.UsesTime |= child.UsesTime;
+            node.UsesScroll |= child.UsesScroll;
+        }
 
         return node;
     }
@@ -436,6 +447,19 @@ internal static class SceneParser
                || node.EdgeFeather is { UsesTime: true }
                || node.StrokeWidth.UsesTime || node.StrokeOpacity.UsesTime || node.DashOffset.UsesTime
                || node.FillGradientAt is { UsesTime: true } || node.StrokeGradientAt is { UsesTime: true };
+    }
+
+    private static bool NodeUsesScroll(VecNode node)
+    {
+        return node.X.UsesScroll || node.Y.UsesScroll || node.W.UsesScroll || node.H.UsesScroll
+               || node.Rx.UsesScroll || node.Ry.UsesScroll
+               || node.Tx.UsesScroll || node.Ty.UsesScroll || node.Rotate.UsesScroll
+               || node.Sx.UsesScroll || node.Sy.UsesScroll || node.Ax.UsesScroll || node.Ay.UsesScroll
+               || node.Y2.UsesScroll
+               || node.Opacity.UsesScroll || node.FillOpacity.UsesScroll || node.Feather.UsesScroll
+               || node.EdgeFeather is { UsesScroll: true }
+               || node.StrokeWidth.UsesScroll || node.StrokeOpacity.UsesScroll || node.DashOffset.UsesScroll
+               || node.FillGradientAt is { UsesScroll: true } || node.StrokeGradientAt is { UsesScroll: true };
     }
 
     private static void ParseFill(SS.UiProp[] map, VecNode node)

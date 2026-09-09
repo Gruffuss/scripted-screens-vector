@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.2.1.0</Version>
+	<Version>0.3.0.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -52,6 +52,11 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.3.0[/b]
+[list]
+[*] New expression variables [b]sy[/b] and [b]vh[/b] — the scroll offset and viewport height of an enclosing scroll view, in scene units. A vector element inside a scroll view moves with the content; adding sy cancels that out, so a header, fade or rule can stay pinned to the viewport while the content scrolls underneath. Both read 0 when there is no scroll view, so the same scene works either way, and a scene that uses them redraws as you scroll even if it never mentions time.
+[/list]
+
 [b]0.2.1[/b]
 [list]
 [*] The eight worked examples, the authoring guide and the full reference now install with the mod, in the mod's own folder. Previously only the DLL was copied, so there was nothing to read or paste.

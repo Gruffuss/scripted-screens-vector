@@ -200,6 +200,10 @@ internal sealed class VectorGraphic : MaskableGraphic
 
     private static Camera? _camera;
 
+    private ScrollRect? _scroll;
+    private bool _scrollSearched;
+    private float _lastScrollY = float.NaN;
+
     private double _tessellateCpuMs;
     private double _bandSampleMs;
     private double _bandStripMs;
@@ -469,7 +473,11 @@ internal sealed class VectorGraphic : MaskableGraphic
         // The entire per-frame cost of a static scene is this one boolean.
         // A scene with no `t` still has to redraw while data is easing to a new value.
         var blending = VectorConfig.SmoothData && Now() - _dataArrived < _dataInterval;
-        var animated = _scene != null && (_scene.UsesTime || blending);
+        // A scroll-driven scene has no `t`, so without this it would be judged static and
+        // freeze the moment it was first drawn. Only rebuild when the offset actually moved.
+        var scrolled = _scene is { UsesScroll: true } && ScrollMoved();
+
+        var animated = _scene != null && (_scene.UsesTime || blending || scrolled);
 
         if (VectorConfig.RendererEnabled && _scene != null && _job == null
             && (_needsRebuild || (animated && DueForRebuild())))
@@ -650,6 +658,8 @@ internal sealed class VectorGraphic : MaskableGraphic
             ? Mathf.Clamp01((now - _dataArrived) / _dataInterval)
             : 1f;
 
+        SampleScroll(rect);
+
         var screenScale = ScreenPixelsPerCanvasUnit();
         var known = screenScale > 0f;
 
@@ -674,6 +684,71 @@ internal sealed class VectorGraphic : MaskableGraphic
 
             return (wall, cpuBefore < 0d || cpuAfter < 0d ? -1d : cpuAfter - cpuBefore);
         });
+    }
+
+    /// <summary>True when the enclosing ScrollRect has moved since the last rebuild.</summary>
+    private bool ScrollMoved()
+    {
+        if (!_scrollSearched)
+        {
+            _scrollSearched = true;
+            _scroll = GetComponentInParent<ScrollRect>();
+        }
+
+        if (_scroll == null)
+            return false;
+
+        var now = _scroll.verticalNormalizedPosition;
+        if (!float.IsNaN(_lastScrollY) && Mathf.Abs(now - _lastScrollY) < 0.0001f)
+            return false;
+
+        _lastScrollY = now;
+        return true;
+    }
+
+    /// <summary>
+    /// Reads the enclosing ScrollRect into the context, in scene units.
+    /// </summary>
+    /// <remarks>
+    /// Main thread only, hence here rather than in the evaluator: a worker may not touch a
+    /// Unity object. The search is cached including its failure, since most scenes are not
+    /// in a scroll view and GetComponentInParent walks the whole ancestry.
+    ///
+    /// Units: the element's own rect maps onto the viewbox, so scene-units-per-canvas-unit
+    /// is viewbox height over rect height. A fade written at `y = "=sy"` therefore lands at
+    /// the top of the viewport whatever the console's size.
+    /// </remarks>
+    private void SampleScroll(Rect rect)
+    {
+        if (!_scrollSearched)
+        {
+            _scrollSearched = true;
+            _scroll = GetComponentInParent<ScrollRect>();
+        }
+
+        if (_scroll == null || _scene == null || rect.height <= 0f)
+        {
+            _context.ScrollY = 0f;
+            _context.ViewportH = 0f;
+            return;
+        }
+
+        var viewport = _scroll.viewport != null ? _scroll.viewport : _scroll.GetComponent<RectTransform>();
+        if (viewport == null)
+            return;
+
+        var content = _scroll.content;
+        var toScene = _scene.ViewHeight / rect.height;
+
+        var viewportH = viewport.rect.height;
+        var contentH = content != null ? content.rect.height : viewportH;
+
+        // normalizedPosition is 1 at the top and 0 at the bottom; scenes are +Y down.
+        var hidden = Mathf.Max(0f, contentH - viewportH);
+        var offset = hidden * (1f - Mathf.Clamp01(_scroll.verticalNormalizedPosition));
+
+        _context.ScrollY = offset * toScene;
+        _context.ViewportH = viewportH * toScene;
     }
 
     /// <summary>Uploads a finished job's geometry and records what it cost.</summary>

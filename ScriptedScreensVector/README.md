@@ -161,6 +161,23 @@ Neither obvious alternative works, which is why it exists:
 Before `fo2`, the only way to get this was a stack of ~20 abutting bands of rising opacity.
 That worked, and it was two thirds of one real console's tessellation cost.
 
+### Pinning artwork inside a scroll view
+
+A vector element inside a scroll view scrolls with the content. `sy` (offset) and `vh`
+(viewport height), both in scene units, cancel that out so a header or fade stays put:
+
+```lua
+{ op = "R", x = 0, y = "=sy", w = W, h = 16, f = "@fadeTop", fo = "=step(1,sy)" },
+{ op = "R", x = 0, y = "=sy+vh-16", w = W, h = 16, f = "@fadeBot" },
+```
+
+Both are `0` when there is no scroll view, so the same scene works either way. A scene using
+them rebuilds as the offset changes even with no `t` anywhere.
+
+Worth checking first: if the pinned artwork does not need to sit *under* scrolled content, a
+second vector element **outside** the scroll view, layered with `z_index`, is pinned for free
+and needs neither variable.
+
 ### Colour
 
 Three mechanisms, and picking the right one matters:

@@ -20,6 +20,16 @@ internal sealed class EvalContext
     /// <summary>Seconds since the scene was first shown.</summary>
     internal float Time { get; set; }
 
+    /// <summary>Scroll offset of the enclosing ScrollRect, in scene units. 0 when none.</summary>
+    /// <remarks>
+    /// Sampled on the main thread at dispatch, like the rect and the camera scale, because
+    /// tessellation runs on a worker and no Unity object may be touched there.
+    /// </remarks>
+    internal float ScrollY { get; set; }
+
+    /// <summary>Viewport height of the enclosing ScrollRect, in scene units. 0 when none.</summary>
+    internal float ViewportH { get; set; }
+
     /// <summary>Named values from the paired data element. Never null.</summary>
     internal Dictionary<string, float> Scalars { get; } = new(StringComparer.Ordinal);
 
@@ -141,6 +151,8 @@ internal sealed class Expression
     {
         Constant,
         Time,
+        ScrollY,
+        ViewportH,
         RepeatIndex,
         RepeatCount,
         Scalar,
@@ -175,6 +187,14 @@ internal sealed class Expression
 
     /// <summary>True when this expression references <c>t</c> anywhere.</summary>
     internal bool UsesTime { get; private set; }
+
+    /// <summary>True when this expression reads <c>sy</c> or <c>vh</c>.</summary>
+    /// <remarks>
+    /// Tracked separately from <see cref="UsesTime"/> because rebuilds are gated on time: a
+    /// scene whose fades follow the scroll but never mention <c>t</c> would otherwise be
+    /// treated as static and freeze in place the moment it was first drawn.
+    /// </remarks>
+    internal bool UsesScroll { get; private set; }
 
     /// <summary>True when nothing but a literal number is involved.</summary>
     internal bool IsConstant => _kind == Kind.Constant;
@@ -211,6 +231,8 @@ internal sealed class Expression
         {
             case Kind.Constant: return _value;
             case Kind.Time: return context.Time;
+            case Kind.ScrollY: return context.ScrollY;
+            case Kind.ViewportH: return context.ViewportH;
             case Kind.RepeatIndex: return context.Index(_depth);
             case Kind.RepeatCount: return context.Count();
             case Kind.Scalar: return context.Scalar(_name);
@@ -390,6 +412,7 @@ internal sealed class Expression
                 var operand = ParseUnary();
                 var node = new Expression { _kind = Kind.Negate, _args = new Expression?[] { operand } };
                 node.UsesTime = operand.UsesTime;
+                node.UsesScroll = operand.UsesScroll;
                 return node;
             }
 
@@ -453,6 +476,7 @@ internal sealed class Expression
                 _name = name,
                 _args = new Expression?[] { index },
                 UsesTime = index.UsesTime,
+                UsesScroll = index.UsesScroll,
             };
         }
 
@@ -493,7 +517,10 @@ internal sealed class Expression
             };
 
             foreach (var argument in args)
+            {
                 node.UsesTime |= argument.UsesTime;
+                node.UsesScroll |= argument.UsesScroll;
+            }
 
             return node;
         }
@@ -502,6 +529,12 @@ internal sealed class Expression
         {
             if (name == "t")
                 return new Expression { _kind = Kind.Time, UsesTime = true };
+
+            if (name == "sy")
+                return new Expression { _kind = Kind.ScrollY, UsesScroll = true };
+
+            if (name == "vh")
+                return new Expression { _kind = Kind.ViewportH, UsesScroll = true };
 
             if (name == "n")
                 return new Expression { _kind = Kind.RepeatCount };
@@ -526,6 +559,7 @@ internal sealed class Expression
                 _kind = kind,
                 _args = new Expression?[] { left, right },
                 UsesTime = left.UsesTime || right.UsesTime,
+                UsesScroll = left.UsesScroll || right.UsesScroll,
             };
         }
 

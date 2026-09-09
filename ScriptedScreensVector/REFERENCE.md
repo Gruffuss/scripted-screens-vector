@@ -333,6 +333,8 @@ Any numeric attribute may be a string beginning with `=`.
 | `n` | current repeat count |
 | `$name` | scalar from the data payload |
 | `$name[expr]` | array element, **0-based**; out of range yields `0` |
+| `sy` | scroll offset of the enclosing scroll view, in scene units; `0` when there is none |
+| `vh` | viewport height of that scroll view, in scene units; `0` when there is none |
 
 **Arrays are 0-based in expressions and 1-based in Lua.** `$history[0]` is the value your
 script stored at `history[1]`. A repeat's `i` runs `0..n-1`, so `$history[i]` lines up with a
@@ -347,6 +349,28 @@ end
 
 Out-of-range reads yield `0` rather than failing, so an off-by-one shows up as a shape stuck
 at zero — not as an error.
+
+**`sy` and `vh` pin artwork to a scroll viewport.** A vector element inside a scroll view
+moves with the content, so anything drawn at a fixed `y` scrolls away with it. Adding `sy`
+cancels that out, which is how you keep a header, a fade or a rule stuck to the viewport
+while the content moves underneath:
+
+```lua
+-- a fade pinned to the top of the viewport, absent until scrolled
+{ op = "R", x = 0, y = "=sy", w = W, h = 16, f = "@fadeTop", fo = "=step(1,sy)" },
+
+-- and to the bottom, gone once the content ends
+{ op = "R", x = 0, y = "=sy+vh-16", w = W, h = 16, f = "@fadeBot" },
+```
+
+Both are read on the main thread when the rebuild is dispatched and converted from canvas
+pixels to scene units through the viewbox, so they mean the same thing at any console size.
+A scene that uses them rebuilds when the offset moves even if it never mentions `t` —
+otherwise it would be treated as static and freeze.
+
+If the artwork does not need to sit *underneath* scrolled content, the simpler answer is a
+second vector element outside the scroll view, layered over it with `z_index`: it is pinned
+because it never scrolls, and needs neither of these.
 
 ### Operators
 
