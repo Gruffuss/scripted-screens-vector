@@ -83,6 +83,10 @@ internal static class Program
         ClipTests.DiagonalBoundaryStillClips(run);
         ClipTests.BufferedMatchesAllocating(run);
         ClipTests.ClampInsideRespectsBoundary(run);
+        SceneTextTests.MatchesTableForm(run);
+        SceneTextTests.DefsAndValueForms(run);
+        SceneTextTests.ValueTyping(run);
+        SceneTextTests.MalformedIsReported(run);
 
         Console.WriteLine();
         GradientTests.LinearParameter(run);

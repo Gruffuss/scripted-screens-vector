@@ -5,14 +5,13 @@
         <RootNamespace>$(ModName)</RootNamespace>
         <TargetFramework>netstandard2.1</TargetFramework>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-        <Version>0.3.0.0</Version>
+        <Version>0.4.0.0</Version>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     </PropertyGroup>
-    <!-- Build paths and the Documents-directory override live in exactly one
-         place: Stationeers.VS.User.props at the repo root. Copy the .example
-         beside it and edit that; it is gitignored. -->
-    <Import Project="..\Stationeers.VS.props" />
-    <Import Project="..\Stationeers.VS.References.props" />
+    <!-- Shared with the fonts mod so build paths and the Documents-directory override
+         live in exactly one place (that folder's Stationeers.VS.User.props). -->
+    <Import Project="..\StationeersLuaAddonTemplate-main\Stationeers.VS.props" />
+    <Import Project="..\StationeersLuaAddonTemplate-main\Stationeers.VS.References.props" />
     <PropertyGroup>
         <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
         <AssemblyVersion>$(Version)</AssemblyVersion>

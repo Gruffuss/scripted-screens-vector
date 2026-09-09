@@ -13,7 +13,7 @@
         <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     </PropertyGroup>
 
-    <Import Project="..\Stationeers.VS.User.props" />
+    <Import Project="..\StationeersLuaAddonTemplate-main\Stationeers.VS.User.props" />
 
     <PropertyGroup>
         <UnityManagedDirectory>$(SteamLibraryDirectory)\Stationeers\rocketstation_Data\Managed</UnityManagedDirectory>
@@ -30,10 +30,13 @@
         <Compile Include="..\ScriptedScreensVector\Clip.cs" />
         <Compile Include="..\ScriptedScreensVector\Gradient.cs" />
         <Compile Include="..\ScriptedScreensVector\Expression.cs" />
+        <Compile Include="..\ScriptedScreensVector\SceneText.cs" />
+        <Compile Include="ScriptedScreensStubs.cs" />
         <Compile Include="Stubs.cs" />
         <Compile Include="TriangulatorTests.cs" />
         <Compile Include="ClipTests.cs" />
         <Compile Include="GradientTests.cs" />
+        <Compile Include="SceneTextTests.cs" />
         <Compile Include="Benchmark.cs" />
         <Compile Include="Program.cs" />
     </ItemGroup>

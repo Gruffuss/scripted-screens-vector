@@ -31,6 +31,44 @@ A scene is **two elements** sharing a `scene` name.
 
 Give it a 1×1 rect at negative coordinates so it draws nothing.
 
+### Scene as text — `src`
+
+A scene may be given as one string instead of nested tables, in place of `root` and `defs`:
+
+```lua
+props = { scene = "tank", src = [[
+SCENE w=200 h=200 fit=stretch
+DEFS {
+    GL id=liquid units=bbox x1=0 y1=0 x2=0 y2=1 stops=[[0,#5FD9A8],[1,#2E8B6E]]
+    CP id=tank { R x=10 y=10 w=44 h=60 rx=8 }
+}
+R x=10 y=10 w=44 h=60 rx=8 f=#0B1622
+G clip=tank {
+    YS n=24 x==8+i*1.75 y==64-$fill*52 y2=72 f=@liquid
+}
+]] }
+```
+
+**Why it exists: a Lua string literal costs zero instructions to build.** Nested tables cost
+roughly a dozen per node, and a page of a few hundred nodes is a serious fraction of the
+50,000 per tick — which is what forces consoles to split their build across frames.
+
+Grammar: one node per line, `OP` then `key=value`, `{` … `}` for children, `#` comments to
+end of line. `SCENE` carries the viewbox; `DEFS { … }` holds gradients and clips. Same op
+names, keys and expression syntax as the table form.
+
+Values: a plain number is a number, `[a,b,c]` is an array and nests, anything else is a
+string — which covers `#colours`, `@refs`, enum words and `=expressions`. A bare word is a
+flag, so `lod` means `lod=1`. Double quotes wrap a string containing spaces.
+
+**One rule the format imposes: an unquoted expression cannot contain a space.** Values are
+read to whitespace, because expressions are full of `,` `[` `]` — `clamp($x,0,1)`,
+`$name[i]` — and those cannot also be separators. Quote an expression that needs a space.
+
+The text is converted to the same props the table form arrives as and parsed by the same
+code, so the two cannot drift apart, and parsed scenes are cached by source text so a
+structure element resent unchanged reparses nothing.
+
 ### Debug switches
 
 Set on the **structure** element's props, alongside `root`. Each disables one stage, so

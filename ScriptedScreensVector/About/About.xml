@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.3.0.0</Version>
+	<Version>0.4.0.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -52,6 +52,11 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.4.0[/b]
+[list]
+[*] A scene can now be written as one string in a [b]src[/b] prop instead of nested tables — one node per line, braces for children. A Lua string literal costs zero instructions to build, where nested tables cost about a dozen per node; on a busy console that is the difference between a page fitting in a tick and having to be split across frames. Same ops, keys and expressions as the table form, and it goes through the same parser so the two cannot drift.
+[/list]
+
 [b]0.3.0[/b]
 [list]
 [*] New [b]sh[/b] attribute: CSS box-shadow, several composing in order — { dx, dy, blur, spread, colour }. Drawn as real geometry from the closed form for a blurred edge, so it needs no offscreen pass and no shader. This is the thing feathering could not do: feather ramps outward from a solid edge while a blur softens both sides of it, which is why a feathered knob reads as a ring instead of a shadow.

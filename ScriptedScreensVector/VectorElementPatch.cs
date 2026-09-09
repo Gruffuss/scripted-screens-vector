@@ -77,7 +77,7 @@ internal static class VectorElementPatch
                 return;
             }
 
-            if (HasProp(element.Props, "root"))
+            if (HasProp(element.Props, "root") || HasProp(element.Props, "src"))
                 ApplyStructure(key, host, element);
         }
         catch (Exception ex)
@@ -88,7 +88,14 @@ internal static class VectorElementPatch
 
     private static void ApplyStructure(string key, GameObject host, SS.UiElement element)
     {
-        var scene = SceneParser.Parse(element.Props);
+        // `src` is the text form. It is converted to the same props the table form
+        // arrives as and parsed by the same code, so the two cannot diverge.
+        var source = ReadString(element.Props, "src");
+        var props = string.IsNullOrEmpty(source)
+            ? element.Props
+            : SceneText.ToProps(source!, ReadString(element.Props, "scene")) ?? element.Props;
+
+        var scene = SceneParser.Parse(props);
         if (scene == null)
             return;
 
