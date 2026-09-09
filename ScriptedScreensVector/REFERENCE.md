@@ -65,9 +65,14 @@ G clip=tank {
 ]==] }
 ```
 
-**Why it exists: a Lua string literal costs zero instructions to build.** Nested tables cost
-roughly a dozen per node, and a page of a few hundred nodes is a serious fraction of the
-50,000 per tick — which is what forces consoles to split their build across frames.
+**Why it exists: clipping, scrolling, click regions, and text that changes without
+re-declaring an element.** A `T` inside an `SC` is not expressible as `label` elements over
+the artwork at any price.
+
+**Not for the instruction budget.** Measured on a real console, three pages built both ways,
+two got worse: 25.0k → 28.3k, 31.5k → 28.9k, 40.1k → 41.9k. A `src` line is free only when it
+is a **literal**, already in the compiled chunk. One built with `string.format` costs about
+what the node table costs, and serialising tables into text at build time is a straight loss.
 
 **Wrap the string in `[==[ … ]==]`, not `[[ … ]]`.** An array value ends in `]]`, and Lua's
 long-string bracket closes at the first one it sees — so a scene containing
@@ -290,11 +295,11 @@ waveform primitive.
 | `ch` | number/expr | total content height; at or below `h` nothing scrolls |
 | `rx` / `ry` | number/expr | corner radii, same rules and per-corner form as `R` |
 | `o` | number/expr | container opacity, multiplied into all descendants |
-| `c` | array | children, drawn in content coordinates |
+| `c` | array | children, in the enclosing coordinates, translated by the scroll offset |
 
-A group that clips to its own box and slides its children inside it. Children are written in
-content coordinates starting at the container's `y`, so the first row sits where the box does
-and the last sits `ch` below it.
+A group that clips to its own box and slides its children inside it. **Children are written in
+the same coordinates as everything around them** -- put the first row at the container's own
+`y` and the last `ch` below it -- and the container translates them by the offset.
 
 ```lua
 { op = "SC", id = "log", x = 4, y = 20, w = 192, h = 120, ch = 480, rx = 6, c = {
@@ -314,13 +319,21 @@ through the chip makes it cost half a second and a slice of the instruction budg
 Wheel is a fifth of the viewport per notch; drag moves content with the pointer. Both clamp to
 `0 .. ch - h`, so a container whose content fits cannot be moved at all.
 
-**`sy` and `vh` report *this* container inside it.** So the pattern that pins a header or a
-fade to a ScriptedScreens scroll view works identically here:
+**`sy` and `vh` report *this* container inside it.** `sy` is the scroll offset, **zero at
+rest**, and `vh` is the container's height -- so pinned artwork is written at the container's
+own `y` plus `sy`:
 
 ```lua
-{ op = "R", x = 4, y = "=sy", w = 192, h = 18, f = "#0B1622" }   -- pinned header
-{ op = "R", x = 4, y = "=sy + vh - 12", w = 192, h = 12, f = "@fade" }  -- bottom fade
+-- container at y = 20, height 120
+{ op = "R", x = 4, y = "=20+sy",         w = 192, h = 18, f = "#0B1622" }  -- pinned header
+{ op = "R", x = 4, y = "=20+sy+vh-12",   w = 192, h = 12, f = "@fade" }    -- bottom fade
 ```
+
+**`sy` is an offset, not a position**, exactly as it is for a ScrollRect. The difference is
+that a ScrollRect scrolls the whole element, so its content origin *is* the scene origin and
+`y = "=sy"` lands on the viewport top by itself. An `SC` sits somewhere inside a scene, so its
+own `y` has to be added. Leaving it out puts the artwork at the top of the viewbox, above the
+container, where it will be clipped away and look like nothing happened.
 
 **Limits worth knowing:**
 
@@ -329,8 +342,9 @@ fade to a ScriptedScreens scroll view works identically here:
 - **Containers do not nest usefully.** An inner one would need its own wheel target inside the
   outer one's and the pointer cannot be in both; the inner container clips and draws correctly
   but the wheel always finds the innermost box under the pointer.
-- **No scrollbar is drawn.** Draw one: `R x=… y="=sy + sy/(ch-h)*(h-thumb)"` is the whole
-  thing, and a scene that wants a different indicator is not fighting a built-in one.
+- **No scrollbar is drawn.** Draw one: with the container at `y`, a thumb of height
+  `h*h/ch` sits at `y + sy + sy*(h - h*h/ch)/(ch - h)`. Two expressions, and a scene that
+  wants a different indicator is not fighting a built-in one.
 - **A text node inside is clipped by the container's box**, which is the case RectMask2D
   handles. Rounded corners cut geometry but not text; see `T`.
 
@@ -342,6 +356,7 @@ fade to a ScriptedScreens scroll view works identically here:
 | `text` | a literal, or `"$name"` bound to a data string |
 | `size` | font size in scene units; scales with the transform |
 | `f` | colour, as on any shape |
+| `fo` | opacity `0..1`, as on any shape; multiplied by the enclosing group's `o` |
 | `align` | `left` (default), `center`, `right` |
 | `valign` | `top` (default), `middle`, `bottom` |
 | `font` | a registered TMP family, e.g. from the companion fonts mod |
@@ -362,6 +377,7 @@ walk records where each `T` landed and the labels are created and updated when t
 | | |
 |---|---|
 | transform, scale, scroll with the group | **yes** — the rect goes through the frame matrix, rotation included |
+| fade with the group | **yes** — `o` and `fo` reach the label as its own alpha |
 | updates from `data` | **yes** — strings are data values now, so `text = "$name"` works like a number |
 | rich text, registered fonts | **yes** — it is real TMP |
 | clipping | **axis-aligned rect only**, via `RectMask2D`. A rounded or rotated clip does not cut text until stencil clipping lands |
@@ -370,12 +386,26 @@ walk records where each `T` landed and the labels are created and updated when t
 `ellipsis` and `shrink` are TMP's own overflow modes, so fitting is done by the engine that
 knows the glyph metrics rather than estimated.
 
-Objects are pooled by index and reused across rebuilds; surplus labels are disabled rather
-than destroyed, so a scene alternating between two pages does not churn objects.
+Group opacity has to arrive this way because it cannot arrive any other way: a TMP child draws
+**above** the mesh, so nothing in the geometry can fade it. Without it a `G o = 0.3` would fade
+all its artwork and leave the readable part at full strength.
 
-**Why use it over a `label` element:** a ScriptedScreens label costs roughly 300 Lua
-instructions to declare and must be re-declared to change its text, and it cannot move or
-clip with the scene. A `T` node costs a string in the data payload.
+This is what lets a row fade at the edge of a scroll container:
+
+```lua
+{ op = "G", o = "=clamp((20+sy+vh-Y)/16,0,1)", c = { { op = "T", ... } } }
+```
+
+Objects are pooled by index and reused across rebuilds; surplus labels are disabled rather
+than destroyed, so a scene alternating between two pages does not churn objects. **A fully
+transparent `T` is still placed**, deliberately: the pool is keyed by placement order, so
+skipping one would hand every later label the wrong text.
+
+**Why use it over a `label` element:** it changes its text without re-declaring an element,
+it is written in viewbox units rather than console pixels, and it moves, clips and scrolls with
+the scene. `ui:element` itself is a C call and cheap — measured, 90 labels became one `src` and
+the page went from 31.5k instructions to 28.9k, a real saving and a modest one. The reason to
+reach for `T` is what a label cannot do at all, not the budget.
 
 ### `SP` — spline
 

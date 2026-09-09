@@ -5,9 +5,8 @@
 --
 -- THE POINT IS WHAT DOES NOT HAPPEN. The scroll position lives on the client. A wheel notch
 -- costs one mesh rebuild and nothing else: no tick, no network message, no instructions out
--- of the 50,000 the chip gets. Put the same list in a ScriptedScreens `scrollview` full of
--- `label` elements and every scroll is a round trip, every row is ~300 instructions, and the
--- list keeps up with the tick rather than with the mouse.
+-- of the 50,000 the chip gets. Put the same list in a ScriptedScreens `scrollview` and every
+-- scroll is a round trip, so it keeps up with the half-second tick rather than with the mouse.
 --
 -- WHAT YOU WRITE. Children are in CONTENT coordinates, measured from the container's own y.
 -- A row at y = TOP + k*ROW sits where you would draw it if the box were tall enough to hold
@@ -16,10 +15,17 @@
 --   ch    total content height. At or below h, nothing scrolls and the wheel is ignored.
 --   id    REQUIRED -- it is the key the scroll position is stored under.
 --
--- INSIDE A CONTAINER, `sy` AND `vh` REPORT THAT CONTAINER. They are the same two variables
--- that report a ScriptedScreens scroll view, so a pinned header, an edge fade or a scrollbar
--- thumb is written the same way in both places. `y = "=sy"` is "the top of what is showing",
--- and it is the trick worth taking away from this file.
+-- INSIDE A CONTAINER, `sy` AND `vh` REPORT THAT CONTAINER. `sy` is the scroll OFFSET and is
+-- zero at rest; `vh` is the container's height. So the top of what is showing is the
+-- container's own y PLUS sy, and pinned artwork is written that way:
+--
+--     y = "=" .. TOP .. "+sy"           the top edge, wherever it has scrolled to
+--     y = "=" .. TOP .. "+sy+vh-10"     the bottom edge
+--
+-- Forgetting the TOP puts the artwork at the top of the VIEWBOX, above the container, where
+-- the clip removes it and nothing appears to happen. `sy` is an offset in both places -- a
+-- ScrollRect scrolls the whole element, so its content origin is already the scene origin and
+-- no constant is needed there.
 
 local ui = ss.ui.surface("main")
 ss.ui.activate("main")
@@ -36,7 +42,7 @@ local CONTENT = ROWS * ROW + 8
 
 -- Thumb geometry, worked out once here rather than inside three expressions. `sy` runs
 -- 0..CONTENT-BOX and the thumb has BOX-THUMB of track, so it moves at TRAVEL times `sy` --
--- and it is drawn INSIDE the container, so it also carries `sy` to stay on screen at all.
+-- on top of the `sy` that keeps it on screen at all, since it is drawn inside the container.
 local THUMB  = BOX * BOX / CONTENT
 local TRAVEL = (BOX - THUMB) / (CONTENT - BOX)
 
@@ -74,11 +80,13 @@ for k = 0, ROWS - 1 do
 end
 
 -- Pinned last, so it draws over the rows.
-body[#body + 1] = { op = "R", x = 10, y = "=sy", w = 180, h = 10, f = "@fadeDown" }
-body[#body + 1] = { op = "R", x = 10, y = "=sy+vh-10", w = 180, h = 10, f = "@fadeUp" }
-body[#body + 1] = { op = "R", x = 180, y = "=sy", w = 3, h = BOX, rx = 1.5, f = "#12202F" }
+local PIN = "=" .. TOP .. "+sy"
+
+body[#body + 1] = { op = "R", x = 10, y = PIN, w = 180, h = 10, f = "@fadeDown" }
+body[#body + 1] = { op = "R", x = 10, y = PIN .. "+vh-10", w = 180, h = 10, f = "@fadeUp" }
+body[#body + 1] = { op = "R", x = 180, y = PIN, w = 3, h = BOX, rx = 1.5, f = "#12202F" }
 body[#body + 1] = { op = "R", x = 180, w = 3, h = THUMB, rx = 1.5, f = "#3A5570",
-                    y = "=sy+sy*" .. TRAVEL }
+                    y = PIN .. "+sy*" .. TRAVEL }
 
 ui:element({
     id = "scroll_s", type = "vector",
@@ -113,8 +121,8 @@ ui:element({
     },
 })
 
--- Row text is one data element: 24 strings in one payload, against 24 label elements at
--- ~300 instructions each to re-declare. Strings live in `data` alongside the numbers.
+-- Row text is one data element: 24 strings in one payload, and no element re-declared to
+-- change a line. Strings live in `data` alongside the numbers.
 local data = ui:element({
     id = "scroll_d", type = "vector",
     rect = { unit = "px", x = -4, y = -4, w = 1, h = 1 },

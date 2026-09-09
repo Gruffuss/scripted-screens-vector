@@ -506,6 +506,9 @@ internal static class Tessellator
         if (TextFound == null || NoFill)
             return;
 
+        // Note an invisible `T` is still collected. The label pool is keyed by placement
+        // ORDER, so skipping one would shift every label after it onto the wrong text --
+        // the saving is a TMP update, the cost is a scene that shows the wrong numbers.
         var body = node.TextLiteral;
         if (node.TextData != null)
             context.Strings.TryGetValue(node.TextData, out body);
@@ -523,6 +526,13 @@ internal static class Tessellator
 
         var paint = ResolvePaint(scene, node, context, frame, stroke: false);
 
+        // Group opacity and `fo` reach the label through its own alpha, because they cannot
+        // reach it any other way: a TMP child draws above the mesh and nothing in the mesh
+        // can fade it. Without this a `G o=0.3` fades all its artwork and leaves the text --
+        // the readable part -- at full strength, which is the opposite of what was asked for.
+        Color colour = paint.At(new Vector2(x, y));
+        colour.a *= frame.Opacity * Mathf.Clamp01(node.FillOpacity.Evaluate(context));
+
         Rect? clip = null;
         if (frame.Clip != null)
             clip = frame.Clip.Bounds(frame.Matrix);
@@ -533,7 +543,7 @@ internal static class Tessellator
             Rect = Rect.MinMaxRect(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y),
                                    Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y)),
             Size = (node.TextSize?.Evaluate(context) ?? 12f) * frame.Scale,
-            Colour = paint.At(new Vector2(x, y)),
+            Colour = colour,
             Align = node.Align,
             VAlign = node.VAlign,
             Font = node.FontFamily,

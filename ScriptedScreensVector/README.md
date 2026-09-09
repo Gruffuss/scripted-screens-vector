@@ -101,12 +101,7 @@ Coordinates are **top-left origin, +Y down**, like the old canvas.
 
 ### Writing the scene as text instead of tables
 
-Nested tables cost roughly a dozen Lua instructions per node, and a page of a few hundred
-nodes is a serious fraction of the 50,000 a chip gets per tick. That is what forces consoles
-to build their screens across several frames.
-
-**A string literal costs nothing.** It is already in the compiled chunk. So a scene can be
-given as `src` in place of `root` and `defs`:
+A scene can be given as `src`, one node per line, in place of `root` and `defs`:
 
 ```lua
 props = { scene = "tank", src = [==[
@@ -130,13 +125,32 @@ vanishes. A longer level of bracket has no such collision.
 One node per line, `OP` then `key=value`, braces for children, `#` for comments. Same op
 names, same keys, same expressions. A bare word is a flag, so `lod` means `lod=1`.
 
+**Do not choose this for the instruction budget.** Measured on the Atmo Regulator's Apple
+skin, three pages built both ways, counting VM instructions on the build tick:
+
+| page | node tables + `label` elements | `src` + `T` + `click` |
+|------|-------------------------------|-----------------------|
+| atmo | 25.0k | 28.3k |
+| alarms, 90 labels | 31.5k | 28.9k |
+| devices | 40.1k | 41.9k |
+
+Two out of three got *worse*. **A `src` line is only free when it is a literal** — then it is
+already in the compiled chunk and costs nothing. A line built with `string.format` costs about
+what the table would have, and serialising tables into text at build time is a straight loss.
+The alarms page won because 90 labels became one `src`, not because text is cheaper.
+
+Choose it for what it actually buys: clipping, scrolling, click regions, and text that changes
+without re-declaring an element. Take the budget win where the layout is static enough to be a
+literal, and do not expect it anywhere else.
+
 **The one rule the format imposes:** an unquoted value is read to the next space, so an
 expression cannot contain one. `y==64-$fill*52` is fine; `y="=64 - $fill * 52"` needs the
 quotes. Expressions are full of commas and brackets, so whitespace is the only separator left.
 
 One element takes either `src` or `root`, not both. When a layout depends on how many devices
-turned up, build the string with `string.format` or `table.concat` — that is still far cheaper
-than building tables, since the cost is in the table constructors rather than in the text.
+turned up, build the string with `string.format` or `table.concat` — but see the measurement
+above, and keep the generated part small. One `string.format` per node is roughly what a node
+table costs; anything fancier is worse.
 
 ### Changing one node without resending the scene
 
@@ -252,12 +266,14 @@ the container clips and slides them:
 
 **The scroll position never reaches the chip.** A wheel notch is one mesh rebuild: no tick, no
 network, no instructions. The alternative — a ScriptedScreens `scrollview` full of `label`
-elements — pays a round trip per scroll and ~300 instructions per row to change a line of
-text. Wheel is a fifth of the viewport per notch, drag moves content with the pointer, and
+elements — pays a **round trip per scroll**, so the list keeps up with the half-second tick
+rather than with the mouse. Wheel is a fifth of the viewport per notch, drag moves content with the pointer, and
 both clamp so a container whose content fits cannot move at all.
 
 Inside one, `sy` and `vh` report **that container**, which is what pins a header, an edge fade
-or a scrollbar thumb. Vertical only, one level deep, and no scrollbar is drawn for you — see
+or a scrollbar thumb. `sy` is the offset and is **zero at rest**, so pinned artwork goes at the
+container's own `y` plus `sy` -- `y = "=30+sy"` for a container at 30. Writing `y = "=sy"`
+puts it at the top of the viewbox instead, where the container clips it away. Vertical only, one level deep, and no scrollbar is drawn for you — see
 [`09-scroll.lua`](examples/09-scroll.lua), where the thumb is two expressions.
 
 One thing to plan around: a `T` node binds a data string **by name**, and there is no
@@ -350,10 +366,15 @@ in, and its content comes from the data payload:
 data:set_props({ data = { eta = "4h 12m" } })
 ```
 
-**Prefer this to a `label` element over the artwork.** A ScriptedScreens label costs roughly
-300 instructions to declare, must be re-declared to change its text, and sits in console pixels
-rather than viewbox units — so every number has to be converted twice and a moving readout has
-to be re-declared as it moves. A `T` node costs a string in the data payload.
+**Prefer this to a `label` element over the artwork** — but not for the reason you might
+expect. `ui:element` is a C call and costs the chip very little; the per-label cost is the Lua
+around it, and that is the same either way. Measured, a page of 90 labels moved from 31.5k
+instructions to 28.9k, which is a real saving and not a large one.
+
+What you actually gain: a `T` node **changes its text without re-declaring an element**, sits
+in viewbox units rather than console pixels so no number is converted twice, and clips, scrolls
+and rotates with the artwork it belongs to. A readout attached to a moving needle is a sane
+thing to draw; as a label element it is not.
 
 Three things it cannot do, because TMP builds its own geometry on its own object:
 

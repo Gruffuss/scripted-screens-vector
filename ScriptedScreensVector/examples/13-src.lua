@@ -2,14 +2,24 @@
 --
 -- Both halves of this file draw the same gauge. The left one is built from nested Lua tables;
 -- the right one is a string literal. They go through the same parser, so the pictures are
--- identical -- what differs is what it costs the chip to hand them over.
+-- identical.
 --
---   nested tables    ~a dozen instructions per node, paid every time the structure is built
---   a string literal ZERO. It is already in the compiled chunk.
+-- WHY YOU WOULD PICK THE TEXT FORM, honestly. It is NOT the instruction budget. Measured on a
+-- real console, three pages built both ways, two came out WORSE:
 --
--- With 50,000 instructions per tick and a tick every half second, a page of a few hundred
--- nodes is a serious fraction of the budget -- which is what forces consoles to build their
--- screens across several frames. The text form removes that problem rather than pacing it.
+--     atmo               25.0k -> 28.3k
+--     alarms, 90 labels  31.5k -> 28.9k
+--     devices            40.1k -> 41.9k
+--
+-- A src line is free only when it is a LITERAL, like the one below -- then it is already in
+-- the compiled chunk and building it costs nothing at all. A line built with string.format
+-- costs about what the node table costs, and serialising tables into text at build time is a
+-- straight loss. The alarms page won because 90 label elements collapsed into one src, not
+-- because text is cheaper than tables.
+--
+-- So: take the free ride where a layout is static enough to be a literal, and pick the text
+-- form the rest of the time for what it actually buys -- clipping, scrolling, click regions,
+-- and text that changes without re-declaring an element.
 --
 -- THE GRAMMAR is one node per line: OP then key=value pairs, { } for children, # for a
 -- comment. SCENE carries the viewbox, DEFS { } holds gradients and clips. Same op names,

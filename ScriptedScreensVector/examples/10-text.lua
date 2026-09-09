@@ -1,11 +1,18 @@
 -- 10 - Text in the scene
 --
 -- Text used to be out of scope here, and the advice was to layer ScriptedScreens `label`
--- elements over the artwork. It is a node now, and that changes the arithmetic:
+-- elements over the artwork. It is a node now.
 --
---   a label element   ~300 instructions to declare, re-declared to change its text, placed
---                     in console pixels, and it does not move or clip with the scene
---   a T node          one string in the data payload
+-- NOT MAINLY A BUDGET WIN. `ui:element` is a C call and costs the chip very little; the
+-- per-label cost is the Lua around it, which is the same either way. Measured on a real
+-- console, a page of 90 labels became one src and went from 31.5k instructions to 28.9k --
+-- a real saving, and a modest one.
+--
+-- What a T node actually buys:
+--
+--   * its text changes WITHOUT re-declaring an element
+--   * it is written in viewbox units, so no number is converted into console pixels twice
+--   * it moves, scales, rotates and scrolls with the group it is in
 --
 -- T MOVES WITH ITS GROUP. Rotate the group and the text rotates. Scale it and the type
 -- scales. Put it in a scroll container and it scrolls. That is the part a label cannot do at

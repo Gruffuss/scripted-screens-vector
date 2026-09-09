@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.9.0.0</Version>
+	<Version>0.9.1.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -42,13 +42,13 @@ Send [i]fill[/i] twice a second and the bar moves smoothly at display rate. Valu
 
 [b]hash(i)[/b] gives each instance of a repeat stable pseudo-random values, identical on every client with nothing transmitted — which is what makes a 400-mote particle field cost one node instead of four hundred.
 
-[h2]It also gives your chip its instructions back[/h2]
-Building a scene as nested Lua tables costs about a dozen instructions per node, and a chip only gets 50,000 per tick. A scene can instead be written as a [b]string[/b] -- one node per line -- and a string literal costs [b]nothing[/b] to build, because it is already in the compiled script.
+[h2]A scene can be written as text[/h2]
+Instead of nested Lua tables, one node per line:
 
 [code]R x=10 y=10 w=44 h=60 rx=8 f=#0B1622
 G clip=tank { YS n=24 x==8+i*1.75 y==64-$fill*52 y2=72 f=@liquid }[/code]
 
-Labels are the other half of that. A ScriptedScreens label costs around 300 instructions to declare and has to be re-declared to change its text; a text node in the scene costs a string in the data payload.
+A static layout written this way is a string literal, already in the compiled script, so it costs the chip nothing to build. A generated one costs about what the tables cost -- this is a way to write a screen, not a way to buy back your instruction budget.
 
 [h2]Resolution independent[/h2]
 Artwork is written in a viewbox and mapped onto whatever size the element is. The same scene fits a 128 px console and a 760 px one, and stays sharp on both.
@@ -66,6 +66,11 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.9.1[/b]
+[list]
+[*] Text now fades with its group. A T node takes fo, and the enclosing group's o reaches it -- so a row's text fades at the edge of a scroll container along with the artwork around it, which it previously did not.
+[*] Corrected the documentation's instruction-budget claims after a real console was ported and measured. Writing a scene as text is free when it is a literal and costs about what tables cost when it is generated; it is worth choosing for clipping, scrolling, click regions and live text, not for the budget.
+[/list]
 [b]0.9.0[/b]
 [list]
 [*] [b]Scroll containers.[/b] SC is a box that clips to itself and slides its children inside it: wheel over it or drag it and a list longer than the console moves. The scroll position stays on the client, so a wheel notch costs one mesh rebuild and nothing else -- no tick, no network message, and none of the chip's instruction budget.
@@ -100,7 +105,7 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 
 [b]0.4.0[/b]
 [list]
-[*] A scene can now be written as one string in a [b]src[/b] prop instead of nested tables — one node per line, braces for children. A Lua string literal costs zero instructions to build, where nested tables cost about a dozen per node; on a busy console that is the difference between a page fitting in a tick and having to be split across frames. Same ops, keys and expressions as the table form, and it goes through the same parser so the two cannot drift.
+[*] A scene can now be written as one string in a [b]src[/b] prop instead of nested tables — one node per line, braces for children. A static layout written this way is a literal, already in the compiled script, so it costs nothing to build; a generated one costs about what the tables cost. Same ops, keys and expressions as the table form, and it goes through the same parser so the two cannot drift.
 [/list]
 
 [b]0.3.0[/b]
