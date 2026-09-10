@@ -49,6 +49,9 @@ internal static class SceneText
 
     private const int MaxCache = 32;
 
+    /// <summary>Reused while unescaping one quoted value. Parsing is single-threaded.</summary>
+    private static readonly System.Text.StringBuilder QuotedScratch = new();
+
     /// <summary>Converts scene text into the props the table form would have produced.</summary>
     internal static SS.UiProp[]? ToProps(string text, string? sceneId)
     {
@@ -303,15 +306,48 @@ internal static class SceneText
         if (r.At < r.Text.Length && r.Text[r.At] == '"')
         {
             r.At++;
-            var start = r.At;
-            while (r.At < r.Text.Length && r.Text[r.At] != '"')
-                r.At++;
 
-            var quoted = r.Text.Substring(start, r.At - start);
+            // Backslash escapes, so a quoted value can contain the quote that delimits it.
+            // Without them a page rendering an inch mark or a JSON fragment had to substitute
+            // some other character and hope nobody looked closely.
+            //
+            // `\"` and `\\` are the two that must exist. `\n` and `\t` come along because a
+            // caller who has escapes will try them, and a literal "n" where a newline was
+            // meant is worse than either. Anything else keeps its backslash, so an unknown
+            // escape is visible rather than silently eaten.
+            var quoted = QuotedScratch;
+            quoted.Length = 0;
+
+            while (r.At < r.Text.Length && r.Text[r.At] != '"')
+            {
+                var c = r.Text[r.At];
+
+                if (c == '\\' && r.At + 1 < r.Text.Length)
+                {
+                    r.At++;
+                    var escaped = r.Text[r.At];
+                    r.At++;
+
+                    quoted.Append(escaped switch
+                    {
+                        '"' => "\"",
+                        '\\' => "\\",
+                        'n' => "\n",
+                        't' => "\t",
+                        _ => "\\" + escaped,
+                    });
+
+                    continue;
+                }
+
+                quoted.Append(c);
+                r.At++;
+            }
+
             if (r.At < r.Text.Length)
                 r.At++;
 
-            return quoted;
+            return quoted.ToString();
         }
 
         var from = r.At;

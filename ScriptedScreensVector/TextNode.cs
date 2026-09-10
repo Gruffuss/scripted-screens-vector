@@ -28,6 +28,8 @@ internal struct TextPlacement
     internal float MinSize;
     internal float Rotation;     // degrees, from the group transform
     internal Rect? ClipRect;     // canvas-space bounds of the enclosing clip, if any
+    internal bool Wrap;          // may run to more than one line
+    internal float LineHeight;   // multiple of the font size; 0 means the font's own
 }
 
 /// <summary>Fit modes for <c>T</c>.</summary>

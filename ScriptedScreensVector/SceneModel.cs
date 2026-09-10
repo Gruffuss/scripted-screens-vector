@@ -185,6 +185,12 @@ internal sealed class VecNode
 
     /// <summary>What to render when the bound value is absent. Defaults to "--".</summary>
     internal string TextMissing = "--";
+
+    /// <summary>`wrap = 1`: let the text run to more than one line inside its box.</summary>
+    internal bool Wrap;
+
+    /// <summary>`lh`: line height as a multiple of the font size. 0 leaves the font's own.</summary>
+    internal float LineHeight;
     internal Expression? TextSize;
     internal string? FontFamily;
     internal bool Bold;
@@ -714,7 +720,7 @@ internal static class SceneParser
         "sw", "so", "cap", "join", "ml", "dash", "dofs", "sd", "sdo",
         "grad", "at", "units", "stops", "fx", "fy",
         "text", "size", "align", "valign", "font", "weight", "cspace", "fit", "min_size",
-        "fmt", "unit", "missing",
+        "fmt", "unit", "missing", "wrap", "lh",
     };
 
     private static void Validate(SS.UiProp[] map, VecScene scene, string? op, string? id)
@@ -906,6 +912,16 @@ internal static class SceneParser
                 node.VAlign = TextAlign.Vertical(PropString(map, "valign"));
                 node.Fit = TextFit.Parse(PropString(map, "fit"));
                 node.CharSpacing = PropNumber(map, "cspace", 0f);
+
+                // Off by default, and that is the deliberate half. A readout that grows a
+                // second line pushes its own baseline up and shunts the layout around it,
+                // which on a console reads as a rendering fault. A paragraph asks for it.
+                node.Wrap = PropNumber(map, "wrap", 0f) > 0.5f;
+
+                // A multiple of the font size, like CSS `line-height: 1.4`, not an absolute.
+                // TMP's own lineSpacing is a percentage OFFSET from the font's natural line
+                // height, so the conversion happens where it is applied rather than here.
+                node.LineHeight = PropNumber(map, "lh", 0f);
 
                 var weight = PropString(map, "weight");
                 node.Bold = weight != null

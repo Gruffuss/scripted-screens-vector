@@ -381,6 +381,8 @@ container, where it will be clipped away and look like nothing happened.
 | `font` | a registered TMP family, e.g. from the companion fonts mod |
 | `weight` | `bold`, or a number ≥ 600 |
 | `cspace` | character spacing |
+| `wrap` | `1` lets the text run to more than one line inside its box |
+| `lh` | line height as a multiple of the font size, CSS style; omitted uses the font's own |
 | `fit` | `none` (default), `ellipsis`, `shrink` |
 | `min_size` | floor for `shrink` |
 
@@ -388,6 +390,17 @@ container, where it will be clipped away and look like nothing happened.
 { op = "T", x = 8, y = 8, w = 120, h = 20, text = "$pressure",
   size = 14, f = "#EAF4F8", align = "right", fit = "ellipsis" }
 ```
+
+**Single line unless you ask.** A readout that quietly becomes two lines pushes its own
+baseline and shunts everything the scene placed around it, which reads as a rendering fault
+rather than as a long string. A paragraph says so:
+
+```lua
+{ op = "T", x = 8, y = 8, w = 180, h = 60, text = "$body",
+  wrap = 1, lh = 1.4, size = 9, f = "#8FA6B8" }
+```
+
+`lh` is a multiple, as in CSS `line-height: 1.4`, not an absolute.
 
 **Text is not part of the mesh, and that shapes what it can do.** TMP builds its own geometry
 on its own GameObject and is main-thread only, while tessellation runs on a worker — so the

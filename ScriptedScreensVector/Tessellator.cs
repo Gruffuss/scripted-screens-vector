@@ -561,6 +561,8 @@ internal static class Tessellator
             Fit = node.Fit,
             MinSize = (node.MinSize?.Evaluate(context) ?? 6f) * frame.Scale,
             Rotation = -Mathf.Atan2(frame.Matrix.m10, frame.Matrix.m00) * Mathf.Rad2Deg,
+            Wrap = node.Wrap,
+            LineHeight = node.LineHeight,
             ClipRect = clip,
         });
     }

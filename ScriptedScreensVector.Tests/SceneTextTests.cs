@@ -20,6 +20,8 @@ namespace ScriptedScreensVector.Tests;
 internal static class SceneTextTests
 {
     private const string Nl = "\n";
+    private const string Q = "\"";
+    private const string BS = "\\";
 
     /// <summary>Renders a prop tree as text so two can be compared and a diff read.</summary>
     private static string Dump(SS.UiProp[]? props, int depth = 0)
@@ -252,5 +254,48 @@ YS n=12 x==6+i*3 y==64-$fill*52 y2=72 f=@liquid fo=0 fo2=0.62
             text.Contains("s_ = \"#1E3247\"") ? 1d : 0d, 1d, 0.001d, 0, 0);
         run.Check("scenetext: bare fea=0 is a value, not a flag",
             text.Contains("fea = 0") ? 1d : 0d, 1d, 0.001d, 0, 0);
+    }
+
+    /// <summary>Backslash escapes inside a quoted value.</summary>
+    /// <remarks>
+    /// The failure this prevents is quiet: before escapes existed, a value containing the
+    /// quote that delimits it ended the token early and the rest of the line became separate
+    /// attributes -- no error, just a node with keys nobody wrote. An unknown escape keeps
+    /// its backslash for the same reason, so it shows up rather than vanishing.
+    /// </remarks>
+    internal static void QuotedEscapes(TestRun run)
+    {
+        // Built by concatenation rather than as one literal: the value under test is a
+        // backslash next to a quote, and writing that inline makes the C# source itself
+        // ambiguous to read.
+        var props = SceneText.ToProps(string.Join(Nl, new[]
+        {
+            "T x=0 y=0 w=100 h=20 id=a text=" + Q + "6" + BS + Q + " of travel" + Q,
+            "T x=0 y=0 w=100 h=20 id=b text=" + Q + "back" + BS + BS + "slash" + Q,
+            "T x=0 y=0 w=100 h=20 id=c text=" + Q + "two" + Q + " lh=1.4 wrap=1",
+            "T x=0 y=0 w=100 h=20 id=d text=" + Q + "keep" + BS + "q it" + Q,
+        }), null);
+
+        var text = Dump(props);
+
+        run.Check("scenetext: escaped quote survives",
+            text.Contains("6\" of travel") ? 1d : 0d, 1d, 0.001d, 0, 0);
+
+        // Every node has to have survived. An escape that ended its token early would have
+        // spilled the rest of that line into junk attributes and lost the nodes after it.
+        run.Check("scenetext: all four nodes parsed",
+            text.Contains("\"a\"") && text.Contains("\"b\"")
+            && text.Contains("\"c\"") && text.Contains("\"d\"") ? 1d : 0d, 1d, 0.001d, 0, 0);
+
+        run.Check("scenetext: escaped backslash collapses to one",
+            text.Contains("back\\slash") ? 1d : 0d, 1d, 0.001d, 0, 0);
+
+        run.Check("scenetext: wrap and lh arrive",
+            text.Contains("lh = 1.4") && text.Contains("wrap = 1") ? 1d : 0d, 1d, 0.001d, 0, 0);
+
+        // An escape this does not know keeps its backslash rather than being eaten, so a typo
+        // is visible in the render instead of silently deleting a character.
+        run.Check("scenetext: unknown escape keeps its backslash",
+            text.Contains("keep\\q it") ? 1d : 0d, 1d, 0.001d, 0, 0);
     }
 }

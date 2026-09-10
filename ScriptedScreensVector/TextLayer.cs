@@ -89,6 +89,18 @@ internal sealed class TextLayer
         label.fontStyle = placement.Bold ? FontStyles.Bold : FontStyles.Normal;
         label.alignment = Alignment(placement);
 
+        // Single line unless the node asked otherwise. TMP wraps by default, and a label
+        // that silently becomes two lines moves its own text off the baseline the scene
+        // placed it on -- which looks like a bug in the console, not a long string.
+        label.enableWordWrapping = placement.Wrap;
+
+        // TMP's lineSpacing is a PERCENTAGE OFFSET from the font's natural line height, not
+        // a multiplier, so `lh = 1` is 0 and `lh = 1.4` is +40. Written as a CSS-style
+        // multiple because that is what an author porting a page already has in hand.
+        label.lineSpacing = placement.LineHeight > 0.01f
+            ? (placement.LineHeight - 1f) * 100f
+            : 0f;
+
         // `ellipsis` and `shrink` are TMP's own overflow modes, so the fitting is done by the
         // text engine that knows the glyph metrics rather than guessed at here.
         switch (placement.Fit)
