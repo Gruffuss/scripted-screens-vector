@@ -134,7 +134,10 @@ internal static class Shadow
         if (rings <= 1 || reach <= 0.0001f)
             return;
 
-        // Then a strip per ring outward, alpha falling along the Gaussian.
+        // Then a strip per ring outward, alpha falling along the Gaussian. Each ring reports
+        // where its outer edge landed so the next one can index it instead of repeating it.
+        var previous = -1;
+
         for (var r = 0; r < rings; r++)
         {
             var dInner = reach - r * (2f * reach / rings);
@@ -145,7 +148,7 @@ internal static class Shadow
             var aInner = shadow.Colour.a * Coverage(dInner, sigma);
             var aOuter = shadow.Colour.a * Coverage(dOuter, sigma);
 
-            EmitRing(vh, inner, outer, shadow.Colour, aInner, aOuter, matrix, clip);
+            previous = EmitRing(vh, inner, outer, shadow.Colour, aInner, aOuter, matrix, clip, previous);
 
             // The outer contour becomes the next ring's inner one.
             (inner, outer) = (outer, inner);
@@ -155,11 +158,33 @@ internal static class Shadow
         _outer = outer;
     }
 
-    private static void EmitRing(MeshBuilder vh, List<Vector2> inner, List<Vector2> outer, Color colour, float aInner, float aOuter, Matrix4x4 matrix, ClipRegion? clip)
+    /// <summary>
+    /// One ring of the blur, from <paramref name="inner"/> out to <paramref name="outer"/>.
+    /// </summary>
+    /// <remarks>
+    /// **Consecutive rings share a contour.** Ring r's outer edge and ring r+1's inner edge
+    /// are the same points at the same alpha -- the distance steps are laid out so that
+    /// <c>dOuter(r) == dInner(r+1)</c>, and the contour list is literally handed forward by the
+    /// caller. Emitting both meant a shadow paid <c>2N</c> rings' worth of vertices where
+    /// <c>N+1</c> would do. An eight-ring shadow on a rounded card was 640 vertices; it is 360
+    /// now, and it looks the same.
+    ///
+    /// <paramref name="previous"/> is where the last ring put its outer vertices, or -1 for
+    /// the first ring. **A clip forces the long way round**: the two clamps take different
+    /// reference points -- ring r clamps its outer against its own inner, ring r+1 clamps that
+    /// same contour against itself -- so the results are not guaranteed to coincide and
+    /// sharing them would tear the ring where the clip bites.
+    /// </remarks>
+    private static int EmitRing(MeshBuilder vh, List<Vector2> inner, List<Vector2> outer, Color colour, float aInner, float aOuter, Matrix4x4 matrix, ClipRegion? clip, int previous)
     {
         var count = inner.Count;
-        if (count < 3 || outer.Count != count || vh.currentVertCount + count * 2 > 60000)
-            return;
+        var share = previous >= 0 && clip == null;
+
+        if (count < 3 || outer.Count != count
+            || Tessellator.Starved(vh, share ? count : count * 2, "a shadow"))
+        {
+            return -1;
+        }
 
         var ci = colour; ci.a = aInner;
         var co = colour; co.a = aOuter;
@@ -168,29 +193,44 @@ internal static class Shadow
         var outer32 = (Color32)co;
         var origin = vh.currentVertCount;
 
+        // Inner edge first, then outer, rather than interleaved pairs. That keeps the OUTER
+        // vertices contiguous, which is the whole point: the next ring indexes them as
+        // `base + i`, and a strided layout could not be indexed that way at all.
+        if (!share)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                var a = inner[i];
+                if (clip != null)
+                    a = clip.ClampInside(a, a);
+
+                vh.AddVert(matrix.MultiplyPoint3x4(a), inner32, Vector2.zero);
+            }
+        }
+
+        var outerBase = vh.currentVertCount;
+
         for (var i = 0; i < count; i++)
         {
-            var a = inner[i];
             var b = outer[i];
-
             if (clip != null)
-            {
-                a = clip.ClampInside(a, a);
                 b = clip.ClampInside(inner[i], b);
-            }
 
-            vh.AddVert(matrix.MultiplyPoint3x4(a), inner32, Vector2.zero);
             vh.AddVert(matrix.MultiplyPoint3x4(b), outer32, Vector2.zero);
         }
 
+        var innerBase = share ? previous : origin;
+
         for (var i = 0; i < count; i++)
         {
-            var a = origin + i * 2;
-            var c = origin + ((i + 1) % count) * 2;
+            var next = (i + 1) % count;
 
-            vh.AddTriangle(a, a + 1, c + 1);
-            vh.AddTriangle(a, c + 1, c);
+            vh.AddTriangle(innerBase + i, outerBase + i, outerBase + next);
+            vh.AddTriangle(innerBase + i, outerBase + next, innerBase + next);
         }
+
+        // Where this ring's OUTER vertices start, so the next can index them as its inner.
+        return outerBase;
     }
 
     /// <summary>Fills the solid core. Convex is the common case and fans directly.</summary>

@@ -235,6 +235,14 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// </remarks>
     private float _countersSince = -1f;
 
+    /// <summary>Vertices in the mesh as it stands, unaffected by the stats reset.</summary>
+    /// <remarks>
+    /// `_peakVertices` is cleared every reporting interval, so a STATIC scene -- which does not
+    /// rebuild and therefore never refills it -- reported zero vertices for ever after. That is
+    /// exactly the scene whose size you most want to ask about.
+    /// </remarks>
+    private int _lastVertices;
+
     private double _tessellateCpuMs;
     private double _bandSampleMs;
     private double _bandStripMs;
@@ -447,7 +455,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             return;
         }
 
-        into.AppendLine($"  nodes {_scene.Root.Count} root, {_lastShapeCount} shapes emitted, {_peakVertices} verts");
+        into.AppendLine($"  nodes {_scene.Root.Count} root, {_lastShapeCount} shapes emitted, {_lastVertices} verts");
 
         var tess = _rebuilds > 0 ? _tessellateMs / _rebuilds : 0d;
         var up = _rebuilds > 0 ? _uploadMs / _rebuilds : 0d;
@@ -461,6 +469,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         var size = _screenPixels < 0f ? "size unknown" : VectorStatsTool.N(_screenPixels, 0) + " px";
         into.AppendLine($"  on screen {size}, animated {_scene.UsesTime}, scroll-driven {_scene.UsesScroll}");
+
+        if (_stats.Starved != null)
+            into.AppendLine($"  TOO LARGE at this size: {_stats.Starved} was dropped");
 
         if (_scene.Problems.Count > 0)
         {
@@ -1061,6 +1072,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         }
 
         _lastShapeCount = _stats.Shapes;
+        _lastVertices = _builder.currentVertCount;
 
         for (var i = 0; i < _opMs.Length; i++)
         {

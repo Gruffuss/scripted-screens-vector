@@ -215,6 +215,9 @@ internal static class Tessellator
         if (HitsFound != null)
             stats.Hits.AddRange(HitsFound);
 
+        stats.Starved = PeekStarved();
+        _starved = null;
+
         stats.Scrolls.Clear();
         if (ScrollsFound != null)
             stats.Scrolls.AddRange(ScrollsFound);
@@ -275,20 +278,20 @@ internal static class Tessellator
         foreach (var node in scene.Root)
             EmitNode(vh, scene, node, context, stack, ref emitted);
 
-        // Over budget is a scene problem like any other: magenta border, a line in
-        // vector_stats, and the mechanism that was refused. Silence here was the whole
-        // complaint -- a console drew less than it was asked to and nothing said which part
-        // went missing, which reads as a mistake in the scene rather than as a ceiling.
-        var starved = TakeStarved();
-        if (starved != null)
-            scene.Problem($"scene is too large for one mesh: {starved} was dropped at {MaxVertices} vertices");
 
         // A scene that drew nothing, or one that parsed with problems, gets a visible
         // marker. Silence is the worst possible failure mode here: a bad clip id, a rejected
         // non-convex clip and an unknown op all render as an empty console, which looks
         // exactly like the screen being switched off.
-        if (scene.Problems.Count > 0 || emitted == 0)
-            EmitErrorMarker(vh, target, scene.Problems.Count);
+        // Running out of room is a fault of THIS rebuild, not of the scene, so it is not filed
+        // in `Problems` -- that list is parse-time and is never cleared, which would have left
+        // the border burned on for good after one close pass and no way to see it clear when
+        // you walked away again. It is peeked here for the marker and harvested into the
+        // rebuild's stats, where it lives exactly as long as it is true.
+        var starved = PeekStarved();
+
+        if (scene.Problems.Count > 0 || starved != null || emitted == 0)
+            EmitErrorMarker(vh, target, scene.Problems.Count + (starved == null ? 0 : 1));
 
         return emitted;
     }
@@ -1108,6 +1111,10 @@ internal static class Tessellator
 
         var contour = outer;
 
+        // Where the fill put its outline vertices, when it took the shared-fan path. -1 when
+        // it did not, because only that path lays down one vertex per contour point in order.
+        var shared = -1;
+
         if (frame.Clip != null)
         {
             // Clipping a filled shape reshapes its boundary, so it happens before
@@ -1159,7 +1166,7 @@ internal static class Tessellator
             }
             else if (holes == null && !NeedsRefinement(paint) && IsConvex(contour))
             {
-                FanShared(vh, contour, paint, frame.Matrix);
+                shared = FanShared(vh, contour, paint, frame.Matrix);
             }
             else if (Triangulator.Triangulate(contour, holes, out var vertices, out var indices))
             {
@@ -1179,7 +1186,7 @@ internal static class Tessellator
         // and disappeared and the whole thing shimmered.
         var feather = FeatherWidth(node, context, frame.Scale) * FeatherFalloff(contour, FeatherWidth(node, context, frame.Scale));
         if (feather > 0.0001f)
-            FeatherRing(vh, contour, paint, feather, frame.Matrix, frame.Clip);
+            FeatherRing(vh, contour, paint, feather, frame.Matrix, frame.Clip, shared);
     }
 
     /// <summary>
@@ -1558,17 +1565,12 @@ internal static class Tessellator
             _starved ??= "a stroke";
     }
 
-    /// <summary>Reads and clears the starvation note. A method, not a field read, because the
-    /// analyser cannot see that <see cref="Starved"/> writes it and calls the check dead.</summary>
-    private static string? TakeStarved()
-    {
-        var was = _starved;
-        _starved = null;
-        return was;
-    }
+    /// <summary>Reads the starvation note without clearing it. A method, not a field read,
+    /// because the analyser cannot see that <see cref="Starved"/> writes it.</summary>
+    private static string? PeekStarved() => _starved;
 
     /// <summary>True when <paramref name="extra"/> more vertices will not fit, and says so.</summary>
-    private static bool Starved(MeshBuilder vh, int extra, string op)
+    internal static bool Starved(MeshBuilder vh, int extra, string op)
     {
         if (vh.currentVertCount + extra <= MaxVertices)
             return false;
@@ -1596,11 +1598,18 @@ internal static class Tessellator
     /// six vertices where four would do. Sharing matters here because a mote field emits
     /// thousands of these per frame.
     /// </remarks>
-    private static void FanShared(MeshBuilder vh, List<Vector2> outline, Paint paint, Matrix4x4 matrix)
+    /// <summary>Fans a convex outline, and reports where its vertices landed.</summary>
+    /// <remarks>
+    /// The index is returned so the feather ring can INDEX these rather than emit its own
+    /// copies. It lays down exactly one vertex per outline point, in order, at
+    /// <c>matrix * outline[i]</c> coloured <c>paint.At(outline[i])</c> -- which is, point for
+    /// point and colour for colour, what the ring's inner edge would otherwise duplicate.
+    /// </remarks>
+    private static int FanShared(MeshBuilder vh, List<Vector2> outline, Paint paint, Matrix4x4 matrix)
     {
         var count = outline.Count;
         if (count < 3 || Starved(vh, count, "a fill"))
-            return;
+            return -1;
 
         var origin = vh.currentVertCount;
 
@@ -1609,6 +1618,8 @@ internal static class Tessellator
 
         for (var i = 1; i < count - 1; i++)
             vh.AddTriangle(origin, origin + i, origin + i + 1);
+
+        return origin;
     }
 
     private static bool IsConvex(List<Vector2> points)
@@ -1942,10 +1953,30 @@ internal static class Tessellator
     /// normal is wrong for anything long and thin — on a 1x1 mote or a 2-unit column it
     /// would feather the short sides far more than the long ones.
     /// </remarks>
-    private static void FeatherRing(MeshBuilder vh, List<Vector2> outline, Paint paint, float width, Matrix4x4 matrix, ClipRegion? clip)
+    /// <summary>
+    /// A soft ramp from the shape's edge out to nothing.
+    /// </summary>
+    /// <remarks>
+    /// **The inner edge is the fill's own outline, and is shared with it when possible.** The
+    /// ring used to emit two vertices per point: one at the outline, solid, and one offset
+    /// outward at zero alpha. The first was an exact duplicate -- same position through the
+    /// same matrix, same colour from the same paint -- of a vertex the fill had just written.
+    ///
+    /// Measured on 400 circles at 1591 px: 60 vertices each with the ring, 20 without. Sharing
+    /// takes a feathered shape from three rings' worth to two, a third off everything that
+    /// feathers, and the picture does not change by one pixel.
+    ///
+    /// Only the shared-fan fill qualifies. Ear clipping builds its own vertex list, and a
+    /// radial fill emits concentric rings, so neither leaves the outline sitting in order at a
+    /// known index. <paramref name="sharedBase"/> is -1 for those and the ring emits both edges
+    /// as before.
+    /// </remarks>
+    private static void FeatherRing(MeshBuilder vh, List<Vector2> outline, Paint paint, float width, Matrix4x4 matrix, ClipRegion? clip, int sharedBase = -1)
     {
         var count = outline.Count;
-        if (count < 3 || Starved(vh, count * 2, "a feather ring"))
+        var share = sharedBase >= 0;
+
+        if (count < 3 || Starved(vh, share ? count : count * 2, "a feather ring"))
             return;
 
         var winding = Mathf.Sign(Triangulator.SignedArea(outline));
@@ -1976,16 +2007,25 @@ internal static class Tessellator
             if (clip != null)
                 outer = clip.ClampInside(outline[i], outer);
 
-            vh.AddVert(matrix.MultiplyPoint3x4(outline[i]), solid, Vector2.zero);
+            if (!share)
+                vh.AddVert(matrix.MultiplyPoint3x4(outline[i]), solid, Vector2.zero);
+
             vh.AddVert(matrix.MultiplyPoint3x4(outer), faded, Vector2.zero);
         }
 
         for (var i = 0; i < count; i++)
         {
-            var a = origin + i * 2;
-            var b = origin + ((i + 1) % count) * 2;
-            vh.AddTriangle(a, a + 1, b + 1);
-            vh.AddTriangle(a, b + 1, b);
+            var next = (i + 1) % count;
+
+            // Inner comes from the fill when shared, from this ring when not; outer always
+            // from this ring. Same two triangles either way, different index bases.
+            var innerA = share ? sharedBase + i : origin + i * 2;
+            var innerB = share ? sharedBase + next : origin + next * 2;
+            var outerA = share ? origin + i : origin + i * 2 + 1;
+            var outerB = share ? origin + next : origin + next * 2 + 1;
+
+            vh.AddTriangle(innerA, outerA, outerB);
+            vh.AddTriangle(innerA, outerB, innerB);
         }
     }
 

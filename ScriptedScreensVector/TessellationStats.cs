@@ -34,6 +34,14 @@ internal sealed class TessellationStats
     /// <summary>Scroll containers the walk found, for wheel and drag to hit-test against.</summary>
     internal readonly System.Collections.Generic.List<ScrollRegion> Scrolls = new();
 
+    /// <summary>What ran out of vertex budget this rebuild, or null. Per REBUILD.</summary>
+    /// <remarks>
+    /// Not a scene problem: a scene is only too large at the size it is currently drawn, so
+    /// filing it with the parse-time faults would burn the marker on permanently after one
+    /// close pass.
+    /// </remarks>
+    internal string? Starved;
+
     /// <summary>Data names the scene asked for and did not get, this rebuild.</summary>
     internal readonly System.Collections.Generic.List<string> Missing = new();
 }

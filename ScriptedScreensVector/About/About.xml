@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.10.4.0</Version>
+	<Version>0.10.6.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -66,6 +66,11 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.10.5[/b]
+[list]
+[*] Fixed: a console that ran out of room once kept its magenta border for ever, because running out was filed with the scene's parse-time faults, which are never cleared. It is a fault of the size you are standing at, so it now clears when it stops being true.
+[*] [b]Feathered shapes cost a third less, and shadows nearly half[/b], with no change to how either looks. Both were emitting a contour twice: a feather ring wrote its inner edge at the same positions and colours the fill had just written, and each ring of a blurred shadow rewrote the contour the previous ring had already laid down. They index the shared edge now. Measured on 400 feathered circles: 60 vertices each became 40.
+[/list]
 [b]0.10.4[/b]
 [list]
 [*] [b]Running out of room says so.[/b] Going over the ceiling used to drop geometry silently -- something on the console was simply missing, with nothing in the log and nothing on screen to say which part. It now raises a scene problem naming what was refused, so it gets the magenta border and a line in vector_stats like every other fault.
