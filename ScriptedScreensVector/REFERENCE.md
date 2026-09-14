@@ -114,6 +114,7 @@ A scene reports its own faults rather than drawing nothing and leaving you to gu
 
 | fault | what happens |
 |-------|--------------|
+| the scene is too large for one mesh | reported, naming what was dropped |
 | unknown op | reported; the node is skipped |
 | unknown attribute name | reported, with the op and the node id |
 | malformed expression | reported; that attribute falls back to its default |

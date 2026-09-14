@@ -147,6 +147,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 }
 
                 graphic._rebuilds = 0;
+                graphic._countersSince = now;
                 graphic._milliseconds = 0d;
                 graphic._tessellateMs = 0d;
                 graphic._uploadMs = 0d;
@@ -223,6 +224,16 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     private ScrollRect? _scroll;
     private bool _scrollSearched;
     private float _lastScrollY = float.NaN;
+
+    /// <summary>When the counters were last cleared, so a rate can be a real rate.</summary>
+    /// <remarks>
+    /// `vector_stats` used to divide the rebuild count by the five-second reporting interval,
+    /// which is only right if a report has just happened. Reports only happen when Diagnostics
+    /// is on, so with it off the counters were never cleared and the figure was the LIFETIME
+    /// total over five -- a console quietly sitting still reported two thousand rebuilds a
+    /// second. Dividing by the elapsed time instead is right either way.
+    /// </remarks>
+    private float _countersSince = -1f;
 
     private double _tessellateCpuMs;
     private double _bandSampleMs;
@@ -441,7 +452,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         var tess = _rebuilds > 0 ? _tessellateMs / _rebuilds : 0d;
         var up = _rebuilds > 0 ? _uploadMs / _rebuilds : 0d;
 
-        into.AppendLine($"  rebuilds {VectorStatsTool.N(_rebuilds / 5d)}/s, "
+        var window = _countersSince < 0f ? 0f : Now() - _countersSince;
+        var rate = window > 0.05f ? _rebuilds / window : 0f;
+
+        into.AppendLine($"  rebuilds {VectorStatsTool.N(rate)}/s over {VectorStatsTool.N(window, 0)}s, "
                         + $"{VectorStatsTool.N(tess)} ms tessellate off-thread, "
                         + $"{VectorStatsTool.N(up)} ms upload on-thread");
 
@@ -865,6 +879,17 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             return;
 
         _mesh = new Mesh { name = "VectorSurface" };
+
+        // 32-BIT INDICES. The default is 16-bit, which cannot address past 65,535 vertices --
+        // and this renderer's ceiling was a margin under that, not a choice. Hitting it drops
+        // geometry, and no amount of spreading the work over frames helps: every vertex has to
+        // be in the SAME mesh at the same instant for the picture to be complete, so a vertex
+        // deferred is a hole, not a delay.
+        //
+        // The cost is the index buffer doubling, four bytes per index instead of two. For a
+        // busy console that is a few hundred kilobytes, against geometry that silently
+        // vanished before.
+        _mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
         _mesh.MarkDynamic();
     }
 
@@ -1062,6 +1087,11 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // Only take pointer events when the scene has something that answers them, so a
         // plain decorative surface stays transparent to the pointer as it always was.
         raycastTarget = _hits.Count > 0 || _scrolls.Count > 0;
+
+        // Started on the first rebuild, not on the first REPORT: reports only happen when
+        // Diagnostics is on, and vector_stats has to give a real rate either way.
+        if (_countersSince < 0f)
+            _countersSince = Now();
 
         _rebuilds++;
         _milliseconds += tessellateMs + _stopwatch.Elapsed.TotalMilliseconds;

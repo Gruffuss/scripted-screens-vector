@@ -149,4 +149,34 @@ internal static class RadialFillTests
         CheckStitch(run, 7, 23);    // coprime, so no step ever lines up
         CheckStitch(run, 1, 16);    // a degenerate inner ring
     }
+
+    internal static void OneFillCannotExhaustASurface(TestRun run)
+    {
+        // The mesh holds 250,000 vertices. A single radial fill has to stay well inside that
+        // on its own, or one gradient could starve everything drawn after it -- which is the
+        // failure this whole pass exists to make visible rather than to allow.
+        //
+        // Worst case: the hard 96-ring cap against the coarsest outline a shape can produce.
+        // An ellipse tops out at 48 points and a rounded rect at 64, but a flattened path is
+        // not bounded the same way, so 256 is a deliberately pessimistic stand-in.
+        var ellipse = RadialFill.VertexCount(48, 96);
+        var roundedRect = RadialFill.VertexCount(64, 96);
+        var fatPath = RadialFill.VertexCount(256, 96);
+
+        run.Check("radial: worst ellipse fill", ellipse, 2577d, 0.05d, 0, 0);
+        run.Check("radial: worst rounded-rect fill", roundedRect, 3289d, 0.0001d, 0, 0);
+
+        // Even the pessimistic one is a twentieth of the surface, so a page can hold plenty.
+        run.Check("radial: even a 256-point outline stays under a tenth of the mesh",
+            fatPath < 25000 ? 1d : 0d, 1d, 0.001d, 0, 0);
+
+        // And the prediction the budget check relies on must never UNDER-count, or the check
+        // passes and the emit overruns. It is the sum of the same Points() the emit loop uses,
+        // so this pins that they stay in step.
+        var summed = 1;
+        for (var ring = 1; ring <= 96; ring++)
+            summed += RadialFill.Points(64, ring, 96);
+
+        run.Check("radial: the budget prediction matches the emit", roundedRect, summed, 0.0001d, 0, 0);
+    }
 }

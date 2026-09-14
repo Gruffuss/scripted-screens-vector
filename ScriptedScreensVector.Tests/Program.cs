@@ -116,6 +116,7 @@ internal static class Program
         RadialFillTests.InnerRingsAreCoarser(run);
         RadialFillTests.TheSavingIsReal(run);
         RadialFillTests.StitchCoversTheAnnulus(run);
+        RadialFillTests.OneFillCannotExhaustASurface(run);
 
         Console.WriteLine();
         GradientTests.LinearParameter(run);

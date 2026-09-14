@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.10.3.0</Version>
+	<Version>0.10.4.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -66,6 +66,12 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.10.4[/b]
+[list]
+[*] [b]A console can hold four times the geometry[/b]: the ceiling was 60,000 vertices, a limit of 16-bit mesh indices rather than a choice, and the mesh uses 32-bit indices now. Measured on a real page that was pinned at the old ceiling and losing two thirds of its shapes.
+[*] [b]Running out of room says so.[/b] Going over the ceiling used to drop geometry silently -- something on the console was simply missing, with nothing in the log and nothing on screen to say which part. It now raises a scene problem naming what was refused, so it gets the magenta border and a line in vector_stats like every other fault.
+[*] Fixed: vector_stats reported a nonsense rebuild rate unless Diagnostics was switched on, because it divided by the reporting interval whether or not a report had happened.
+[/list]
 [b]0.10.3[/b]
 [list]
 [*] [b]Radial gradients cost about half the mesh they used to[/b], and a small many-stop one far less. Band count now respects what the screen can resolve -- a thirteen-stop ramp on a six-pixel shape was drawing ninety-six bands of detail finer than a pixel -- and rings near the centre carry fewer points, since a ring at a tenth of the radius has a tenth of the circumference. This matters because a surface has a hard vertex ceiling that fails by dropping geometry silently.

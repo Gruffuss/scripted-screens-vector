@@ -27,7 +27,18 @@ namespace ScriptedScreensVector;
 /// </remarks>
 internal static class Tessellator
 {
-    private const int MaxVertices = 60000;
+    /// <summary>Most vertices one surface's mesh may hold.</summary>
+    /// <remarks>
+    /// Was 60,000: a margin under the 65,535 a 16-bit index buffer can address. The mesh uses
+    /// 32-bit indices now, so the hardware ceiling is gone and this is purely a sanity bound
+    /// -- a runaway scene should still not be able to eat memory without limit.
+    ///
+    /// A vertex costs 24 bytes here (position, colour, one UV) plus its share of indices, so
+    /// 250,000 is about 9 MB per surface at full stretch. Deliberately not a config knob: the
+    /// right value is not a judgement anyone has had to make, and the scene that reaches it
+    /// now says so instead of failing quietly.
+    /// </remarks>
+    private const int MaxVertices = 250000;
     private const int MinCornerSegments = 3;
     private const int MaxCornerSegments = 16;
     private const int MinEllipseSegments = 6;
@@ -74,6 +85,16 @@ internal static class Tessellator
     [ThreadStatic] internal static List<HitRegion>? HitsFound;
 
     [ThreadStatic] internal static List<ScrollRegion>? ScrollsFound;
+
+    /// <summary>The op that first ran out of vertex budget this rebuild, or null.</summary>
+    /// <remarks>
+    /// Every budget check used to be a bare `return`, so a scene over the ceiling simply drew
+    /// less than it asked for, with nothing in the log and nothing on screen to say which part
+    /// went missing. Recording the first op to be refused turns that into the magenta border
+    /// and a named problem, which is what the rest of the diagnostics already do for every
+    /// other kind of fault.
+    /// </remarks>
+    [ThreadStatic] private static string? _starved;
 
     /// <summary>Index triples for one radial band, reused so a fill allocates nothing.</summary>
     [ThreadStatic] private static List<int>? _ringIndices;
@@ -223,6 +244,8 @@ internal static class Tessellator
         BandFeatherMs = 0d;
         BandQuads = 0;
 
+        _starved = null;
+
         (TextFound ??= new List<TextPlacement>(16)).Clear();
         (HitsFound ??= new List<HitRegion>(16)).Clear();
         (ScrollsFound ??= new List<ScrollRegion>(4)).Clear();
@@ -253,6 +276,14 @@ internal static class Tessellator
         foreach (var node in scene.Root)
             EmitNode(vh, scene, node, context, stack, ref emitted);
 
+        // Over budget is a scene problem like any other: magenta border, a line in
+        // vector_stats, and the mechanism that was refused. Silence here was the whole
+        // complaint -- a console drew less than it was asked to and nothing said which part
+        // went missing, which reads as a mistake in the scene rather than as a ceiling.
+        var starved = TakeStarved();
+        if (starved != null)
+            scene.Problem($"scene is too large: {starved} was dropped at {MaxVertices} vertices");
+
         // A scene that drew nothing, or one that parsed with problems, gets a visible
         // marker. Silence is the worst possible failure mode here: a bad clip id, a rejected
         // non-convex clip and an unknown op all render as an empty console, which looks
@@ -279,7 +310,7 @@ internal static class Tessellator
 
         void Bar(float x, float y, float w, float h)
         {
-            if (vh.currentVertCount + 4 > MaxVertices)
+            if (Starved(vh, 4, "the error marker"))
                 return;
 
             var origin = vh.currentVertCount;
@@ -322,7 +353,7 @@ internal static class Tessellator
 
     private static void EmitNode(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
     {
-        if (vh.currentVertCount >= MaxVertices)
+        if (Starved(vh, 1, "a node"))
             return;
 
         switch (node.Op)
@@ -404,7 +435,7 @@ internal static class Tessellator
 
                 for (var i = 0; i < instances; i++)
                 {
-                    if (vh.currentVertCount >= MaxVertices)
+                    if (Starved(vh, 1, "a repeat"))
                         break;
 
                     // `n` stays the authored count inside expressions: reducing it would
@@ -831,7 +862,7 @@ internal static class Tessellator
 
         if (!clipped && !NeedsRefinement(paint))
         {
-            if (vh.currentVertCount + samples * 2 > MaxVertices)
+            if (Starved(vh, samples * 2, "a band"))
                 return;
 
             var origin = vh.currentVertCount;
@@ -1305,7 +1336,7 @@ internal static class Tessellator
     /// <summary>Fans a clipped piece, ramping alpha by each vertex's depth into the band.</summary>
     private static void FanRamped(MeshBuilder vh, List<Vector2> piece, Paint paint, Matrix4x4 matrix, float edgeY, float farY, float opacityY, float opacityY2)
     {
-        if (vh.currentVertCount + piece.Count > MaxVertices)
+        if (Starved(vh, piece.Count, "a ramped fill"))
             return;
 
         var span = farY - edgeY;
@@ -1510,6 +1541,43 @@ internal static class Tessellator
         stack.Pop();
     }
 
+    /// <summary>
+    /// Strokes, with the budget noticed from outside.
+    /// </summary>
+    /// <remarks>
+    /// <c>Stroke.Emit</c> takes the ceiling as a number and stops when it reaches it, and it
+    /// has no way to say so. Comparing the count before and after catches the one case the
+    /// helper below cannot: a stroke that stopped halfway along its own path.
+    /// </remarks>
+    private static void StrokeWithBudget(MeshBuilder vh, List<Vector2> points, bool closed, float width, Paint paint, VecNode node, float feather, Matrix4x4 matrix)
+    {
+        var before = vh.currentVertCount;
+
+        Stroke.Emit(vh, points, closed, width, paint, node.Cap, node.Join, node.MiterLimit, feather, matrix, MaxVertices);
+
+        if (vh.currentVertCount >= MaxVertices && vh.currentVertCount > before)
+            _starved ??= "a stroke";
+    }
+
+    /// <summary>Reads and clears the starvation note. A method, not a field read, because the
+    /// analyser cannot see that <see cref="Starved"/> writes it and calls the check dead.</summary>
+    private static string? TakeStarved()
+    {
+        var was = _starved;
+        _starved = null;
+        return was;
+    }
+
+    /// <summary>True when <paramref name="extra"/> more vertices will not fit, and says so.</summary>
+    private static bool Starved(MeshBuilder vh, int extra, string op)
+    {
+        if (vh.currentVertCount + extra <= MaxVertices)
+            return false;
+
+        _starved ??= op;
+        return true;
+    }
+
     private static void Charge(VecOp op, long mark)
     {
         OpMilliseconds[(int)op] += (Stopwatch.GetTimestamp() - mark) * 1000d / Stopwatch.Frequency;
@@ -1532,7 +1600,7 @@ internal static class Tessellator
     private static void FanShared(MeshBuilder vh, List<Vector2> outline, Paint paint, Matrix4x4 matrix)
     {
         var count = outline.Count;
-        if (count < 3 || vh.currentVertCount + count > MaxVertices)
+        if (count < 3 || Starved(vh, count, "a fill"))
             return;
 
         var origin = vh.currentVertCount;
@@ -1598,7 +1666,7 @@ internal static class Tessellator
         var screenRadius = sceneRadius * scale * ScreenScale;
         var rings = RadialFill.Rings(screenRadius, paint.Gradient.StopCount);
 
-        if (vh.currentVertCount + RadialFill.VertexCount(count, rings) > MaxVertices)
+        if (Starved(vh, RadialFill.VertexCount(count, rings), "a radial gradient"))
             return;
 
         var indices = RingIndices;
@@ -1720,7 +1788,7 @@ internal static class Tessellator
 
     private static void Triangle(MeshBuilder vh, Vector2 a, Vector2 b, Vector2 c, Paint paint, Matrix4x4 matrix)
     {
-        if (vh.currentVertCount + 3 > MaxVertices)
+        if (Starved(vh, 3, "a triangle"))
             return;
 
         var origin = vh.currentVertCount;
@@ -1761,12 +1829,12 @@ internal static class Tessellator
             // redirected along the boundary the way a filled contour is.
             if (frame.Clip == null)
             {
-                Stroke.Emit(vh, run, wasClosed, width, paint, node.Cap, node.Join, node.MiterLimit, feather, frame.Matrix, MaxVertices);
+                StrokeWithBudget(vh, run, wasClosed, width, paint, node, feather, frame.Matrix);
                 continue;
             }
 
             foreach (var piece in frame.Clip.ClipPolyline(Loop(run, wasClosed)))
-                Stroke.Emit(vh, piece, closed: false, width, paint, node.Cap, node.Join, node.MiterLimit, feather, frame.Matrix, MaxVertices);
+                StrokeWithBudget(vh, piece, closed: false, width, paint, node, feather, frame.Matrix);
         }
     }
 
@@ -1833,7 +1901,7 @@ internal static class Tessellator
         if (opacityScale <= 0.002f)
             return;
 
-        if (vh.currentVertCount + edge.Count * 2 > MaxVertices)
+        if (Starved(vh, edge.Count * 2, "an edge feather"))
             return;
 
         var origin = vh.currentVertCount;
@@ -1878,7 +1946,7 @@ internal static class Tessellator
     private static void FeatherRing(MeshBuilder vh, List<Vector2> outline, Paint paint, float width, Matrix4x4 matrix, ClipRegion? clip)
     {
         var count = outline.Count;
-        if (count < 3 || vh.currentVertCount + count * 2 > MaxVertices)
+        if (count < 3 || Starved(vh, count * 2, "a feather ring"))
             return;
 
         var winding = Mathf.Sign(Triangulator.SignedArea(outline));
