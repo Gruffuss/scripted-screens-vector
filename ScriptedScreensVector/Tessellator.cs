@@ -29,15 +29,21 @@ internal static class Tessellator
 {
     /// <summary>Most vertices one surface's mesh may hold.</summary>
     /// <remarks>
-    /// A margin under 65,535, and **not a choice**. The mesh is presented through a
-    /// <c>CanvasRenderer</c>, and UGUI's batcher works in 16-bit indices, so a mesh past that
-    /// is not merely unsupported -- it took the game down natively, with nothing in the log.
+    /// A surface's geometry is split across as many meshes as it needs -- see
+    /// <see cref="VectorSlice"/> -- so this is the total across all of them, eight meshes'
+    /// worth. It is a sanity bound rather than a hardware one: a scene this size is a mistake,
+    /// and a runaway one should not be able to eat memory without limit.
     ///
-    /// Raising it means leaving one CanvasRenderer behind, splitting a surface across several
-    /// child graphics with a mesh each. That is a real option and nobody has needed it yet;
-    /// what was actually missing was being TOLD when a scene hit the ceiling, which it now is.
+    /// The PER-MESH limit is the real constraint and lives in <see cref="MeshBuilder.PerMesh"/>.
+    /// It is UGUI's, not ours: its own VertexHelper throws at 65,000 because the
+    /// CanvasRenderer batcher works in 16-bit indices. Asking a mesh for 32-bit indices and
+    /// handing it to a CanvasRenderer anyway took the game down natively, with nothing in the
+    /// log. More meshes is the supported answer, and the one TextMeshPro uses.
     /// </remarks>
-    private const int MaxVertices = 60000;
+    private const int MaxVertices = 480000;
+
+    /// <summary>A single shape larger than one mesh cannot be split and is refused outright.</summary>
+    private const int MaxPerShape = MeshBuilder.PerMesh;
     private const int MinCornerSegments = 3;
     private const int MaxCornerSegments = 16;
     private const int MinEllipseSegments = 6;
@@ -464,6 +470,10 @@ internal static class Tessellator
                     emitted++;
                 }
 
+                // A shape is finished, so the geometry may be cut here if it has to be split
+                // across meshes. Inside a shape it may not: a feather ring indexes the fill's
+                // vertices and a shadow's rings index each other.
+                vh.MarkShape();
                 Charge(VecOp.Rect, mark);
                 break;
             }
@@ -479,6 +489,7 @@ internal static class Tessellator
                     emitted++;
                 }
 
+                vh.MarkShape();
                 Charge(VecOp.Ellipse, mark);
                 break;
             }
@@ -488,6 +499,7 @@ internal static class Tessellator
                 var mark = Stopwatch.GetTimestamp();
                 EmitBand(vh, scene, node, context, stack.Peek());
                 emitted++;
+                vh.MarkShape();
                 Charge(VecOp.Band, mark);
                 break;
             }
@@ -499,6 +511,7 @@ internal static class Tessellator
                 var mark = Stopwatch.GetTimestamp();
                 EmitPath(vh, scene, node, context, stack.Peek());
                 emitted++;
+                vh.MarkShape();
                 Charge(node.Op, mark);
                 break;
             }
@@ -523,6 +536,7 @@ internal static class Tessellator
                 var mark = Stopwatch.GetTimestamp();
                 EmitPathData(vh, scene, node, context, stack.Peek());
                 emitted++;
+                vh.MarkShape();
                 Charge(VecOp.Path, mark);
                 break;
             }
@@ -1572,6 +1586,14 @@ internal static class Tessellator
     /// <summary>True when <paramref name="extra"/> more vertices will not fit, and says so.</summary>
     internal static bool Starved(MeshBuilder vh, int extra, string op)
     {
+        // One shape has to fit one mesh whole: a cut can only fall between shapes, so nothing
+        // downstream can rescue a single shape bigger than a mesh.
+        if (extra > MaxPerShape)
+        {
+            _starved ??= op + " (too large for one mesh on its own)";
+            return true;
+        }
+
         if (vh.currentVertCount + extra <= MaxVertices)
             return false;
 

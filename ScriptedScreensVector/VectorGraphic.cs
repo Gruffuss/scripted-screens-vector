@@ -243,6 +243,17 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// </remarks>
     private int _lastVertices;
 
+    /// <summary>Extra meshes for a surface that does not fit in one. Usually empty.</summary>
+    /// <remarks>
+    /// This graphic presents slice 0 itself; each child presents the next. They are created in
+    /// emission order and draw in sibling order, which reproduces the order a single mesh got
+    /// from its triangle list.
+    /// </remarks>
+    private readonly List<VectorSlice> _slices = new();
+
+    /// <summary>How many meshes the last rebuild needed, for the stats line.</summary>
+    private int _sliceCount = 1;
+
     private double _tessellateCpuMs;
     private double _bandSampleMs;
     private double _bandStripMs;
@@ -444,6 +455,48 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         _needsRebuild = true;
     }
 
+    /// <summary>Hands slices 1..n to child graphics, creating and retiring them as needed.</summary>
+    private void ApplySlices()
+    {
+        var extra = Mathf.Max(0, _sliceCount - 1);
+
+        while (_slices.Count < extra)
+        {
+            var host = new GameObject("VectorSlice", typeof(RectTransform), typeof(CanvasRenderer), typeof(VectorSlice));
+            var rect = host.GetComponent<RectTransform>();
+
+            rect.SetParent(rectTransform, worldPositionStays: false);
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+
+            var slice = host.GetComponent<VectorSlice>();
+            slice.material = material;
+
+            _slices.Add(slice);
+        }
+
+        for (var i = 0; i < _slices.Count; i++)
+        {
+            var slice = _slices[i];
+            if (slice == null)
+                continue;
+
+            if (i < extra)
+            {
+                slice.gameObject.SetActive(true);
+                slice.Present(_builder, i + 1);
+            }
+            else
+            {
+                // Disabled rather than destroyed: a surface that crosses the threshold as you
+                // walk toward it would otherwise churn objects every few steps.
+                slice.gameObject.SetActive(false);
+            }
+        }
+    }
+
     /// <summary>Writes one surface's state into the vector_stats report.</summary>
     internal void Describe(System.Text.StringBuilder into)
     {
@@ -455,7 +508,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             return;
         }
 
-        into.AppendLine($"  nodes {_scene.Root.Count} root, {_lastShapeCount} shapes emitted, {_lastVertices} verts");
+        into.AppendLine($"  nodes {_scene.Root.Count} root, {_lastShapeCount} shapes emitted, {_lastVertices} verts"
+                        + (_sliceCount > 1 ? $" across {_sliceCount} meshes" : string.Empty));
 
         var tess = _rebuilds > 0 ? _tessellateMs / _rebuilds : 0d;
         var up = _rebuilds > 0 ? _uploadMs / _rebuilds : 0d;
@@ -1059,8 +1113,14 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         _stopwatch.Restart();
 
+        _sliceCount = _builder.Slices();
+
         _builder.Apply(_mesh!);
         canvasRenderer.SetMesh(_mesh);
+
+        // Everything past the first mesh goes to a child. A scene that fits one mesh -- which
+        // is nearly all of them -- never creates any and never pays for this.
+        ApplySlices();
 
         _stopwatch.Stop();
 
