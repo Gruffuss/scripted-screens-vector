@@ -583,9 +583,11 @@ internal static class Tessellator
         var paint = ResolvePaint(scene, node, context, frame, stroke: false);
 
         // Group opacity and `fo` reach the label through its own alpha, because they cannot
-        // reach it any other way: a TMP child draws above the mesh and nothing in the mesh
-        // can fade it. Without this a `G o=0.3` fades all its artwork and leaves the text --
-        // the readable part -- at full strength, which is the opposite of what was asked for.
+        // reach it any other way: a label is a TMP object with its own geometry, so no amount
+        // of mesh drawn around it can fade it. True whatever the draw order -- `ztext` decides
+        // whether a shape can COVER a label, never whether it can tint one. Without this a
+        // `G o=0.3` fades all its artwork and leaves the text -- the readable part -- at full
+        // strength, which is the opposite of what was asked for.
         Color colour = paint.At(new Vector2(x, y));
         colour.a *= frame.Opacity * Mathf.Clamp01(node.FillOpacity.Evaluate(context));
 

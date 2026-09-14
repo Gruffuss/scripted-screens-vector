@@ -25,6 +25,11 @@
 --   * it clips to an AXIS-ALIGNED RECTANGLE only -- a rounded clip cuts the shapes around
 --     the text but not the text
 --   * `f` is a flat colour, sampled at the node's origin. No gradient fills on type.
+--   * a group's opacity reaches it as the LABEL's alpha, not by fading it with the mesh --
+--     which is the right answer, but it means `o` cannot tint type the way it tints a fill
+--
+-- DRAW ORDER IS ORDINARY, though it took work to make it so: a shape declared after a `T`
+-- covers it, one declared before it does not. See 14-ztext.
 --
 -- Fonts come from the companion fonts mod: any family TMP knows can be named here.
 

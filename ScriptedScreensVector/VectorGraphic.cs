@@ -593,11 +593,13 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         ScriptedScreensVectorPlugin.Log?.LogInfo(
             $"vector capture: \"{_sceneId}\" built inline, {_builder.currentVertCount} verts across {_sliceCount} mesh(es)");
 
-        // SLICES BEFORE TEXT, matching the normal path exactly. Sibling order is draw order,
-        // and both are children of this graphic, so creating them in the other order puts the
-        // geometry on top of the labels -- permanently, because slice children are pooled and
-        // never reordered afterwards. The two paths differing here is a bug by construction:
-        // a capture must leave the surface in the state a normal rebuild would.
+        // SLICES BEFORE TEXT, matching the normal path exactly. Sibling order is draw order
+        // and both are children of this graphic, so creation order decides who draws over
+        // whom. Under `ztext` (the default) OrderTextWithSlices rearranges them afterwards and
+        // this only sets the starting point; under `ztext = 0` nothing reorders them, so
+        // creating them the other way round would put geometry over every label permanently.
+        // The two paths differing here is a bug by construction either way: a capture must
+        // leave the surface in the state a normal rebuild would.
         ApplySlices();
 
         if (_stats.Text.Count > 0 || _text != null)
