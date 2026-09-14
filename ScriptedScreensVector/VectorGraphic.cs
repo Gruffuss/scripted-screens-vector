@@ -254,6 +254,19 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>How many meshes the last rebuild needed, for the stats line.</summary>
     private int _sliceCount = 1;
 
+    /// <summary>The on-screen size bucket the current geometry was built for.</summary>
+    /// <remarks>
+    /// Segment counts, the feather width and curve sampling all follow on-screen size, but
+    /// that size is only read when a rebuild is DISPATCHED -- and a static scene dispatches
+    /// only when its data or its scene changes. So a static scene kept whatever detail it had
+    /// when it was last built, for ever. Built while off screen, where the scale is unknown
+    /// and treated as 1, it stayed at minimum detail no matter how close you walked.
+    ///
+    /// Animated scenes never showed this because they rebuild constantly and pick the current
+    /// size up on the way past.
+    /// </remarks>
+    private int _builtForBucket = int.MinValue;
+
     private double _tessellateCpuMs;
     private double _bandSampleMs;
     private double _bandStripMs;
@@ -453,6 +466,35 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         _offsets[region.Id] = next;
         _needsRebuild = true;
+    }
+
+    /// <summary>True when the surface has changed on-screen size enough to be worth rebuilding.</summary>
+    /// <remarks>
+    /// Buckets are multiplicative, roughly 15% apart, for the same reason the path flattener
+    /// quantises its own scale: ordinary camera drift stays inside a bucket, so standing
+    /// still and breathing does not retessellate anything, while actually walking up to a
+    /// console does. An unknown size gets its own bucket, so coming into view counts as a
+    /// change and the scene is rebuilt at its real size.
+    /// </remarks>
+    private bool ScaleChanged()
+    {
+        var bucket = ScaleBucket();
+
+        if (bucket == _builtForBucket)
+            return false;
+
+        _builtForBucket = bucket;
+        return true;
+    }
+
+    private int ScaleBucket()
+    {
+        var scale = ScreenPixelsPerCanvasUnit();
+
+        if (scale <= 0f)
+            return int.MinValue + 1;
+
+        return Mathf.FloorToInt(Mathf.Log(scale) / Mathf.Log(1.15f));
     }
 
     /// <summary>Hands slices 1..n to child graphics, creating and retiring them as needed.</summary>
@@ -799,6 +841,11 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         var animated = _scene != null && (_scene.UsesTime || blending || scrolled);
 
+        // Walking toward a console changes how much detail its geometry should have. Nothing
+        // else notices for a static scene, so the size bucket is what asks for the rebuild.
+        if (VectorConfig.RendererEnabled && _scene != null && !animated && ScaleChanged())
+            _needsRebuild = true;
+
         if (VectorConfig.RendererEnabled && _scene != null && _job == null
             && (_needsRebuild || (animated && DueForRebuild())))
         {
@@ -998,6 +1045,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         _jobScreenPixels = known ? rect.width * screenScale : -1f;
         _needsRebuild = false;
+        _builtForBucket = ScaleBucket();
 
         var scene = _scene!;
         var context = _context;

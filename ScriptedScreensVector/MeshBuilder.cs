@@ -38,8 +38,20 @@ internal sealed class MeshBuilder
     /// </remarks>
     private readonly List<int> _cuts = new(256);
 
+    /// <summary>Index-list position at each of those boundaries, kept in step with <see cref="_cuts"/>.</summary>
+    /// <remarks>
+    /// A shape writes its vertices and then its triangles, and never references anything
+    /// outside itself, so a shape boundary cuts BOTH lists at once. Recording the index
+    /// position too is what makes a slice a contiguous range of each -- without it, finding a
+    /// slice's triangles meant scanning every index in the surface, once per slice.
+    /// </remarks>
+    private readonly List<int> _cutIndices = new(256);
+
     /// <summary>Where each slice starts, rebuilt on demand. Index i covers [_slices[i], _slices[i+1]).</summary>
     private readonly List<int> _slices = new(4);
+
+    /// <summary>The matching index-list starts, one per entry in <see cref="_slices"/>.</summary>
+    private readonly List<int> _sliceIndexStart = new(4);
 
     /// <summary>Vertices one mesh may hold. UGUI's own limit is 65,000; this leaves room.</summary>
     internal const int PerMesh = 60000;
@@ -54,7 +66,9 @@ internal sealed class MeshBuilder
         _uv0.Clear();
         _indices.Clear();
         _cuts.Clear();
+        _cutIndices.Clear();
         _slices.Clear();
+        _sliceIndexStart.Clear();
     }
 
     /// <summary>Marks the end of a shape, where the geometry may be cut.</summary>
@@ -62,8 +76,11 @@ internal sealed class MeshBuilder
     {
         var at = _positions.Count;
 
-        if (_cuts.Count == 0 || _cuts[^1] != at)
-            _cuts.Add(at);
+        if (_cuts.Count > 0 && _cuts[^1] == at)
+            return;
+
+        _cuts.Add(at);
+        _cutIndices.Add(_indices.Count);
     }
 
     /// <summary>
@@ -80,25 +97,34 @@ internal sealed class MeshBuilder
             return _slices.Count - 1;
 
         _slices.Add(0);
+        _sliceIndexStart.Add(0);
 
         var start = 0;
         while (start < _positions.Count)
         {
             var limit = start + PerMesh;
             var cut = -1;
+            var cutIndex = _indices.Count;
 
-            foreach (var mark in _cuts)
+            for (var k = 0; k < _cuts.Count; k++)
             {
-                if (mark > start && mark <= limit)
-                    cut = mark;
+                if (_cuts[k] > start && _cuts[k] <= limit)
+                {
+                    cut = _cuts[k];
+                    cutIndex = _cutIndices[k];
+                }
             }
 
             // No boundary fit: one shape is bigger than a mesh. Take the whole remainder
             // rather than looping for ever; the tessellator guards against this case.
             if (cut < 0)
+            {
                 cut = _positions.Count;
+                cutIndex = _indices.Count;
+            }
 
             _slices.Add(cut);
+            _sliceIndexStart.Add(cutIndex);
             start = cut;
         }
 
@@ -119,15 +145,21 @@ internal sealed class MeshBuilder
         _indices.Add(c);
     }
 
-    private readonly List<Vector3> _sliceP = new(4096);
-    private readonly List<Color32> _sliceC = new(4096);
-    private readonly List<Vector2> _sliceU = new(4096);
+    /// <summary>Rebased indices for one slice. The only copy a split upload makes.</summary>
     private readonly List<int> _sliceI = new(8192);
 
     /// <summary>Uploads one slice of the geometry to a mesh, reusing its buffers.</summary>
     /// <remarks>
-    /// Slice 0 of a single-slice build is the whole thing and takes the direct path, which is
-    /// every ordinary scene. Only a surface that overflows one mesh pays for the copy.
+    /// **Vertices are not copied at all.** Unity takes a range of a list directly, so the
+    /// position, colour and UV buffers are handed over in place. Only the indices are copied,
+    /// because they have to be rebased onto the slice's own vertex numbering, and only this
+    /// slice's own range is touched.
+    ///
+    /// The first version walked the WHOLE index list once per slice, testing each triangle for
+    /// membership. On a surface of 150 shadowed cards that is roughly 900,000 indices scanned
+    /// three times, on the main thread, every upload -- measured at 6.17 ms against 0.14 ms for
+    /// a single-mesh surface a ninth the size. Nine times the geometry cannot cost forty times
+    /// the upload; the difference was all scanning.
     /// </remarks>
     internal void Apply(Mesh mesh, int slice = 0)
     {
@@ -170,34 +202,16 @@ internal sealed class MeshBuilder
             return;
         }
 
-        _sliceP.Clear();
-        _sliceC.Clear();
-        _sliceU.Clear();
+        var indexFrom = _sliceIndexStart[slice];
+        var indexTo = _sliceIndexStart[slice + 1];
+
         _sliceI.Clear();
+        for (var t = indexFrom; t < indexTo; t++)
+            _sliceI.Add(_indices[t] - from);
 
-        for (var i = from; i < to; i++)
-        {
-            _sliceP.Add(_positions[i]);
-            _sliceC.Add(_colours[i]);
-            _sliceU.Add(_uv0[i]);
-        }
-
-        // Triangles are emitted in shape order and never reach past their own shape, so the
-        // ones belonging to this slice are exactly those whose vertices fall in its range.
-        for (var t = 0; t + 2 < _indices.Count; t += 3)
-        {
-            var a = _indices[t];
-            if (a < from || a >= to)
-                continue;
-
-            _sliceI.Add(a - from);
-            _sliceI.Add(_indices[t + 1] - from);
-            _sliceI.Add(_indices[t + 2] - from);
-        }
-
-        mesh.SetVertices(_sliceP);
-        mesh.SetColors(_sliceC);
-        mesh.SetUVs(0, _sliceU);
+        mesh.SetVertices(_positions, from, to - from);
+        mesh.SetColors(_colours, from, to - from);
+        mesh.SetUVs(0, _uv0, from, to - from);
         mesh.SetTriangles(_sliceI, 0, calculateBounds: true);
     }
 }
