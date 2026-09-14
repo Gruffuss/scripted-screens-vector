@@ -219,6 +219,7 @@ internal sealed class TextLayer
                 {
                     current.DisableKeyword(ShaderUtilities.Keyword_Underlay);
                     current.SetColor(ShaderUtilities.ID_UnderlayColor, Color.clear);
+                    label.UpdateMeshPadding();
                 }
             }
 
@@ -271,11 +272,26 @@ internal sealed class TextLayer
         material.SetFloat(ShaderUtilities.ID_UnderlayDilate, Mathf.Clamp(fit.Dilate, -1f, 1f));
         material.SetFloat(ShaderUtilities.ID_UnderlaySoftness, Mathf.Clamp01(fit.Softness));
 
+        // TMP caches each glyph quad's padding and only recomputes it when told. Writing the
+        // underlay straight onto the material does not tell it, so every quad kept the tight
+        // padding it had before the shadow existed and the glow was cut off exactly at each
+        // letter's edge. GetPadding does account for the underlay (read in the decompiled
+        // ShaderUtilities); it simply was never being asked again.
+        label.UpdateMeshPadding();
+
         _shadowed.Add(index);
     }
 
     /// <summary>One of each distinct complaint, not one per label per frame.</summary>
     private readonly HashSet<string> _warned = new(StringComparer.Ordinal);
+
+    /// <summary>Everything this layer has warned about, for the vector_stats report.</summary>
+    /// <remarks>
+    /// The warnings used to reach the BepInEx log only. `vector_stats` printed "no problems"
+    /// for a whole evening while every text shadow on a page was being shrunk to 43% of what
+    /// it asked for -- reported, and read by nobody, which is silent in practice.
+    /// </remarks>
+    internal IReadOnlyCollection<string> Warnings => _warned;
 
     private void Warn(string message)
     {

@@ -106,6 +106,11 @@ internal static class Tessellator
 
     private static List<int> RingIndices => _ringIndices ??= new List<int>(512);
 
+    /// <summary>The outline a radial fill builds its rings from, after densifying.</summary>
+    [ThreadStatic] private static List<Vector2>? _ringOutline;
+
+    private static List<Vector2> RingOutline => _ringOutline ??= new List<Vector2>(RadialFill.MaxOutlinePoints + 64);
+
 
     [ThreadStatic] internal static double BandSampleMs;
     [ThreadStatic] internal static double BandStripMs;
@@ -1688,8 +1693,13 @@ internal static class Tessellator
     /// focus, and their union only reconstructs the shape when it is star-shaped about that
     /// point. Callers check with <see cref="Encloses"/> and fall back to ear clipping.
     /// </remarks>
-    private static void FillRadialBands(MeshBuilder vh, List<Vector2> outline, Paint paint, Matrix4x4 matrix, float scale)
+    private static void FillRadialBands(MeshBuilder vh, List<Vector2> shape, Paint paint, Matrix4x4 matrix, float scale)
     {
+        // Points along every long edge, so colour is sampled round each ring and not only at
+        // the corners -- see RadialFill.Densify for what went wrong without it.
+        var outline = RingOutline;
+        RadialFill.Densify(shape, RadialFill.PixelsPerBand / Mathf.Max(0.0001f, scale * ScreenScale), outline);
+
         var count = outline.Count;
 
         // In bounding-box mode the focus is a 0..1 fraction, so it has to be mapped back

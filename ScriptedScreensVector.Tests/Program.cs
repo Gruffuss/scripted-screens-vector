@@ -127,6 +127,7 @@ internal static class Program
         RadialFillTests.StitchCoversTheAnnulus(run);
         RadialFillTests.OneFillCannotExhaustASurface(run);
         RadialFillTests.BoundingBoxRadialTakesTheBands(run);
+        RadialFillTests.BandsFollowTheGradientNotTheCorners(run);
 
         TextOrderTests.UncoveredLabelForcesNoCut(run);
         TextOrderTests.CoveredLabelIsCutUnder(run);

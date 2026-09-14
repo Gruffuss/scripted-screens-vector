@@ -226,4 +226,125 @@ internal static class RadialFillTests
             !ScriptedScreensVector.Tessellator.RadialBandsFit(box, outsidePaint),
             "focus (1.5,0.5) is past the right edge");
     }
+
+    /// <summary>
+    /// The colour between ring vertices must follow the gradient, not the shape's corners.
+    /// </summary>
+    /// <remarks>
+    /// Shipped broken once: rings were scaled copies of a rounded rect whose straight edges had
+    /// no points, so colour along them was a blend between corners and the bands came out as
+    /// rounded rectangles -- "a point with corners" in game, where the old subdivided fill had
+    /// been smooth. This rebuilds the rings the way FillRadialBands does, through the real
+    /// Densify, Points and Stitch, and compares the gradient parameter interpolated at every
+    /// triangle's centre with the true value there. The gradient parameter stands in for
+    /// colour: colour is a function of it, so an error in one is an error in the other.
+    /// </remarks>
+    internal static void BandsFollowTheGradientNotTheCorners(TestRun run)
+    {
+        // The reported case: 90x50 rounded rect, bbox radial, centre (0.3,0.3), r 0.71, at
+        // about 1.4 screen pixels per unit.
+        var min = new UnityEngine.Vector2(10f, 243f);
+        var size = new UnityEngine.Vector2(90f, 50f);
+        const float pixelsPerUnit = 1.4f;
+
+        var shape = RoundedRect(min, size, 8f, 6);
+        var focus = min + new UnityEngine.Vector2(0.3f * size.x, 0.3f * size.y);
+
+        float T(UnityEngine.Vector2 p)
+        {
+            var g = new UnityEngine.Vector2((p.x - min.x) / size.x, (p.y - min.y) / size.y);
+            return (g - new UnityEngine.Vector2(0.3f, 0.3f)).magnitude / 0.71f;
+        }
+
+        var raw = Worst(shape, focus, pixelsPerUnit, T);
+
+        var dense = new List<UnityEngine.Vector2>();
+        RadialFill.Densify(shape, RadialFill.PixelsPerBand / pixelsPerUnit, dense);
+        var fixedError = Worst(dense, focus, pixelsPerUnit, T);
+
+        run.Pass($"radial: worst colour error corners-only {raw:F3}, densified {fixedError:F3} (of a 0..1 ramp)");
+        run.Check("radial: densified bands follow the gradient", fixedError < 0.02f, $"worst {fixedError:F3}");
+        run.Check("radial: the corners-only outline really was wrong", raw > fixedError * 3f,
+            $"{raw:F3} vs {fixedError:F3}");
+    }
+
+    private static float Worst(List<UnityEngine.Vector2> outline, UnityEngine.Vector2 focus, float pixelsPerUnit,
+        System.Func<UnityEngine.Vector2, float> t)
+    {
+        var count = outline.Count;
+        var radius = 0f;
+        foreach (var point in outline)
+            radius = UnityEngine.Mathf.Max(radius, (point - focus).magnitude);
+
+        var rings = RadialFill.Rings(radius * pixelsPerUnit, 2);
+        var verts = new List<UnityEngine.Vector2> { focus };
+        var tris = new List<int>();
+        var previousBase = 0;
+        var previousCount = 0;
+
+        for (var ring = 1; ring <= rings; ring++)
+        {
+            var ratio = ring / (float)rings;
+            var points = RadialFill.Points(count, ring, rings);
+            var thisBase = verts.Count;
+
+            for (var k = 0; k < points; k++)
+                verts.Add(focus + (outline[k * count / points] - focus) * ratio);
+
+            if (ring == 1)
+            {
+                for (var k = 0; k < points; k++)
+                    tris.AddRange(new[] { 0, thisBase + k, thisBase + (k + 1) % points });
+            }
+            else
+            {
+                RadialFill.Stitch(previousBase, previousCount, thisBase, points, tris);
+            }
+
+            previousBase = thisBase;
+            previousCount = points;
+        }
+
+        var worst = 0f;
+        for (var i = 0; i + 2 < tris.Count; i += 3)
+        {
+            var a = verts[tris[i]];
+            var b = verts[tris[i + 1]];
+            var c = verts[tris[i + 2]];
+            var centre = (a + b + c) / 3f;
+            var blended = (t(a) + t(b) + t(c)) / 3f;
+
+            // The ramp clamps past its last stop at 0.7 of the radius; errors out there are
+            // invisible, so only the part of the fill the ramp actually spans is judged.
+            if (t(centre) > 0.7f)
+                continue;
+
+            worst = UnityEngine.Mathf.Max(worst, UnityEngine.Mathf.Abs(blended - t(centre)));
+        }
+
+        return worst;
+    }
+
+    private static List<UnityEngine.Vector2> RoundedRect(UnityEngine.Vector2 min, UnityEngine.Vector2 size, float r, int arc)
+    {
+        var points = new List<UnityEngine.Vector2>();
+        var corners = new[]
+        {
+            (min + new UnityEngine.Vector2(size.x - r, r), -90f),
+            (min + new UnityEngine.Vector2(size.x - r, size.y - r), 0f),
+            (min + new UnityEngine.Vector2(r, size.y - r), 90f),
+            (min + new UnityEngine.Vector2(r, r), 180f),
+        };
+
+        foreach (var (centre, start) in corners)
+        {
+            for (var k = 0; k <= arc; k++)
+            {
+                var angle = (start + 90f * k / arc) * UnityEngine.Mathf.Deg2Rad;
+                points.Add(centre + new UnityEngine.Vector2(UnityEngine.Mathf.Cos(angle), UnityEngine.Mathf.Sin(angle)) * r);
+            }
+        }
+
+        return points;
+    }
 }

@@ -84,8 +84,12 @@ internal sealed class MeshBuilder
     /// <summary>Vertices emitted so far. Named to match the old call sites.</summary>
     internal int currentVertCount => _positions.Count;
 
+    /// <summary>The last slice refused as too large to upload, or null.</summary>
+    internal string? Dropped;
+
     internal void Clear()
     {
+        Dropped = null;
         _positions.Clear();
         _colours.Clear();
         _uv0.Clear();
@@ -332,6 +336,10 @@ internal sealed class MeshBuilder
         // something upstream is wrong. Drop the slice and say so rather than crash.
         if (to - from > PerMesh)
         {
+            // Kept for vector_stats as well as logged: the log alone let a dropped slice read as
+            // "no problems" there while its shapes vanished from the console.
+            Dropped = $"mesh {slice} ({to - from} vertices, past the {PerMesh} one mesh holds)";
+
             ScriptedScreensVectorPlugin.Log?.LogError(
                 $"vector: slice {slice} is {to - from} vertices, past the {PerMesh} one mesh can hold; "
                 + "dropped. A single shape too large to split is the only way this happens.");

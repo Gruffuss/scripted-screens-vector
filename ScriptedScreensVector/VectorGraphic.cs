@@ -741,7 +741,22 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 into.AppendLine($"    ${name}");
         }
 
-        if (_scene.Problems.Count == 0 && _stats.Missing.Count == 0)
+        var dropped = _builder.Dropped;
+        if (dropped != null)
+            into.AppendLine($"  DROPPED: {dropped} -- everything in it is missing from the console");
+
+        var textWarnings = _text?.Warnings;
+        if (textWarnings is { Count: > 0 })
+        {
+            into.AppendLine("  TEXT");
+            foreach (var warning in textWarnings)
+                into.AppendLine($"    {warning}");
+        }
+
+        // Every section above counts. This line used to consider only two of them, so a
+        // dropped shape or a shrunk text shadow still read as "no problems".
+        if (_scene.Problems.Count == 0 && _stats.Missing.Count == 0 && _stats.Starved == null
+            && dropped == null && textWarnings is not { Count: > 0 })
             into.AppendLine("  no problems");
     }
 
