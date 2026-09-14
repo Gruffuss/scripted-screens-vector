@@ -35,8 +35,15 @@
         <Compile Include="..\ScriptedScreensVector\RadialFill.cs" />
         <Compile Include="..\ScriptedScreensVector\MeshBuilder.cs" />
         <Compile Include="..\ScriptedScreensVector\TextOrder.cs" />
+        <Compile Include="..\ScriptedScreensVector\SceneModel.cs" />
+        <Compile Include="..\ScriptedScreensVector\PathData.cs" />
+        <Compile Include="..\ScriptedScreensVector\Stroke.cs" />
+        <Compile Include="..\ScriptedScreensVector\Shadow.cs" />
+        <Compile Include="..\ScriptedScreensVector\Tessellator.cs" />
+        <Compile Include="..\ScriptedScreensVector\TessellationStats.cs" />
         <Compile Include="ScriptedScreensStubs.cs" />
         <Compile Include="Stubs.cs" />
+        <Compile Include="ConfigStub.cs" />
         <Compile Include="TriangulatorTests.cs" />
         <Compile Include="ClipTests.cs" />
         <Compile Include="GradientTests.cs" />

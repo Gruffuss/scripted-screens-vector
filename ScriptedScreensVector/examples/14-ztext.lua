@@ -1,29 +1,30 @@
--- 14 - Text in draw order
+-- 14 - Text and draw order
 --
--- Labels are TextMeshPro objects parented beside the geometry, not part of the mesh, and
--- UGUI draws children in sibling order. So by default the WHOLE text layer draws after the
--- WHOLE surface: a shape declared after a label still cannot cover it. "On top" and
--- "underneath" are the only two states and they apply to every label at once.
+-- A label is covered by anything declared after it and covers anything declared before it --
+-- the same rule every other node follows. That is the DEFAULT; there is nothing to switch on.
 --
--- `ztext = 1` on the scene makes labels obey scene order instead, like everything else.
+-- It is worth a whole example because it was not always so, and the reason still shapes the
+-- cost. Labels are TextMeshPro objects parented beside the mesh rather than part of it, and
+-- UGUI draws children in sibling order -- so the whole text layer drew either entirely before
+-- or entirely after the whole surface. "On top" and "underneath" were the only two states and
+-- they applied to every label at once, which made `z-index` impossible to express.
 --
--- IT IS OPT-IN, and deliberately so. Text on top is what every scene written before this
--- existed relies on -- often correctly, since it was the only behaviour available. Turning
--- it on changes only the cases where a shape genuinely covers a label.
+-- WHAT IT COSTS. A label a later shape actually covers forces the mesh to be cut there, and
+-- each extra mesh is a draw call. The cut is forced ONLY on a genuine overlap of the two
+-- boxes, which a well-placed scene mostly avoids by construction: 12-click.lua has seven
+-- labels over nineteen shapes and forces none, because its rows, pills and accent bars were
+-- already positioned not to collide. Deciding that costs ~0.19 ms per 40,000 vertices, on the
+-- tessellation worker rather than the frame.
 --
--- WHAT IT COSTS. A label that has to sit under later geometry forces the mesh to be cut
--- there, and each extra mesh is a draw call. So a cut is forced ONLY where a later shape
--- actually overlaps the label's box -- which on a normal page is close to never, because
--- tiles do not overlap their neighbours and a label sits inside its own tile. A page of
--- thirty labelled tiles stays one mesh. A page that really does slide panels over text pays
--- one draw call per such label, which is the price of asking for it.
+-- `ztext = 0` restores the old rule, for a scene that deliberately wants a readout floating
+-- above artwork drawn after it.
 --
--- One case it cannot serve: a label declared before ANY shape. The surface's own renderer
--- always draws before its children, so there is nothing to put such a label behind. It stays
--- on top rather than vanishing.
+-- One case neither setting can serve: a label declared before ANY shape. The surface's own
+-- renderer always draws before its children, so there is nothing to put such a label behind.
+-- It stays on top rather than vanishing.
 --
 -- What to look for: two identical scenes, one flag apart. The red shutter slides UNDER the
--- word on the left, and OVER it on the right.
+-- word on the left (the default) and OVER it on the right (`ztext = 0`).
 
 local ui = ss.ui.surface("main")
 ss.ui.activate("main")
@@ -68,8 +69,8 @@ ui:element({
     props = {
         scene = "ztext_on",
         w = 200, h = 240,
-        ztext = 1,
-        root = column("ztext = 1"),
+        -- No ztext here: draw order is what you get without asking.
+        root = column("default"),
     },
 })
 
@@ -79,7 +80,8 @@ ui:element({
     props = {
         scene = "ztext_off",
         w = 200, h = 240,
-        root = column("default"),
+        ztext = 0,
+        root = column("ztext = 0"),
     },
 })
 

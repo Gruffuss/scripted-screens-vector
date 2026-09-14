@@ -188,27 +188,30 @@ the capture rebuilds the surface and renders a clone inside one call, so the geo
 tessellated **inline on the main thread** rather than on a worker. A capture of a dense
 console costs a frame; ordinary rendering is unaffected.
 
-### Text in draw order — `ztext`
+### Text and draw order — `ztext`
 
-Set `ztext = 1` on the **structure** element's props (or `SCENE ztext=1` in the text form).
+**Labels obey scene order by default.** A shape declared after a label covers it; one declared
+before it does not. `ztext = 0` on the structure element restores the older behaviour, where all
+text painted above all geometry.
 
-Labels are TextMeshPro objects parented beside the geometry rather than part of the mesh, and
-UGUI draws children in sibling order. So by default the whole text layer draws after the whole
-surface: **a shape declared after a label cannot cover it**, and that applies to every label at
-once. `ztext = 1` makes labels obey scene order like everything else.
+That older behaviour existed because labels are TextMeshPro objects parented beside the mesh
+rather than part of it, and UGUI draws children in sibling order — so the whole text layer drew
+either entirely before or entirely after the whole surface. "On top" and "underneath" were the
+only two states and they applied to every label at once.
 
-Opt-in, because text-on-top is what scenes written before it rely on. Turning it on changes
-only the cases where a shape genuinely overlaps a label.
-
-**What it costs.** A label that has to sit under later geometry forces the mesh to be cut
-there, and each extra mesh is a draw call. A cut is forced *only* where a later shape actually
-overlaps the label's box, which on a normal page is close to never — tiles do not overlap
-their neighbours and a label sits inside its own tile. Measured: thirty labelled tiles stay in
-one mesh. A page that really does slide panels over text pays one draw call per such label.
+**What it costs.** A label a later shape actually covers forces the mesh to be cut there, and
+each extra mesh is a draw call. A cut is forced *only* on genuine overlap of the two boxes,
+which a well-placed scene mostly avoids by construction — `examples/12-click.lua` has seven
+labels over nineteen shapes and forces none, because its rows, pills and accent bars were
+already positioned not to collide. Tracking the bounds to decide costs about 0.19 ms per 40,000
+vertices, and it is on the tessellation worker, not the frame.
 
 **One case it cannot serve:** a label declared before any shape. The surface's own renderer
 draws before its children, so there is nothing to put such a label behind; it stays on top
 rather than disappearing.
+
+**When to reach for `ztext = 0`:** a scene that deliberately floats a readout above artwork
+drawn after it, and wants that regardless of declaration order.
 
 ### Debug switches
 

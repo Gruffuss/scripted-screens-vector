@@ -75,3 +75,34 @@ answers "did geometry exist" but not "did it reach the picture".
 
 Not needed while captures work. Worth copying if one ever comes back blank with a healthy
 vertex count, because that is exactly the case the current line cannot distinguish.
+
+---
+
+## `ztext` cuts more on HTML pages than on hand-authored ones, and nobody knows why
+
+Measured in game on 0.11.12.0, with text in draw order on by default:
+
+| scene | shapes | meshes |
+|---|---|---|
+| `12-click.lua` (hand-authored) | 19 | 1 |
+| `html:page` (HTML mod) | 48 | **13** |
+| `html:gas` (HTML mod) | 754 | **9** |
+
+**This is not a performance problem and was wrongly presented as one.** The extra upload is
+0.06 -> 0.13 ms on `html:page` and 0.34 -> 0.71 ms on gas — sub-millisecond, against a 16.7 ms
+frame. Tessellation is unchanged, because it is the same geometry handed over in more pieces.
+
+**What it does mean is that the prediction was wrong.** "A cut is close to never" held for
+scenes a person placed and not for scenes a layout engine generated, which is exactly the
+population the original design note warned about.
+
+**The suspicion, untested:** the HTML emitter gives a label slack on the side its alignment
+allows, so TextMeshPro does not wrap a shrink-wrapped box. That makes a label's rect wider than
+its text, and the overlap test uses the rect. Spurious overlaps with neighbouring tiles would
+follow, and would scale with page size rather than with real occlusion.
+
+**How to settle it:** log which labels force a cut, and against which shape, under
+`Diagnostics.Enabled`. One line per cut names the label text and both boxes, and the answer is
+either "the slack" or "genuinely overlapping boxes" in a single look. Do that before changing
+the overlap test — the record on guessing about this renderer is poor, and the cheap wrong fix
+(shrinking the test box) would reintroduce labels drawing over things that really do cover them.

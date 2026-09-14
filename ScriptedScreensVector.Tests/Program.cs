@@ -134,7 +134,9 @@ internal static class Program
         TextOrderTests.ForcedCutBeatsTheVertexBudget(run);
         TextOrderTests.LabelBeforeAllGeometryStaysVisible(run);
         TextOrderTests.ZtextSurvivesTheSrcForm(run);
+        TextOrderTests.DrawOrderIsTheDefault(run);
         TextOrderTests.BoundsAreNotTrackedByDefault(run);
+        TextOrderTests.BoundsTrackingCost(run);
 
         Console.WriteLine();
         GradientTests.LinearParameter(run);

@@ -404,23 +404,24 @@ engine that has the glyph metrics rather than estimated in Lua.
 A label element is still the right answer for text that must update the instant a value
 changes, and for anything the player has to select or copy.
 
-### Putting a shape over a label — `ztext`
+### Text and draw order
 
-Text draws above every shape by default, whatever the scene order says, because labels are TMP
-objects beside the mesh rather than in it. If you need a panel to slide over a label, set
-`ztext = 1` on the structure element:
+A label is covered by anything declared after it and covers anything declared before it — the
+same rule the rest of the scene follows. Nothing to switch on.
+
+It is worth knowing *why* this is worth mentioning at all: labels are TMP objects beside the
+mesh rather than in it, so until recently the whole text layer drew above the whole surface and
+a panel could never be slid over a readout.
+
+The cost is one extra mesh, so one draw call, per label a later shape **actually overlaps** —
+not per label. A page of tiles where each label sits inside its own tile stays in a single
+mesh. If you want the old rule back for one scene:
 
 ```lua
-props = { scene = "panel", w = 200, h = 240, ztext = 1, root = { ... } }
+props = { scene = "panel", w = 200, h = 240, ztext = 0, root = { ... } }
 ```
 
-Then a label is covered by anything declared after it, and covers anything declared before it
-— the same rule the rest of the scene already follows.
-
-It is opt-in because the old behaviour is load-bearing for scenes that layer a readout over
-artwork. The cost is one extra mesh, and so one draw call, per label that a later shape
-actually overlaps; labels nothing covers stay in the single mesh they are in today. See
-`examples/14-ztext.lua`, which draws the same scene both ways side by side.
+`examples/14-ztext.lua` draws the same scene both ways side by side.
 
 ### Reusing a subtree — `SYM` and `USE`
 

@@ -214,4 +214,87 @@ internal static class TextOrderTests
         run.Check("ztext: shape bounds cost nothing when unused", box.width == 0f && box.height == 0f,
             $"bounds {box}");
     }
+
+    /// <summary>
+    /// Text in draw order is ON unless a scene asks otherwise, and `ztext = 0` still opts out.
+    /// </summary>
+    /// <remarks>
+    /// A default is exactly the sort of thing that flips back by accident during an unrelated
+    /// edit and is never noticed, because both states render something plausible. This is the
+    /// only thing that would catch it.
+    /// </remarks>
+    internal static void DrawOrderIsTheDefault(TestRun run)
+    {
+        var on = Parse("SCENE vb=[0,0,100,100]");
+        var off = Parse("SCENE vb=[0,0,100,100] ztext=0");
+        var explicitly = Parse("SCENE vb=[0,0,100,100] ztext=1");
+
+        run.Check("ztext: on by default", on == true, $"got {Describe(on)}");
+        run.Check("ztext: ztext=0 opts out", off == false, $"got {Describe(off)}");
+        run.Check("ztext: ztext=1 still works", explicitly == true, $"got {Describe(explicitly)}");
+    }
+
+    /// <summary>Parses a one-shape scene and reports its draw-order flag, or null on failure.</summary>
+    /// <remarks>
+    /// The rect carries NO fill on purpose. `ParseFill` goes through
+    /// <c>ColorUtility.TryParseHtmlString</c>, which is a native ECall and throws
+    /// <c>SecurityException</c> outside the player — so a scene with `f=#fff` takes the whole
+    /// run down here while working perfectly in game. Nothing about this flag needs a colour.
+    /// </remarks>
+    private static bool? Parse(string header)
+    {
+        var props = SceneText.ToProps(header + "\nR x=0 y=0 w=10 h=10", "s");
+        if (props == null)
+            return null;
+
+        return SceneParser.Parse(props)?.TextInOrder;
+    }
+
+    private static string Describe(bool? value)
+    {
+        return value == null ? "scene did not parse" : value.Value.ToString();
+    }
+
+    /// <summary>What bounds tracking costs a scene that never overlaps anything.</summary>
+    /// <remarks>
+    /// The question this answers is whether `ztext` could simply be the default, rather than
+    /// a flag every caller has to remember. Reported, not asserted: it is a measurement, and
+    /// a timing assertion would fail on a busy machine for reasons unrelated to the code.
+    ///
+    /// Note this is .NET 8 and the game is Mono, so the absolute figure does not transfer —
+    /// the project has been caught by that before. What does transfer is the shape: four
+    /// float comparisons against list appends that are already happening.
+    /// </remarks>
+    internal static void BoundsTrackingCost(TestRun run)
+    {
+        const int Shapes = 10000;   // 40,000 vertices — a dense console
+
+        var off = Time(Shapes, false);
+        var on = Time(Shapes, true);
+
+        run.Pass($"ztext: bounds tracking over {Shapes * 4:N0} verts -- "
+                 + $"off {off:F2} ms, on {on:F2} ms, delta {on - off:F2} ms");
+    }
+
+    private static double Time(int shapes, bool track)
+    {
+        var builder = new MeshBuilder();
+        var watch = new System.Diagnostics.Stopwatch();
+
+        // Two passes; the first lets the lists reach their high-water mark and the JIT run,
+        // so the timed one measures steady state rather than allocation.
+        for (var pass = 0; pass < 2; pass++)
+        {
+            builder.Clear();
+            builder.TrackBounds(track);
+            watch.Restart();
+
+            for (var i = 0; i < shapes; i++)
+                AddShape(builder, Rect.MinMaxRect(i % 100, i % 50, i % 100 + 9f, i % 50 + 9f));
+
+            watch.Stop();
+        }
+
+        return watch.Elapsed.TotalMilliseconds;
+    }
 }
