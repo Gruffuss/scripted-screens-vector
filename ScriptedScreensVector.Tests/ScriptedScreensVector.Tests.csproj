@@ -40,6 +40,7 @@
         <Compile Include="SceneTextTests.cs" />
         <Compile Include="ScrollTests.cs" />
         <Compile Include="PrintfTests.cs" />
+        <Compile Include="TextShadowTests.cs" />
         <Compile Include="Benchmark.cs" />
         <Compile Include="Program.cs" />
     </ItemGroup>

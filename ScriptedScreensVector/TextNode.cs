@@ -30,6 +30,7 @@ internal struct TextPlacement
     internal Rect? ClipRect;     // canvas-space bounds of the enclosing clip, if any
     internal bool Wrap;          // may run to more than one line
     internal float LineHeight;   // multiple of the font size; 0 means the font's own
+    internal VecShadow? Shadow;  // first `sh` entry, in canvas units; see TextLayer
 }
 
 /// <summary>Fit modes for <c>T</c>.</summary>
@@ -187,5 +188,99 @@ internal static class Printf
         };
 
         return net == null ? spec : spec[..percent] + "{0:" + net + "}" + spec[(end + 1)..];
+    }
+}
+
+
+/// <summary>One drop shadow: CSS `box-shadow` order, in scene units.</summary>
+/// <remarks>
+/// Lives here rather than beside the emitter that draws it because a text placement carries
+/// one too, and the placement types are the half of this renderer the headless test harness
+/// can compile -- the emitter needs a mesh and a clip region, this needs neither.
+/// </remarks>
+internal readonly struct VecShadow
+{
+    internal readonly float Dx;
+    internal readonly float Dy;
+    internal readonly float Blur;
+    internal readonly float Spread;
+    internal readonly Color Colour;
+
+    internal VecShadow(float dx, float dy, float blur, float spread, Color colour)
+    {
+        Dx = dx;
+        Dy = dy;
+        Blur = blur;
+        Spread = spread;
+        Colour = colour;
+    }
+}
+
+
+/// <summary>A text shadow converted into the SDF shader's normalised padding space.</summary>
+internal struct TextShadowFit
+{
+    internal float OffsetX;
+    internal float OffsetY;
+    internal float Dilate;
+    internal float Softness;
+
+    /// <summary>1 when the request fit; below 1 by the factor it had to be reduced.</summary>
+    internal float Scale;
+}
+
+/// <summary>
+/// Turns a <c>sh</c> entry into the four numbers the font's underlay takes.
+/// </summary>
+/// <remarks>
+/// Separated from the code that writes them so it can be checked without Unity, because this
+/// is the part that goes wrong quietly: a factor out by the sampling size draws a shadow at a
+/// tenth of its size, which reads as "the blur is subtle" rather than as a bug.
+///
+/// **The space.** Underlay offset, dilate and softness are normalised against the glyph's SDF
+/// padding: 1.0 is the whole padding, which is <c>gradientScale</c> atlas texels, and one
+/// texel covers <c>fontSize / samplingPointSize</c> rendered units. So a canvas-unit distance
+/// becomes <c>d * samplingPointSize / (gradientScale * fontSize)</c>. Read out of the
+/// decompiled <c>ShaderUtilities.GetPadding</c>, not guessed.
+///
+/// **The budget.** The shader renormalises whenever
+/// <c>max(|dx|,|dy|) + dilate + softness</c> exceeds 1 — it does not clip an over-large
+/// shadow, it SHRINKS it, and everything else with it. Scaling the whole request here
+/// instead keeps the shadow's shape and makes the reduction a number the caller can report.
+/// </remarks>
+internal static class TextShadow
+{
+    internal static TextShadowFit Fit(VecShadow shadow, float gradientScale, float samplingPointSize, float fontSize)
+    {
+        var fit = new TextShadowFit { Scale = 1f };
+
+        if (gradientScale <= 0.0001f || samplingPointSize <= 0f || fontSize <= 0f)
+            return fit;
+
+        var perUnit = samplingPointSize / (gradientScale * fontSize);
+
+        fit.OffsetX = shadow.Dx * perUnit;
+
+        // Scenes are +Y down; the shader is +Y up.
+        fit.OffsetY = -shadow.Dy * perUnit;
+
+        fit.Dilate = shadow.Spread * perUnit;
+
+        // The geometric shadow reads `blur` as a CSS blur radius and uses sigma = blur/2.
+        // Softness spreads across the same space, so it takes the same halving and a text
+        // shadow reads at the same strength as the one on the box behind it.
+        fit.Softness = Mathf.Max(0f, shadow.Blur * 0.5f * perUnit);
+
+        var budget = Mathf.Max(Mathf.Abs(fit.OffsetX), Mathf.Abs(fit.OffsetY)) + fit.Dilate + fit.Softness;
+        if (budget > 1f)
+        {
+            fit.Scale = 1f / budget;
+            fit.OffsetX *= fit.Scale;
+            fit.OffsetY *= fit.Scale;
+            fit.Dilate *= fit.Scale;
+            fit.Softness *= fit.Scale;
+        }
+
+        return fit;
     }
 }

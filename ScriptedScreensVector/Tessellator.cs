@@ -546,6 +546,26 @@ internal static class Tessellator
         if (frame.Clip != null)
             clip = frame.Clip.Bounds(frame.Matrix);
 
+        // Text takes ONE shadow, because the text engine's underlay is one layer. Several
+        // are reported rather than quietly collapsed -- a designer who wrote two expects two.
+        VecShadow? textShadow = null;
+        if (node.Shadows is { Length: > 0 })
+        {
+            var first = node.Shadows[0];
+
+            // Scaled here, with the same factor as the font size, so TextLayer receives canvas
+            // units and does not need the frame.
+            textShadow = new VecShadow(
+                first.Dx * frame.Scale,
+                first.Dy * frame.Scale,
+                first.Blur * frame.Scale,
+                first.Spread * frame.Scale,
+                first.Colour);
+
+            if (node.Shadows.Length > 1)
+                scene.Problem($"T{(string.IsNullOrEmpty(node.Id) ? "" : " \"" + node.Id + "\"")}: text takes one shadow, {node.Shadows.Length} given");
+        }
+
         TextFound.Add(new TextPlacement
         {
             Text = body!,
@@ -563,6 +583,7 @@ internal static class Tessellator
             Rotation = -Mathf.Atan2(frame.Matrix.m10, frame.Matrix.m00) * Mathf.Rad2Deg,
             Wrap = node.Wrap,
             LineHeight = node.LineHeight,
+            Shadow = textShadow,
             ClipRect = clip,
         });
     }
@@ -674,11 +695,8 @@ internal static class Tessellator
             RecordHit(node.Id!, outline, frame.Matrix, context);
 
         // Shadows first: they sit beneath the shape, and in declaration order like CSS.
-        if (node.Shadows != null && closed)
-        {
-            foreach (var shadow in node.Shadows)
-                Shadow.Emit(vh, outline, shadow, frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
-        }
+        if (closed)
+            EmitShadows(vh, node, outline, frame);
 
         if (node.HasFill)
             FillContour(vh, node, context, frame, outline, null, ResolvePaint(scene, node, context, frame, stroke: false));
@@ -866,6 +884,22 @@ internal static class Tessellator
         }
     }
 
+    /// <summary>Draws a node's shadows beneath an outline, in declaration order like CSS.</summary>
+    /// <remarks>
+    /// Extracted because it had exactly one caller and that caller was reached only from `R`
+    /// and `C`. Every other closed shape -- a filled `Y`, a closed `P`, a `SP` -- parsed `sh`
+    /// and silently drew nothing, which is the quiet-ignore failure the attribute whitelist
+    /// exists to catch and cannot, because `sh` is a real key on a real op.
+    /// </remarks>
+    private static void EmitShadows(MeshBuilder vh, VecNode node, List<Vector2> outline, Frame frame)
+    {
+        if (node.Shadows == null || outline.Count < 3)
+            return;
+
+        foreach (var shadow in node.Shadows)
+            Shadow.Emit(vh, outline, shadow, frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+    }
+
     private static void EmitPath(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame)
     {
         List<Vector2> points;
@@ -915,9 +949,35 @@ internal static class Tessellator
             return;
 
         if (node.HasFill && node.Closed)
+        {
+            EmitShadows(vh, node, points, frame);
             FillContour(vh, node, context, frame, points, null, ResolvePaint(scene, node, context, frame, stroke: false));
+        }
 
         StrokeOutline(vh, scene, node, context, frame, points, node.Closed);
+    }
+
+    /// <summary>The largest closed subpath, which is the outer contour by the same rule the
+    /// triangulator uses. Null when a path has no closed subpath to cast a shadow from.</summary>
+    private static List<Vector2>? Outermost(List<SubPath> subpaths)
+    {
+        List<Vector2>? best = null;
+        var bestArea = 0f;
+
+        foreach (var sub in subpaths)
+        {
+            if (!sub.Closed || sub.Points.Count < 3)
+                continue;
+
+            var area = Mathf.Abs(Triangulator.SignedArea(sub.Points));
+            if (area <= bestArea)
+                continue;
+
+            bestArea = area;
+            best = sub.Points;
+        }
+
+        return best;
     }
 
     private static void EmitPathData(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame)
@@ -930,7 +990,18 @@ internal static class Tessellator
             return;
 
         if (node.HasFill)
+        {
+            // The OUTER contour only, which is the largest closed subpath -- the same rule
+            // the triangulator uses to tell an outline from its holes. Shadowing every closed
+            // subpath would draw a solid shadow behind each hole; punching one out needs the
+            // polygon boolean this renderer does not have, and is the limit already recorded
+            // for holes inside a clipped fill.
+            var outer = Outermost(subpaths);
+            if (outer != null)
+                EmitShadows(vh, node, outer, frame);
+
             FillSubpaths(vh, scene, node, context, frame, subpaths);
+        }
 
         foreach (var sub in subpaths)
             StrokeOutline(vh, scene, node, context, frame, sub.Points, sub.Closed);

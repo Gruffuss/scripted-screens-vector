@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.10.1.0</Version>
+	<Version>0.10.2.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -66,6 +66,11 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.10.2[/b]
+[list]
+[*] [b]Shadows work on every closed shape[/b], not only rectangles and ellipses. A filled polygon, spline or closed path parsed sh and silently drew nothing; the documentation claimed otherwise and was wrong.
+[*] [b]Text takes a shadow too[/b], through the font's own underlay, since a glyph has no outline for the geometric shadow to trace. One shadow per label, and a request larger than the font's SDF padding allows is scaled down as a whole and reported rather than quietly shrunk.
+[/list]
 [b]0.10.1[/b]
 [list]
 [*] Text nodes take wrap=1 for multi-line paragraphs and lh for line height, as a CSS-style multiple of the font size. Single line stays the default, since a readout that silently becomes two lines shifts everything the scene placed around it.

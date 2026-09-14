@@ -4,23 +4,6 @@ using UnityEngine;
 namespace ScriptedScreensVector;
 
 /// <summary>One CSS-style drop shadow: offset, blur, spread, colour.</summary>
-internal readonly struct VecShadow
-{
-    internal readonly float Dx;
-    internal readonly float Dy;
-    internal readonly float Blur;
-    internal readonly float Spread;
-    internal readonly Color Colour;
-
-    internal VecShadow(float dx, float dy, float blur, float spread, Color colour)
-    {
-        Dx = dx;
-        Dy = dy;
-        Blur = blur;
-        Spread = spread;
-        Colour = colour;
-    }
-}
 
 /// <summary>
 /// Draws Gaussian drop shadows as geometry, with no offscreen pass and no shader.

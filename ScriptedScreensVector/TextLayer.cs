@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -31,6 +32,15 @@ internal sealed class TextLayer
 
     /// <summary>The face a fresh label starts with, restored when a placement names none.</summary>
     private TMP_FontAsset? _defaultFont;
+
+    /// <summary>Labels currently carrying an instanced material because of a shadow.</summary>
+    /// <remarks>
+    /// Reading `fontMaterial` INSTANTIATES a material, which costs an extra draw call and
+    /// breaks batching, so it is only touched for a label that actually has a shadow. This
+    /// set is what lets one be turned off again: the pool reassigns every property, and a
+    /// label reused for a placement with no shadow must not keep the previous occupant's.
+    /// </remarks>
+    private readonly HashSet<int> _shadowed = new();
     private readonly List<RectTransform> _masks = new();
     private readonly Transform _parent;
 
@@ -51,6 +61,10 @@ internal sealed class TextLayer
         {
             if (_pool[i] != null)
                 _pool[i].gameObject.SetActive(false);
+
+            // A hidden label keeps its material, and the pool may hand it to a placement with
+            // no shadow later. Forget it now so that placement clears it.
+            _shadowed.Remove(i);
         }
     }
 
@@ -133,6 +147,107 @@ internal sealed class TextLayer
             ApplyFont(label, placement.Font!);
         else if (_defaultFont != null && label.font != _defaultFont)
             label.font = _defaultFont;
+
+        ApplyShadow(label, index, placement);
+    }
+
+    /// <summary>Drives the text engine's underlay from a `sh` entry.</summary>
+    /// <remarks>
+    /// **Text cannot take the geometric shadow every other shape gets.** That one stacks
+    /// contours carrying a blurred edge's coverage, and a glyph has no contour here -- the
+    /// text engine builds its own mesh on its own object, above ours. The underlay is the
+    /// same idea done inside the SDF shader, which is the only place the glyph's silhouette
+    /// is known.
+    ///
+    /// **Units.** Underlay offset, dilate and softness are normalised against the glyph's SDF
+    /// padding, not measured in pixels: 1.0 is the whole padding, which is `gradientScale`
+    /// atlas texels, and one texel covers `fontSize / samplingPointSize` rendered units. So
+    /// the conversion out of canvas units is
+    /// `canvas * samplingPointSize / (gradientScale * fontSize)`. Read out of the decompiled
+    /// `ShaderUtilities.GetPadding` and `UpdateShaderRatios` rather than guessed.
+    ///
+    /// **The budget is real and it bites.** The shader renormalises whenever
+    /// `max(|dx|,|dy|) + dilate + softness` exceeds 1, so an over-large shadow is not clipped,
+    /// it is silently SHRUNK -- and everything else shrinks with it. Rather than let that
+    /// happen invisibly, the whole request is scaled down together here and the fact is
+    /// reported, so the shape stays right and the cause is named.
+    /// </remarks>
+    private void ApplyShadow(TextMeshProUGUI label, int index, TextPlacement placement)
+    {
+        if (placement.Shadow == null)
+        {
+            // Only touch the material if we are the ones who instanced it.
+            if (_shadowed.Remove(index))
+            {
+                ShaderUtilities.GetShaderPropertyIDs();
+
+                var current = label.fontMaterial;
+                if (current != null)
+                {
+                    current.DisableKeyword(ShaderUtilities.Keyword_Underlay);
+                    current.SetColor(ShaderUtilities.ID_UnderlayColor, Color.clear);
+                }
+            }
+
+            return;
+        }
+
+        // The ID_* fields are lazily filled and are ZERO until this runs. Writing to shader
+        // property 0 is a silent no-op, which would have made every text shadow simply not
+        // appear with nothing in the log -- the same class of failure as the native ECalls
+        // that bit this project twice. It self-guards, so calling it every time is free.
+        ShaderUtilities.GetShaderPropertyIDs();
+
+        var shadow = placement.Shadow.Value;
+        var material = label.fontMaterial;
+        var font = label.font;
+
+        if (material == null || font == null || !material.HasProperty(ShaderUtilities.ID_UnderlayOffsetX))
+        {
+            // The face has no underlay in its shader. Silence here would be the whole bug
+            // again, so it is said once per surface rather than per label per frame.
+            Warn($"font \"{font?.name}\" has no underlay in its shader; text shadow not drawn");
+            return;
+        }
+
+        var gradient = material.HasProperty(ShaderUtilities.ID_GradientScale)
+            ? material.GetFloat(ShaderUtilities.ID_GradientScale)
+            : 0f;
+
+        var sampling = font.faceInfo.pointSize;
+        var size = Mathf.Max(1f, placement.Size);
+
+        if (gradient <= 0.001f || sampling <= 0f)
+        {
+            Warn($"font \"{font.name}\" reports no usable SDF scale; text shadow not drawn");
+            return;
+        }
+
+        var fit = TextShadow.Fit(shadow, gradient, sampling, size);
+
+        if (fit.Scale < 0.999f)
+        {
+            Warn($"text shadow is larger than the font's SDF padding allows; reduced to {fit.Scale * 100f:F0}% "
+                 + "(use a smaller offset and blur, or a font atlas with more padding)");
+        }
+
+        material.EnableKeyword(ShaderUtilities.Keyword_Underlay);
+        material.SetColor(ShaderUtilities.ID_UnderlayColor, shadow.Colour);
+        material.SetFloat(ShaderUtilities.ID_UnderlayOffsetX, fit.OffsetX);
+        material.SetFloat(ShaderUtilities.ID_UnderlayOffsetY, fit.OffsetY);
+        material.SetFloat(ShaderUtilities.ID_UnderlayDilate, Mathf.Clamp(fit.Dilate, -1f, 1f));
+        material.SetFloat(ShaderUtilities.ID_UnderlaySoftness, Mathf.Clamp01(fit.Softness));
+
+        _shadowed.Add(index);
+    }
+
+    /// <summary>One of each distinct complaint, not one per label per frame.</summary>
+    private readonly HashSet<string> _warned = new(StringComparer.Ordinal);
+
+    private void Warn(string message)
+    {
+        if (_warned.Add(message))
+            ScriptedScreensVectorPlugin.Log?.LogWarning($"vector text: {message}");
     }
 
     /// <summary>
@@ -202,5 +317,6 @@ internal sealed class TextLayer
 
         _masks.Clear();
         _pool.Clear();
+        _shadowed.Clear();
     }
 }

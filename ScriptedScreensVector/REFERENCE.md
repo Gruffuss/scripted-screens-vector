@@ -383,6 +383,7 @@ container, where it will be clipped away and look like nothing happened.
 | `cspace` | character spacing |
 | `wrap` | `1` lets the text run to more than one line inside its box |
 | `lh` | line height as a multiple of the font size, CSS style; omitted uses the font's own |
+| `sh` | one drop shadow, drawn by the font's underlay — see Shadows |
 | `fit` | `none` (default), `ellipsis`, `shrink` |
 | `min_size` | floor for `shrink` |
 
@@ -593,18 +594,36 @@ written unwrapped.
   sh = { { 0, 3, 8, 0, "#0000001f" }, { 0, 3, 1, 0, "#0000000a" } } }
 ```
 
-Available on `R`, `C`, and any closed shape. Drawn as geometry — no offscreen pass, no
-shader — by stacking contours from `-3σ` to `+3σ` carrying the closed-form coverage of a
-blurred edge, `0.5·erfc(d / (σ√2))`. Ring count follows the blur's on-screen size.
+Available on **`R`, `C`, a filled closed `Y` or `SP`, a closed `P`, and `T`.** Everything but
+text is drawn as geometry — no offscreen pass, no shader — by stacking contours from `-3σ` to
+`+3σ` carrying the closed-form coverage of a blurred edge, `0.5·erfc(d / (σ√2))`. Ring count
+follows the blur's on-screen size.
+
+A path with holes casts its shadow from the **outer contour only**: shadowing each closed
+subpath would put a solid shadow behind every hole, and punching one out needs the polygon
+boolean this renderer does not have.
+
+**Text is the exception and works differently.** A glyph has no contour here — the text engine
+builds its own mesh above ours — so a `T` shadow is the SDF shader's underlay instead. Same
+`sh` syntax, three differences:
+
+- **One shadow only.** The underlay is a single layer. A second is reported, not drawn.
+- **Size is capped by the font's SDF padding.** Offset, spread and blur share one budget of
+  roughly `gradientScale` atlas texels. A request past it is scaled down *as a whole*, so the
+  shadow keeps its shape, and the reduction is logged with its percentage rather than left to
+  look like the numbers were ignored.
+- `spread` maps to dilate and `blur` to softness, both approximations of the geometric
+  version rather than the same arithmetic.
 
 **Three differences from CSS**, worth knowing rather than discovering:
 
 - The coverage is measured along each vertex's normal rather than by solving the 2-D
   convolution. Exact on a straight edge, very slightly tight at a sharp corner; under a
   pixel at UI corner radii.
-- **The shadow is not knocked out under the shape.** CSS clips it to outside the border box
-  so a translucent shape does not darken over its own shadow. That needs a polygon boolean
-  here. Opaque shapes are unaffected; a translucent one will read darker than the mockup.
+- **The shadow is not knocked out under the shape.** CSS clips it to outside the border box so
+  a translucent shape does not darken over its own shadow. That needs a polygon boolean here.
+  Opaque shapes are unaffected; a translucent one will read darker than the mockup. Geometry
+  only — the text underlay draws strictly behind its glyphs and has no such problem.
 - `inset` is not implemented.
 
 Blending is straight source-over on sRGB bytes — the space the colours are written in — so a

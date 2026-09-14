@@ -103,6 +103,14 @@ internal static class Program
         PrintfTests.RepeatedCallsAgree(run);
 
         Console.WriteLine();
+        TextShadowTests.OffsetScale(run);
+        TextShadowTests.YIsFlipped(run);
+        TextShadowTests.BlurIsHalved(run);
+        TextShadowTests.OversizeIsScaledWhole(run);
+        TextShadowTests.FitsAreLeftAlone(run);
+        TextShadowTests.NonsenseFontIsSafe(run);
+
+        Console.WriteLine();
         GradientTests.LinearParameter(run);
         GradientTests.RadialParameter(run);
         GradientTests.TwoStopInterpolation(run);
