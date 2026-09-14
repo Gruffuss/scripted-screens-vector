@@ -61,7 +61,11 @@ public sealed class ScriptedScreensVectorPlugin : ModBehaviour
             FrameMonitor.Install();
 
             _harmony = new Harmony(PluginInfo.PLUGIN_GUID);
-            _harmony.PatchAll(typeof(VectorElementPatch));
+            // The ASSEMBLY, not one type. PatchAll(Type) registers exactly that class, so a
+            // second patch -- the capture hook lives in a nested one -- compiles in and is
+            // then silently never applied. No error, no warning: the flag it sets simply
+            // stays false for ever, and everything downstream looks like it is not working.
+            _harmony.PatchAll(typeof(VectorElementPatch).Assembly);
             Log.LogInfo($"Patched ScriptedScreens; element type \"{VectorElementPatch.ElementType}\" is live.");
         }
         catch (System.Exception ex)

@@ -290,7 +290,32 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     private readonly Stopwatch _stopwatch = new();
     private readonly MeshBuilder _builder = new();
 
-    private Mesh? _mesh;
+    /// <summary>
+    /// The surface's geometry. **Serialised deliberately**, so a capture clone keeps it.
+    /// </summary>
+    /// <remarks>
+    /// ScriptedScreens' screen capture clones the surface tree with <c>Instantiate</c> and
+    /// renders the clone. A mesh handed to a CanvasRenderer is not a serialised property, so
+    /// the clone's renderer had nothing to draw and every capture of a vector console came
+    /// back blank — which is why the whole port had to be checked by eye, and is recorded in
+    /// the port feedback as probably its single biggest time cost.
+    ///
+    /// Instantiate copies serialised references as references when they point outside the
+    /// hierarchy being cloned, which is how the HTML mod's RawImage keeps its live
+    /// RenderTexture. A mesh behaves the same way, so marking the field is the whole fix: the
+    /// clone shares the live mesh and paints exactly what is on screen.
+    /// </remarks>
+    [SerializeField] private Mesh? _mesh;
+
+    /// <summary>
+    /// True on the instance that created the mesh; false on a capture clone.
+    /// </summary>
+    /// <remarks>
+    /// NOT serialised, and that is the point — it is how a clone knows what it is. A clone
+    /// must never clear or destroy the mesh it is sharing, or capturing a console would wipe
+    /// the console.
+    /// </remarks>
+    private bool _ownsMesh;
 
     private VecScene? _scene;
     private float _startTime;
@@ -495,6 +520,80 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             return int.MinValue + 1;
 
         return Mathf.FloorToInt(Mathf.Log(scale) / Mathf.Log(1.15f));
+    }
+
+    /// <summary>
+    /// Tessellates and uploads on the spot, for a capture that cannot wait for a worker.
+    /// </summary>
+    /// <remarks>
+    /// Legal on the main thread for the same reason it is legal off it: the rebuild path is
+    /// plain managed arithmetic with no Unity call in it. This is the slow way round and is
+    /// only ever taken while a capture is running -- ordinary rendering keeps the work off the
+    /// frame, which is the whole point of the threading.
+    ///
+    /// A job already in flight owns the builder and the context, so it is waited for and
+    /// landed rather than raced. A capture is a debugging action; a few milliseconds of block
+    /// is a fair price for a picture that is not blank.
+    /// </remarks>
+    private void BuildNow()
+    {
+        if (_job != null)
+        {
+            try
+            {
+                _job.Wait(250);
+            }
+            catch (System.AggregateException ex)
+            {
+                ScriptedScreensVectorPlugin.Log?.LogWarning($"vector \"{_sceneId}\": capture wait failed: {ex.GetBaseException().Message}");
+            }
+
+            LandJob();
+        }
+
+        if (_job != null || _scene == null)
+            return;
+
+        var rect = rectTransform.rect;
+        if (rect.width <= 0f || rect.height <= 0f)
+            return;
+
+        _context.Time = Now() - _startTime;
+        _context.Blend = 1f;
+
+        SampleScroll(rect);
+
+        _context.ScrollOffsets.Clear();
+        foreach (var pair in _offsets)
+            _context.ScrollOffsets[pair.Key] = pair.Value;
+
+        var screenScale = ScreenPixelsPerCanvasUnit();
+        var known = screenScale > 0f;
+
+        Tessellator.Emit(_builder, _scene, _context, rect, known ? screenScale : 1f, known, _stats);
+
+        _sliceCount = _builder.Slices();
+        _lastShapeCount = _stats.Shapes;
+        _lastVertices = _builder.currentVertCount;
+        _builtForBucket = ScaleBucket();
+        _needsRebuild = false;
+
+        EnsureMesh();
+        _builder.Apply(_mesh!);
+        canvasRenderer.SetMesh(_mesh);
+
+        // Kept: a blank capture is otherwise silent, and this says whether geometry existed
+        // at the moment the picture was taken. It fires only during a capture.
+        ScriptedScreensVectorPlugin.Log?.LogInfo(
+            $"vector capture: \"{_sceneId}\" built inline, {_builder.currentVertCount} verts across {_sliceCount} mesh(es)");
+
+        if (_stats.Text.Count > 0 || _text != null)
+        {
+            _text ??= new TextLayer(rectTransform);
+            _text.Apply(_stats.Text);
+        }
+
+        ApplySlices();
     }
 
     /// <summary>Hands slices 1..n to child graphics, creating and retiring them as needed.</summary>
@@ -974,7 +1073,26 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// </remarks>
     protected override void UpdateGeometry()
     {
+        // A capture clone has a mesh it did not make and no scene of its own. Present what it
+        // was given and touch nothing: clearing here would wipe the geometry of the live
+        // console it was cloned from, which is a far worse bug than a blank capture.
+        if (!_ownsMesh && _mesh != null)
+        {
+            canvasRenderer.SetMesh(_mesh);
+            return;
+        }
+
         EnsureMesh();
+
+        // ScriptedScreens' capture rebuilds the surface and then clones it inside a single
+        // call, so there is no frame in which a worker could have produced anything. This is
+        // the one hook that runs in between -- the capture calls ForceUpdateCanvases before it
+        // clones -- so build here and now, and the clone inherits a populated mesh.
+        if (VectorElementPatch.Capturing && _scene != null && VectorConfig.RendererEnabled)
+        {
+            BuildNow();
+            return;
+        }
 
         // Must not touch _builder: a worker may own it right now. The mesh is main-thread
         // only, so clearing that is safe.
@@ -991,6 +1109,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             return;
 
         _mesh = new Mesh { name = "VectorSurface" };
+        _ownsMesh = true;
 
         // NO 32-BIT INDEX FORMAT HERE. Setting it crashes the game natively, with nothing in
         // the log: this mesh goes to a CanvasRenderer, and UGUI's batcher assumes 16-bit
@@ -1222,7 +1341,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         _text?.Destroy();
         _text = null;
 
-        if (_mesh != null)
+        if (_mesh != null && _ownsMesh)
         {
             Destroy(_mesh);
             _mesh = null;

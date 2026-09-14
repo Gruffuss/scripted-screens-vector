@@ -114,7 +114,7 @@ A scene reports its own faults rather than drawing nothing and leaving you to gu
 
 | fault | what happens |
 |-------|--------------|
-| the scene is too large for one mesh | reported, naming what was dropped |
+| a single shape too large for one mesh | reported, naming what was dropped |
 | unknown op | reported; the node is skipped |
 | unknown attribute name | reported, with the op and the node id |
 | malformed expression | reported; that attribute falls back to its default |
@@ -150,6 +150,43 @@ is answerable from inside the editor.
 
 Bound by reflection, so the mod loads normally without StationeersLua and simply does not
 register the tool.
+
+### Size limits
+
+**One mesh holds 60,000 vertices, and a surface uses as many meshes as it needs.** Extra
+meshes are created automatically; `vector_stats` says `across N meshes` when there is more
+than one. Measured: 150 shadowed cards at 148,000 vertices across three meshes drew in full
+with no change to frame time.
+
+That per-mesh figure is **UGUI's limit, not a setting** — its own vertex helper throws at
+65,000, because the `CanvasRenderer` batcher works in 16-bit indices. Asking a mesh for 32-bit
+indices and handing it to a CanvasRenderer anyway takes the game down natively, with nothing
+in the log. More meshes is the supported answer and the one TextMeshPro uses.
+
+Cuts fall **between shapes**, never inside one, so a single shape has to fit one mesh on its
+own. One that does not is refused and reported. Nothing else is capped: a page can be as dense
+as you like, and the cost you will feel first is the mesh upload, which is on the frame and
+grows with vertex count.
+
+**What is expensive, measured at 1395 px:**
+
+| | vertices |
+|---|---|
+| a filled rectangle | 4 |
+| the same rectangle with a feather | 64 |
+| the same rectangle with one `sh` | 640 |
+| a small circle with a feather | 40 |
+
+A box-shadow is far and away the most expensive thing a scene can ask for — roughly nine
+cards' worth each — because its ring count follows the blur's on-screen size. Reducing the
+blur radius is the direct lever.
+
+### Screen capture
+
+`capture_scripted_screen` works on vector consoles, artwork and text alike. It is not free:
+the capture rebuilds the surface and renders a clone inside one call, so the geometry is
+tessellated **inline on the main thread** rather than on a worker. A capture of a dense
+console costs a frame; ordinary rendering is unaffected.
 
 ### Debug switches
 
@@ -715,13 +752,7 @@ gradient drew ninety-six bands. Rings nearer the focus also carry fewer outline 
 because a ring at a tenth of the radius has a tenth of the circumference.
 
 Together those roughly halve a typical fill and cut a small multi-stop one by an order of
-magnitude. It matters because a surface has a hard **60,000-vertex ceiling**, so an expensive gradient
-does not slow the console down — it makes something else on it disappear. Going over is
-reported since 0.10.4, naming what was dropped, and `vector_stats` shows the count.
-
-That ceiling is **not a setting**. It is UGUI's own limit — the UI throws at 65,000 — and this
-layer hands its mesh to a `CanvasRenderer` whose batcher works in 16-bit indices throughout.
-Raising it means splitting a surface across several meshes, not changing a number.
+magnitude — worth knowing, though no longer a wall. See **Size limits** below.
 
 ### `SYM` / `USE` — symbols
 

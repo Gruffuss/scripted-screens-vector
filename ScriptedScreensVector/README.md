@@ -619,6 +619,25 @@ missing name draws **magenta** rather than white. See "When something looks wron
 
 ---
 
+## How much a console can hold
+
+**One mesh holds 60,000 vertices and a surface uses as many as it needs**, so density is not
+something to budget against any more. 150 cards each carrying a drop shadow — 148,000
+vertices — drew in full with frame time unchanged.
+
+What is worth knowing is *what* costs. Measured on a 1395 px console:
+
+| | vertices |
+|---|---|
+| a filled rectangle | 4 |
+| with a feather | 64 |
+| with one `sh` shadow | 640 |
+
+A shadow is about nine cards' worth of geometry, because its ring count follows the blur's
+on-screen size. If a design puts one on every tile in a grid, that is where the geometry goes,
+and a smaller blur radius is the direct lever. Nothing breaks if you ignore this — it is a
+cost, not a limit.
+
 ## When something looks wrong
 
 The surface tells you first. A magenta hatched border means the scene has faults; magenta

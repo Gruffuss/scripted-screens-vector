@@ -23,7 +23,11 @@ namespace ScriptedScreensVector;
 [RequireComponent(typeof(CanvasRenderer))]
 internal sealed class VectorSlice : MaskableGraphic
 {
-    private Mesh? _mesh;
+    /// <summary>Serialised so a capture clone keeps it; see VectorGraphic for why.</summary>
+    [SerializeField] private Mesh? _mesh;
+
+    /// <summary>True on the instance that made the mesh, false on a capture clone.</summary>
+    private bool _ownsMesh;
 
     /// <summary>Never raycast: the parent surface owns hit testing for the whole scene.</summary>
     protected override void Awake()
@@ -35,7 +39,11 @@ internal sealed class VectorSlice : MaskableGraphic
     /// <summary>Shows one slice of the surface's geometry.</summary>
     internal void Present(MeshBuilder builder, int slice)
     {
-        _mesh ??= new Mesh { name = "VectorSlice" };
+        if (_mesh == null)
+        {
+            _mesh = new Mesh { name = "VectorSlice" };
+            _ownsMesh = true;
+        }
 
         builder.Apply(_mesh, slice);
         canvasRenderer.SetMesh(_mesh);
@@ -57,7 +65,7 @@ internal sealed class VectorSlice : MaskableGraphic
 
     protected override void OnDestroy()
     {
-        if (_mesh != null)
+        if (_mesh != null && _ownsMesh)
         {
             Destroy(_mesh);
             _mesh = null;

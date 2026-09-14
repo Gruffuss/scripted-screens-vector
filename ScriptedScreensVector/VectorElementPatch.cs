@@ -91,6 +91,28 @@ internal static class VectorElementPatch
     }
 
     /// <summary>Live surfaces, for the stats tool.</summary>
+    /// <summary>True while ScriptedScreens is capturing a surface to a PNG.</summary>
+    /// <remarks>
+    /// The capture is synchronous and destructive: it calls <c>RebuildSurfaceFromModel</c>,
+    /// which recreates every host on the surface, then <c>Canvas.ForceUpdateCanvases</c>, then
+    /// clones the tree and renders the clone -- all inside one call, with no frame in between.
+    ///
+    /// A surface rebuilt that way has never tessellated, because tessellation is dispatched to
+    /// a worker and landed on a later frame. So the clone was of an empty graphic and every
+    /// capture of a vector console came back blank. Knowing a capture is running is what lets
+    /// the geometry be built inline instead, which is legal precisely because the tessellator
+    /// contains no Unity call.
+    /// </remarks>
+    internal static bool Capturing { get; private set; }
+
+    [HarmonyPatch(typeof(SS), "TryCaptureSurfaceShared")]
+    private static class CapturePatch
+    {
+        private static void Prefix() => Capturing = true;
+
+        private static void Postfix() => Capturing = false;
+    }
+
     internal static IEnumerable<VectorGraphic> LiveSurfaces()
     {
         return Scenes.Values;
