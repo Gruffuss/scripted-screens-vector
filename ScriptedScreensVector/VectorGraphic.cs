@@ -572,7 +572,13 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         Tessellator.Emit(_builder, _scene, _context, rect, known ? screenScale : 1f, known, _stats);
 
+        if (_scene.TextInOrder)
+            TextOrder.Assign(_stats.Text, _builder);
+
         _sliceCount = _builder.Slices();
+
+        if (_scene.TextInOrder)
+            TextOrder.Resolve(_stats.Text, _builder, _sliceCount);
         _lastShapeCount = _stats.Shapes;
         _lastVertices = _builder.currentVertCount;
         _builtForBucket = ScaleBucket();
@@ -598,6 +604,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         {
             _text ??= new TextLayer(rectTransform);
             _text.Apply(_stats.Text);
+
+            if (_scene != null && _scene.TextInOrder)
+                OrderTextWithSlices();
         }
     }
 
@@ -640,6 +649,49 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 // walk toward it would otherwise churn objects every few steps.
                 slice.gameObject.SetActive(false);
             }
+        }
+    }
+
+    /// <summary>
+    /// Interleaves labels and meshes so that both obey scene order.
+    /// </summary>
+    /// <remarks>
+    /// UGUI draws a parent before its children and children in sibling order, so the surface's
+    /// own mesh is always first and everything else is arranged behind that. A label that has
+    /// to sit under a shape is parked before the mesh carrying that shape:
+    ///
+    ///   surface mesh (slice 0) - labels at depth 1 - slice 1 - labels at depth 2 - ...
+    ///
+    /// Only called when the scene asked for `ztext`. Without it, labels keep the position
+    /// their creation order gave them -- after every slice, which is where text has always
+    /// drawn -- and no scene written before this existed changes.
+    /// </remarks>
+    private void OrderTextWithSlices()
+    {
+        if (_text == null)
+            return;
+
+        var placements = _stats.Text;
+        var extra = Mathf.Max(0, _sliceCount - 1);
+        var sibling = 0;
+
+        for (var depth = 1; depth <= _sliceCount; depth++)
+        {
+            for (var i = 0; i < placements.Count; i++)
+            {
+                if (placements[i].SliceDepth != depth)
+                    continue;
+
+                var mask = _text.MaskFor(i);
+                if (mask != null)
+                    mask.SetSiblingIndex(sibling++);
+            }
+
+            // The mesh this depth sits on top of. Slice d is child d-1; the last depth has
+            // no slice after it, which is the ordinary "text on top" case.
+            var slice = depth - 1;
+            if (slice < extra && slice < _slices.Count && _slices[slice] != null)
+                _slices[slice].transform.SetSiblingIndex(sibling++);
         }
     }
 
@@ -1217,6 +1269,11 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
             Tessellator.Emit(builder, scene, context, rect, scale, known, stats);
 
+            // Off-thread on purpose: this is a rect test per label per later shape, and it
+            // has to happen before Slices() is asked how the mesh divides.
+            if (scene.TextInOrder)
+                TextOrder.Assign(stats.Text, builder);
+
             var wall = (Stopwatch.GetTimestamp() - mark) * 1000d / Stopwatch.Frequency;
             var cpuAfter = ThreadCpuMilliseconds();
 
@@ -1320,6 +1377,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         _sliceCount = _builder.Slices();
 
+        if (_scene != null && _scene.TextInOrder)
+            TextOrder.Resolve(_stats.Text, _builder, _sliceCount);
+
         _builder.Apply(_mesh!);
         canvasRenderer.SetMesh(_mesh);
 
@@ -1334,6 +1394,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         {
             _text ??= new TextLayer(rectTransform);
             _text.Apply(_stats.Text);
+
+            if (_scene != null && _scene.TextInOrder)
+                OrderTextWithSlices();
         }
 
         _lastShapeCount = _stats.Shapes;

@@ -47,6 +47,31 @@ internal sealed class MeshBuilder
     /// </remarks>
     private readonly List<int> _cutIndices = new(256);
 
+    /// <summary>Canvas-space bounds of each shape, one per entry in <see cref="_cuts"/>.</summary>
+    /// <remarks>
+    /// Only filled when the scene asks for text in draw order, because it is the only thing
+    /// that reads them and tracking a running box costs four comparisons per vertex.
+    /// </remarks>
+    private readonly List<Rect> _shapeBounds = new(256);
+
+    /// <summary>True while shape bounds are being tracked; see <see cref="_shapeBounds"/>.</summary>
+    private bool _trackBounds;
+
+    /// <summary>Running box of the shape being built, valid while <see cref="_trackBounds"/>.</summary>
+    private float _minX, _minY, _maxX, _maxY;
+
+    /// <summary>Vertex count at which the current shape began.</summary>
+    private int _shapeStart;
+
+    /// <summary>Cuts that must be taken whatever the vertex budget says.</summary>
+    /// <remarks>
+    /// The ordinary cuts are candidates chosen to fit 60,000 vertices in a mesh. These are
+    /// the opposite: a label has to draw between two shapes, so the mesh has to end there
+    /// regardless of how little is in it. Held as shape indices rather than vertex counts so
+    /// the caller can name a boundary without knowing where it landed.
+    /// </remarks>
+    private readonly List<int> _forced = new(8);
+
     /// <summary>Where each slice starts, rebuilt on demand. Index i covers [_slices[i], _slices[i+1]).</summary>
     private readonly List<int> _slices = new(4);
 
@@ -69,6 +94,80 @@ internal sealed class MeshBuilder
         _cutIndices.Clear();
         _slices.Clear();
         _sliceIndexStart.Clear();
+        _shapeBounds.Clear();
+        _forced.Clear();
+        _shapeStart = 0;
+        ResetShapeBox();
+    }
+
+    /// <summary>Starts recording each shape's bounds, for putting text in draw order.</summary>
+    internal void TrackBounds(bool on)
+    {
+        _trackBounds = on;
+    }
+
+    /// <summary>How many shape boundaries have been marked.</summary>
+    internal int ShapeCount => _cuts.Count;
+
+    /// <summary>Bounds of shape <paramref name="shape"/>; empty when nothing was tracked.</summary>
+    internal Rect ShapeBounds(int shape)
+    {
+        return shape >= 0 && shape < _shapeBounds.Count ? _shapeBounds[shape] : default;
+    }
+
+    /// <summary>Vertex count at which <paramref name="shape"/> begins.</summary>
+    internal int ShapeStart(int shape)
+    {
+        if (shape <= 0)
+            return 0;
+
+        return shape <= _cuts.Count ? _cuts[shape - 1] : _positions.Count;
+    }
+
+    /// <summary>How many slices end at or before <paramref name="vertex"/>.</summary>
+    /// <remarks>
+    /// Text in draw order asks this: a label cut in before vertex V draws after exactly this
+    /// many meshes. Only meaningful once <see cref="Slices"/> has run.
+    /// </remarks>
+    internal int SlicesBefore(int vertex)
+    {
+        var before = 0;
+
+        // _slices[0] is always 0 and is the start of the first mesh, not the end of one.
+        for (var i = 1; i < _slices.Count; i++)
+        {
+            if (_slices[i] <= vertex)
+                before++;
+        }
+
+        return before;
+    }
+
+    /// <summary>Requires a mesh boundary immediately before <paramref name="shape"/>.</summary>
+    internal void ForceCutBefore(int shape)
+    {
+        if (shape <= 0 || shape > _cuts.Count)
+            return;
+
+        // The cut sits at the START of that shape, which is the END of the one before it.
+        var at = shape - 1;
+        if (_forced.Contains(at))
+            return;
+
+        // Kept sorted: Slices walks it once, in step with its own forward scan.
+        var insert = _forced.Count;
+        while (insert > 0 && _forced[insert - 1] > at)
+            insert--;
+
+        _forced.Insert(insert, at);
+    }
+
+    private void ResetShapeBox()
+    {
+        _minX = float.MaxValue;
+        _minY = float.MaxValue;
+        _maxX = float.MinValue;
+        _maxY = float.MinValue;
     }
 
     /// <summary>Marks the end of a shape, where the geometry may be cut.</summary>
@@ -81,6 +180,18 @@ internal sealed class MeshBuilder
 
         _cuts.Add(at);
         _cutIndices.Add(_indices.Count);
+
+        if (_trackBounds)
+        {
+            // A shape that emitted no vertices still gets an entry, so that shape indices and
+            // bounds stay in step. An empty box overlaps nothing, which is the right answer.
+            _shapeBounds.Add(_positions.Count > _shapeStart
+                ? Rect.MinMaxRect(_minX, _minY, _maxX, _maxY)
+                : default);
+
+            _shapeStart = _positions.Count;
+            ResetShapeBox();
+        }
     }
 
     /// <summary>
@@ -99,6 +210,11 @@ internal sealed class MeshBuilder
         _slices.Add(0);
         _sliceIndexStart.Add(0);
 
+        // A forced cut outranks the vertex budget: text has to draw between two shapes, so
+        // the mesh ends there however little is in it. Taking the NEAREST one ahead keeps the
+        // greedy rule below for every stretch between them.
+        var nextForced = 0;
+
         var start = 0;
         while (start < _positions.Count)
         {
@@ -106,12 +222,24 @@ internal sealed class MeshBuilder
             var cut = -1;
             var cutIndex = _indices.Count;
 
-            for (var k = 0; k < _cuts.Count; k++)
+            while (nextForced < _forced.Count && _cuts[_forced[nextForced]] <= start)
+                nextForced++;
+
+            if (nextForced < _forced.Count && _cuts[_forced[nextForced]] <= limit)
             {
-                if (_cuts[k] > start && _cuts[k] <= limit)
+                cut = _cuts[_forced[nextForced]];
+                cutIndex = _cutIndices[_forced[nextForced]];
+                nextForced++;
+            }
+            else
+            {
+                for (var k = 0; k < _cuts.Count; k++)
                 {
-                    cut = _cuts[k];
-                    cutIndex = _cutIndices[k];
+                    if (_cuts[k] > start && _cuts[k] <= limit)
+                    {
+                        cut = _cuts[k];
+                        cutIndex = _cutIndices[k];
+                    }
                 }
             }
 
@@ -136,6 +264,14 @@ internal sealed class MeshBuilder
         _positions.Add(position);
         _colours.Add(colour);
         _uv0.Add(uv);
+
+        if (!_trackBounds)
+            return;
+
+        if (position.x < _minX) _minX = position.x;
+        if (position.x > _maxX) _maxX = position.x;
+        if (position.y < _minY) _minY = position.y;
+        if (position.y > _maxY) _maxY = position.y;
     }
 
     internal void AddTriangle(int a, int b, int c)

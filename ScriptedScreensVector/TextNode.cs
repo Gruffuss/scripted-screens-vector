@@ -31,6 +31,16 @@ internal struct TextPlacement
     internal bool Wrap;          // may run to more than one line
     internal float LineHeight;   // multiple of the font size; 0 means the font's own
     internal VecShadow? Shadow;  // first `sh` entry, in canvas units; see TextLayer
+
+    /// <summary>How many shapes had been emitted when this label was collected.</summary>
+    /// <remarks>Where the label sits in draw order; see <see cref="TextOrder"/>.</remarks>
+    internal int ShapeIndex;
+
+    /// <summary>Vertex count this label must be drawn before, when a shape covers it.</summary>
+    internal int CutVertex;
+
+    /// <summary>How many meshes draw before this label. Set by <see cref="TextOrder"/>.</summary>
+    internal int SliceDepth;
 }
 
 /// <summary>Fit modes for <c>T</c>.</summary>

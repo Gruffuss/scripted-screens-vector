@@ -188,6 +188,28 @@ the capture rebuilds the surface and renders a clone inside one call, so the geo
 tessellated **inline on the main thread** rather than on a worker. A capture of a dense
 console costs a frame; ordinary rendering is unaffected.
 
+### Text in draw order — `ztext`
+
+Set `ztext = 1` on the **structure** element's props (or `SCENE ztext=1` in the text form).
+
+Labels are TextMeshPro objects parented beside the geometry rather than part of the mesh, and
+UGUI draws children in sibling order. So by default the whole text layer draws after the whole
+surface: **a shape declared after a label cannot cover it**, and that applies to every label at
+once. `ztext = 1` makes labels obey scene order like everything else.
+
+Opt-in, because text-on-top is what scenes written before it rely on. Turning it on changes
+only the cases where a shape genuinely overlaps a label.
+
+**What it costs.** A label that has to sit under later geometry forces the mesh to be cut
+there, and each extra mesh is a draw call. A cut is forced *only* where a later shape actually
+overlaps the label's box, which on a normal page is close to never — tiles do not overlap
+their neighbours and a label sits inside its own tile. Measured: thirty labelled tiles stay in
+one mesh. A page that really does slide panels over text pays one draw call per such label.
+
+**One case it cannot serve:** a label declared before any shape. The surface's own renderer
+draws before its children, so there is nothing to put such a label behind; it stays on top
+rather than disappearing.
+
 ### Debug switches
 
 Set on the **structure** element's props, alongside `root`. Each disables one stage, so

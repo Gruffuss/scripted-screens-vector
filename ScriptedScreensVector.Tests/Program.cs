@@ -27,6 +27,15 @@ internal sealed class TestRun
         return false;
     }
 
+    /// <summary>Plain boolean assertion, for tests whose answer is not an area.</summary>
+    internal void Check(string name, bool ok, string detail)
+    {
+        if (ok)
+            Pass($"{name}  ({detail})");
+        else
+            Fail($"{name}  -- {detail}");
+    }
+
     internal void Pass(string message)
     {
         Console.WriteLine($"  PASS  {message}");
@@ -117,6 +126,15 @@ internal static class Program
         RadialFillTests.TheSavingIsReal(run);
         RadialFillTests.StitchCoversTheAnnulus(run);
         RadialFillTests.OneFillCannotExhaustASurface(run);
+
+        TextOrderTests.UncoveredLabelForcesNoCut(run);
+        TextOrderTests.CoveredLabelIsCutUnder(run);
+        TextOrderTests.EarlierShapeIsIgnored(run);
+        TextOrderTests.AGridOfLabelledTilesStaysOneMesh(run);
+        TextOrderTests.ForcedCutBeatsTheVertexBudget(run);
+        TextOrderTests.LabelBeforeAllGeometryStaysVisible(run);
+        TextOrderTests.ZtextSurvivesTheSrcForm(run);
+        TextOrderTests.BoundsAreNotTrackedByDefault(run);
 
         Console.WriteLine();
         GradientTests.LinearParameter(run);

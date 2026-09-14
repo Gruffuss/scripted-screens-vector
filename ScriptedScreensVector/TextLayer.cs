@@ -321,6 +321,19 @@ internal sealed class TextLayer
         };
     }
 
+    /// <summary>The clip object the nth placement is drawn inside, for ordering siblings.</summary>
+    /// <remarks>
+    /// The mask is the child of the surface; the label is a child of the mask. So draw order
+    /// is decided by the mask's sibling index, not the label's.
+    /// </remarks>
+    internal Transform? MaskFor(int index)
+    {
+        if (index < 0 || index >= _masks.Count)
+            return null;
+
+        return _masks[index] == null ? null : _masks[index];
+    }
+
     private void Create()
     {
         var maskObject = new GameObject("VecTextClip", typeof(RectTransform), typeof(RectMask2D));

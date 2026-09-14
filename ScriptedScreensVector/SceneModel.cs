@@ -266,6 +266,18 @@ internal sealed class VecScene
     /// </remarks>
     internal bool DebugNoFill;
 
+    /// <summary>
+    /// `ztext = 1` on the scene root: labels obey scene order instead of all drawing on top.
+    /// </summary>
+    /// <remarks>
+    /// Opt-in, so no scene written before this existed changes. Text has always drawn above
+    /// every shape, and a scene that layers a label over artwork declared after it is relying
+    /// on that -- correctly, because it was the only behaviour available.
+    ///
+    /// Costs a mesh split, and a draw call, at each label a later shape actually covers.
+    /// </remarks>
+    internal bool TextInOrder;
+
     internal bool DebugNoFeather;
 
     /// <summary>Evaluate every attribute once and reuse, isolating evaluation from geometry.</summary>
@@ -316,6 +328,7 @@ internal static class SceneParser
             ViewHeight = Mathf.Max(1f, PropNumber(props, "h", 100f)),
             Fit = ParseFit(PropString(props, "fit")),
             DebugNoFill = PropNumber(props, "nofill", 0f) > 0.5f,
+            TextInOrder = PropNumber(props, "ztext", 0f) > 0.5f,
             DebugNoFeather = PropNumber(props, "nofeather", 0f) > 0.5f,
             DebugNoEval = PropNumber(props, "noeval", 0f) > 0.5f,
         };

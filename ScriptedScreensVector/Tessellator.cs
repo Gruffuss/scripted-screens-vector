@@ -258,6 +258,8 @@ internal static class Tessellator
         (HitsFound ??= new List<HitRegion>(16)).Clear();
         (ScrollsFound ??= new List<ScrollRegion>(4)).Clear();
 
+        vh.TrackBounds(scene.TextInOrder);
+
         NoFill = scene.DebugNoFill;
         NoFeather = scene.DebugNoFeather;
         NoEval = scene.DebugNoEval;
@@ -526,7 +528,7 @@ internal static class Tessellator
 
             case VecOp.Text:
             {
-                CollectText(scene, node, context, stack.Peek());
+                CollectText(scene, node, context, stack.Peek(), vh.ShapeCount);
                 emitted++;
                 break;
             }
@@ -555,7 +557,7 @@ internal static class Tessellator
     /// before triangulation, which a TMP child is not made of; a rect is what RectMask2D can
     /// enforce, and anything rounder waits for the stencil path.
     /// </remarks>
-    private static void CollectText(VecScene scene, VecNode node, EvalContext context, Frame frame)
+    private static void CollectText(VecScene scene, VecNode node, EvalContext context, Frame frame, int shapeIndex)
     {
         if (TextFound == null || NoFill)
             return;
@@ -637,6 +639,7 @@ internal static class Tessellator
             LineHeight = node.LineHeight,
             Shadow = textShadow,
             ClipRect = clip,
+            ShapeIndex = shapeIndex,
         });
     }
 

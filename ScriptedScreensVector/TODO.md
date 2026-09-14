@@ -50,41 +50,22 @@ Either report both from the same rebuild, or label the vertex figure as a peak.
 
 ---
 
-## Text cannot be covered by a shape — needed for CSS z-index
+## Text in draw order shipped as `ztext`; the overlap test is the part to watch
 
-**Wanted by the HTML mod**, which is implementing the full CSS stack, so this is a
-requirement rather than a nicety: `z-index` on a box that overlaps a label has to be able to
-put the box on top, and today it cannot.
+Done in 0.11.11.0. A `T` forces a mesh cut only where a later shape actually overlaps its box,
+so the common page keeps one mesh and one draw call. `TextOrderTests` pins that: thirty
+labelled tiles stay in one mesh, and reverting the overlap test to "always true" turns them
+into thirty, which is the failure this design existed to avoid.
 
-**Why.** Labels are TextMeshPro objects parented beside the geometry, not part of the mesh.
-UGUI draws children in sibling order, so the whole text layer draws either entirely before or
-entirely after the whole mesh. A label belonging to a node early in the scene still draws with
-every other label. "On top" and "underneath" are the only two states, and they apply to all
-text at once.
+**What is still worth measuring in game**, and was not: a page that genuinely does overlap —
+the HTML mod's `z-index` cases — has never been looked at for draw-call count. The theory says
+one extra draw call per covered label. If a real page ever feels heavy with `ztext = 1` on,
+`vector_stats` reports `across N meshes` and that is the number to read.
 
-**The fix, and the machinery already exists.** The mesh is already cut into slices at shape
-boundaries (`MeshBuilder.MarkShape`, `VectorSlice`), and cuts already fall between shapes,
-which is exactly the constraint a text node needs. So:
-
-1. A `T` node forces a cut at its position in draw order, the same call `MarkShape` makes.
-2. `TextPlacement` records which cut it falls after.
-3. `TextLayer` parents each label as a sibling at that index, so children read
-   `slice 0, labels before cut 1, slice 1, labels before cut 2, …`.
-
-Shapes then cover labels and labels cover shapes according to scene order, which is what the
-scene already means everywhere else.
-
-**Costs, stated honestly.** A scene interleaving text and shapes gets one mesh per run between
-labels rather than one per 60,000 vertices, so a page alternating label and box ends up with
-many small meshes and a draw call each. Worth measuring before shipping — a page of thirty
-labelled tiles could go from one draw call to sixty. A mitigation exists if it bites: only cut
-where a label actually **overlaps** a later shape's bounds, which is rare, and leave
-non-overlapping text in one layer as now.
-
-**Do not start this without the overlap test.** The naive version is simple and will be slow
-on exactly the pages the HTML mod generates.
-
----
+**Known limit, by design:** a label declared before any shape cannot be put underneath,
+because the surface's own renderer always draws before its children. It stays on top. Fixing
+that means giving the surface an empty slice 0, which costs a draw call on every scene to
+serve a case nothing has asked for yet.
 
 ## Capture logging could say whether pixels arrived
 

@@ -404,6 +404,24 @@ engine that has the glyph metrics rather than estimated in Lua.
 A label element is still the right answer for text that must update the instant a value
 changes, and for anything the player has to select or copy.
 
+### Putting a shape over a label — `ztext`
+
+Text draws above every shape by default, whatever the scene order says, because labels are TMP
+objects beside the mesh rather than in it. If you need a panel to slide over a label, set
+`ztext = 1` on the structure element:
+
+```lua
+props = { scene = "panel", w = 200, h = 240, ztext = 1, root = { ... } }
+```
+
+Then a label is covered by anything declared after it, and covers anything declared before it
+— the same rule the rest of the scene already follows.
+
+It is opt-in because the old behaviour is load-bearing for scenes that layer a readout over
+artwork. The cost is one extra mesh, and so one draw call, per label that a later shape
+actually overlaps; labels nothing covers stay in the single mesh they are in today. See
+`examples/14-ztext.lua`, which draws the same scene both ways side by side.
+
 ### Reusing a subtree — `SYM` and `USE`
 
 A row, an LED, a duct segment: written once, stamped anywhere.
