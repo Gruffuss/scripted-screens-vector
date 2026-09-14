@@ -706,6 +706,18 @@ Gradients are baked into vertex colours. A two-stop linear gradient is exact; mu
 radial are subdivided automatically, and radial fills as concentric bands so vertices land at
 even gradient parameters.
 
+**A radial fill is the most expensive thing in the format**, so it is worth knowing what it
+costs. Band count follows the shape's on-screen radius, its stop count, and — since 0.10.3 —
+what the screen can actually resolve, which is the one that was missing: a many-stop ramp used
+to force its band count with no regard to size, so a six-pixel badge with a thirteen-stop
+gradient drew ninety-six bands. Rings nearer the focus also carry fewer outline points now,
+because a ring at a tenth of the radius has a tenth of the circumference.
+
+Together those roughly halve a typical fill and cut a small multi-stop one by an order of
+magnitude. It matters because a surface has a hard **60,000-vertex ceiling** that fails by
+dropping geometry silently, so an expensive gradient does not slow the console down — it makes
+something else on it disappear. `vector_stats` reports the count.
+
 ### `SYM` / `USE` — symbols
 
 Declare a reusable subtree in `defs`, instantiate it anywhere:

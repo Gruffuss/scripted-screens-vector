@@ -75,6 +75,11 @@ internal static class Tessellator
 
     [ThreadStatic] internal static List<ScrollRegion>? ScrollsFound;
 
+    /// <summary>Index triples for one radial band, reused so a fill allocates nothing.</summary>
+    [ThreadStatic] private static List<int>? _ringIndices;
+
+    private static List<int> RingIndices => _ringIndices ??= new List<int>(512);
+
 
     [ThreadStatic] internal static double BandSampleMs;
     [ThreadStatic] internal static double BandStripMs;
@@ -1581,58 +1586,65 @@ internal static class Tessellator
     private static void FillRadialBands(MeshBuilder vh, List<Vector2> outline, Paint paint, Matrix4x4 matrix, float scale)
     {
         var count = outline.Count;
+
         // In bounding-box mode the focus is a 0..1 fraction, so it has to be mapped back
         // into the shape's own space before rings can be built around it.
-        var focusPoint = paint.FromGradientSpace(paint.Gradient!.Focus);
+        var focus = paint.FromGradientSpace(paint.Gradient!.Focus);
 
-        // Ring count follows the shape's ON-SCREEN radius, not just its stop count. Bands
-        // are visible as steps once they are more than a couple of pixels apart, and the
-        // same scene draws at very different sizes with console resolution and camera
-        // distance -- a fixed count bands badly when large and wastes mesh when small.
         var sceneRadius = 0f;
         foreach (var point in outline)
-            sceneRadius = Mathf.Max(sceneRadius, (point - focusPoint).magnitude);
+            sceneRadius = Mathf.Max(sceneRadius, (point - focus).magnitude);
 
         var screenRadius = sceneRadius * scale * ScreenScale;
-        var rings = Mathf.Clamp(Mathf.CeilToInt(screenRadius / 2.5f), 12, 96);
+        var rings = RadialFill.Rings(screenRadius, paint.Gradient.StopCount);
 
-        // More stops need at least enough bands to resolve each one.
-        rings = Mathf.Min(Mathf.Max(rings, 8 * Mathf.Max(1, paint.Gradient.StopCount - 1)), 96);
-
-        if (vh.currentVertCount + count * rings + 1 > MaxVertices)
+        if (vh.currentVertCount + RadialFill.VertexCount(count, rings) > MaxVertices)
             return;
 
-        var focus = focusPoint;
+        var indices = RingIndices;
         var origin = vh.currentVertCount;
 
         vh.AddVert(matrix.MultiplyPoint3x4(focus), paint.At(focus), Vector2.zero);
 
+        // Rings carry fewer points the closer they sit to the focus, because a ring at a
+        // tenth of the radius has a tenth of the circumference and the full outline would
+        // oversample it tenfold. Bases are recorded as they are laid down, since the counts
+        // differ and the stitch below needs both.
+        var previousBase = origin;
+        var previousCount = 0;
+
         for (var ring = 1; ring <= rings; ring++)
         {
             var ratio = ring / (float)rings;
-            for (var i = 0; i < count; i++)
+            var points = RadialFill.Points(count, ring, rings);
+            var thisBase = vh.currentVertCount;
+
+            for (var k = 0; k < points; k++)
             {
-                var point = focus + (outline[i] - focus) * ratio;
+                // Sampled along the ORIGINAL outline by parameter, not by index, so a ring
+                // with fewer points still follows the same curve rather than a prefix of it.
+                var at = outline[k * count / points];
+                var point = focus + (at - focus) * ratio;
                 vh.AddVert(matrix.MultiplyPoint3x4(point), paint.At(point), Vector2.zero);
             }
-        }
 
-        // Innermost ring fans out from the focus.
-        for (var i = 0; i < count; i++)
-            vh.AddTriangle(origin, origin + 1 + i, origin + 1 + (i + 1) % count);
-
-        // Remaining rings are quad strips.
-        for (var ring = 1; ring < rings; ring++)
-        {
-            var inner = origin + 1 + (ring - 1) * count;
-            var outer = origin + 1 + ring * count;
-
-            for (var i = 0; i < count; i++)
+            if (ring == 1)
             {
-                var next = (i + 1) % count;
-                vh.AddTriangle(inner + i, outer + i, outer + next);
-                vh.AddTriangle(inner + i, outer + next, inner + next);
+                // Innermost ring fans out from the focus.
+                for (var k = 0; k < points; k++)
+                    vh.AddTriangle(origin, thisBase + k, thisBase + (k + 1) % points);
             }
+            else
+            {
+                indices.Clear();
+                RadialFill.Stitch(previousBase, previousCount, thisBase, points, indices);
+
+                for (var k = 0; k + 2 < indices.Count; k += 3)
+                    vh.AddTriangle(indices[k], indices[k + 1], indices[k + 2]);
+            }
+
+            previousBase = thisBase;
+            previousCount = points;
         }
     }
 

@@ -111,6 +111,13 @@ internal static class Program
         TextShadowTests.NonsenseFontIsSafe(run);
 
         Console.WriteLine();
+        RadialFillTests.RingsFollowSize(run);
+        RadialFillTests.StopsCannotOutvoteTheScreen(run);
+        RadialFillTests.InnerRingsAreCoarser(run);
+        RadialFillTests.TheSavingIsReal(run);
+        RadialFillTests.StitchCoversTheAnnulus(run);
+
+        Console.WriteLine();
         GradientTests.LinearParameter(run);
         GradientTests.RadialParameter(run);
         GradientTests.TwoStopInterpolation(run);

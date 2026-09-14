@@ -32,6 +32,7 @@
         <Compile Include="..\ScriptedScreensVector\Expression.cs" />
         <Compile Include="..\ScriptedScreensVector\SceneText.cs" />
         <Compile Include="..\ScriptedScreensVector\TextNode.cs" />
+        <Compile Include="..\ScriptedScreensVector\RadialFill.cs" />
         <Compile Include="ScriptedScreensStubs.cs" />
         <Compile Include="Stubs.cs" />
         <Compile Include="TriangulatorTests.cs" />
@@ -41,6 +42,7 @@
         <Compile Include="ScrollTests.cs" />
         <Compile Include="PrintfTests.cs" />
         <Compile Include="TextShadowTests.cs" />
+        <Compile Include="RadialFillTests.cs" />
         <Compile Include="Benchmark.cs" />
         <Compile Include="Program.cs" />
     </ItemGroup>
