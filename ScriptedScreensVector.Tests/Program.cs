@@ -141,6 +141,7 @@ internal static class Program
         TextOrderTests.BoundsTrackingCost(run);
         TextOrderTests.TouchingBoxesDoNotCut(run);
         TextShadowTests.OffsetShadowsMoveToACopy(run);
+        TextShadowTests.LabelsTurnWithTheirGroup(run);
 
         Console.WriteLine();
         GradientTests.LinearParameter(run);

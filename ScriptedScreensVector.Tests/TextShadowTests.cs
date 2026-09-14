@@ -126,4 +126,40 @@ internal static class TextShadowTests
 
         run.Check("text shadow: one that already fits stays on the label", !smallCast, $"cast {smallCast}");
     }
+
+    /// <summary>A label in a rotating group turns WITH it, keeps its size, and stays on its axis.</summary>
+    /// <remarks>
+    /// The viewbox matrix and the group rotation are built by hand here, because the real group
+    /// path goes through Quaternion.Euler, a native call that cannot run headless. The needle is
+    /// the reference: whatever way the matrix turns the scene's "up", the label must turn too.
+    /// Before the fix the label turned -60 while the needle turned +60.
+    /// </remarks>
+    internal static void LabelsTurnWithTheirGroup(TestRun run)
+    {
+        foreach (var degrees in new[] { 60f, -60f, 45f })
+        {
+            // Scene (+Y down) onto a 200-unit canvas (+Y up), then a group at (100,100) turned
+            // by the scene's rotation, exactly as Tessellator composes them.
+            var viewbox = Matrix4x4.Translate(new Vector3(0f, 200f, 0f)) * Matrix4x4.Scale(new Vector3(1f, -1f, 1f));
+            var r = -degrees * Mathf.Deg2Rad;
+            var turn = Matrix4x4.identity;
+            turn.m00 = Mathf.Cos(r); turn.m01 = -Mathf.Sin(r); turn.m10 = Mathf.Sin(r); turn.m11 = Mathf.Cos(r);
+            var frame = viewbox * Matrix4x4.Translate(new Vector3(100f, 100f, 0f)) * turn;
+
+            // A needle pointing scene-up from the group origin.
+            var tip = frame.MultiplyPoint3x4(new Vector2(0f, -40f)) - frame.MultiplyPoint3x4(Vector2.zero);
+            var needle = Mathf.Atan2(-tip.x, tip.y) * Mathf.Rad2Deg;
+
+            var box = Tessellator.LabelBox(frame, -20f, -55f, 40f, 10f, out var rotation);
+            var offset = box.center - (Vector2)frame.MultiplyPoint3x4(Vector2.zero);
+            var axis = Mathf.Atan2(-offset.x, offset.y) * Mathf.Rad2Deg;
+
+            run.Check($"text: at {degrees} deg the label turns with its needle",
+                Mathf.Abs(Mathf.DeltaAngle(rotation, needle)) < 0.01f, $"needle {needle:F1}, label {rotation:F1}");
+            run.Check($"text: at {degrees} deg the label keeps its size and sits on the needle's axis",
+                Mathf.Abs(box.width - 40f) < 0.01f && Mathf.Abs(box.height - 10f) < 0.01f
+                && Mathf.Abs(Mathf.DeltaAngle(axis, needle)) < 0.01f,
+                $"{box.width:F1}x{box.height:F1}, axis {axis:F1}");
+        }
+    }
 }

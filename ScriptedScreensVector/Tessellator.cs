@@ -562,6 +562,31 @@ internal static class Tessellator
     /// before triangulation, which a TMP child is not made of; a rect is what RectMask2D can
     /// enforce, and anything rounder waits for the stencil path.
     /// </remarks>
+    /// <summary>
+    /// Where a label goes and how far it is turned, from the frame carrying it.
+    /// </summary>
+    /// <remarks>
+    /// The box is the label's UNROTATED size placed at its transformed centre; TextLayer turns it
+    /// by <paramref name="rotation"/>. Taking the bounds of two transformed corners instead -- as
+    /// this once did -- is only right at 0 degrees: under a rotating group the box changed shape
+    /// as a needle swung, 45 degrees making it square whatever the text.
+    ///
+    /// The rotation is NOT negated. The viewbox matrix already flips scene +Y-down into canvas
+    /// +Y-up, so the angle read back out of it is in UGUI's counter-clockwise convention.
+    /// Negating it a second time spun every label the opposite way to the group carrying it: a
+    /// dial's readout turned against its needle, correct only at 0 degrees. Measured before the
+    /// fix: needle +60, text -60. Pinned by TextShadowTests.LabelsTurnWithTheirGroup.
+    /// </remarks>
+    internal static Rect LabelBox(Matrix4x4 matrix, float x, float y, float w, float h, out float rotation)
+    {
+        var centre = matrix.MultiplyPoint3x4(new Vector2(x + w * 0.5f, y + h * 0.5f));
+        var across = matrix.MultiplyVector(new Vector3(w, 0f, 0f)).magnitude;
+        var down = matrix.MultiplyVector(new Vector3(0f, h, 0f)).magnitude;
+
+        rotation = Mathf.Atan2(matrix.m10, matrix.m00) * Mathf.Rad2Deg;
+        return new Rect(centre.x - across * 0.5f, centre.y - down * 0.5f, across, down);
+    }
+
     private static void CollectText(VecScene scene, VecNode node, EvalContext context, Frame frame, int shapeIndex)
     {
         if (TextFound == null || NoFill)
@@ -582,8 +607,11 @@ internal static class Tessellator
         var w = node.W.Evaluate(context);
         var h = node.H.Evaluate(context);
 
-        var a = frame.Matrix.MultiplyPoint3x4(new Vector2(x, y));
-        var b = frame.Matrix.MultiplyPoint3x4(new Vector2(x + w, y + h));
+        // The label's box is its UNROTATED size placed at its transformed centre; TextLayer turns
+        // it by Rotation below. Taking the bounds of two transformed corners instead -- as this
+        // did -- is only right at 0 degrees: under a rotating group the box changed shape as the
+        // needle swung, 45 degrees making it square whatever the text.
+        var box = LabelBox(frame.Matrix, x, y, w, h, out var rotation);
 
         var paint = ResolvePaint(scene, node, context, frame, stroke: false);
 
@@ -630,8 +658,7 @@ internal static class Tessellator
         TextFound.Add(new TextPlacement
         {
             Text = body!,
-            Rect = Rect.MinMaxRect(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y),
-                                   Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y)),
+            Rect = box,
             Size = (node.TextSize?.Evaluate(context) ?? 12f) * frame.Scale,
             Colour = colour,
             Align = node.Align,
@@ -641,7 +668,7 @@ internal static class Tessellator
             CharSpacing = node.CharSpacing,
             Fit = node.Fit,
             MinSize = (node.MinSize?.Evaluate(context) ?? 6f) * frame.Scale,
-            Rotation = -Mathf.Atan2(frame.Matrix.m10, frame.Matrix.m00) * Mathf.Rad2Deg,
+            Rotation = rotation,
             Wrap = node.Wrap,
             LineHeight = node.LineHeight,
             Shadow = textShadow,
