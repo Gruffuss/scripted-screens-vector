@@ -587,13 +587,18 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         ScriptedScreensVectorPlugin.Log?.LogInfo(
             $"vector capture: \"{_sceneId}\" built inline, {_builder.currentVertCount} verts across {_sliceCount} mesh(es)");
 
+        // SLICES BEFORE TEXT, matching the normal path exactly. Sibling order is draw order,
+        // and both are children of this graphic, so creating them in the other order puts the
+        // geometry on top of the labels -- permanently, because slice children are pooled and
+        // never reordered afterwards. The two paths differing here is a bug by construction:
+        // a capture must leave the surface in the state a normal rebuild would.
+        ApplySlices();
+
         if (_stats.Text.Count > 0 || _text != null)
         {
             _text ??= new TextLayer(rectTransform);
             _text.Apply(_stats.Text);
         }
-
-        ApplySlices();
     }
 
     /// <summary>Hands slices 1..n to child graphics, creating and retiring them as needed.</summary>
@@ -694,6 +699,39 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         if (SceneParser.PatchNodes(props, _scene))
             _needsRebuild = true;
+    }
+
+    /// <summary>
+    /// The data this surface is currently showing, as a payload that can be replayed.
+    /// </summary>
+    /// <remarks>
+    /// A capture calls <c>RebuildSurfaceFromModel</c>, which destroys every host and builds a
+    /// new graphic with an empty context. ScriptedScreens replays the stored elements, but the
+    /// data element is only the LAST payload -- and under `keep = 1` a payload is a patch, so
+    /// replaying it recovers whatever that one tick happened to mention and nothing else. The
+    /// merged state lives here and nowhere else, so it has to be handed over directly.
+    ///
+    /// Marked as a patch, because that is what it is: it restores what was on screen without
+    /// claiming to be the whole truth, and the next real payload still decides for itself.
+    /// </remarks>
+    internal EvalContext Snapshot()
+    {
+        var copy = new EvalContext { KeepUnmentioned = true };
+
+        foreach (var pair in _context.Scalars)
+            copy.Scalars[pair.Key] = pair.Value;
+        foreach (var pair in _context.Arrays)
+            copy.Arrays[pair.Key] = pair.Value;
+        foreach (var pair in _context.Colours)
+            copy.Colours[pair.Key] = pair.Value;
+        foreach (var pair in _context.Strings)
+            copy.Strings[pair.Key] = pair.Value;
+        foreach (var pair in _context.StringArrays)
+            copy.StringArrays[pair.Key] = pair.Value;
+        foreach (var pair in _context.ColourArrays)
+            copy.ColourArrays[pair.Key] = pair.Value;
+
+        return copy;
     }
 
     internal void SetData(EvalContext source)

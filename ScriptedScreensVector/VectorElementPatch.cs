@@ -156,6 +156,19 @@ internal static class VectorElementPatch
             graphic.SetClickTarget(clicks, element.Id);
         }
         graphic.SetScene(scene);
+
+        // A rebuild -- which is what a capture does -- makes a NEW graphic with an empty
+        // context, and the data element ScriptedScreens replays afterwards is one payload, not
+        // the merged state. Under `keep = 1` that payload is a patch, so everything the script
+        // sent on an earlier tick and has no reason to resend simply vanishes: the console kept
+        // its artwork and lost every label's text.
+        if (Scenes.TryGetValue(key, out var previous)
+            && !ReferenceEquals(previous, null)
+            && !ReferenceEquals(previous, graphic))
+        {
+            graphic.SetData(previous.Snapshot());
+        }
+
         Scenes[key] = graphic;
 
         if (PendingData.TryGetValue(key, out var waiting))

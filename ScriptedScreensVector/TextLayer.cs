@@ -148,6 +148,39 @@ internal sealed class TextLayer
         else if (_defaultFont != null && label.font != _defaultFont)
             label.font = _defaultFont;
 
+        // Build the glyph geometry now if it has none. TMP normally marks itself dirty and
+        // lets its own update manager build it on the canvas callback -- but a screen capture
+        // runs us from INSIDE that callback, so a label touched there marks itself for a pass
+        // already in progress and never gets built. Every later rebuild assigns the same text,
+        // TMP sees no change, and it stays empty for good, which is why only a power cycle
+        // healed it.
+        //
+        // NOT DONE HERE, and worth saying why: pushing the material and texture to the
+        // CanvasRenderer by hand as well. That rendered every glyph as a solid block, and
+        // because this condition is also true for any FRESHLY created label it broke ordinary
+        // consoles that had never been captured at all. TMP owns its material; only the mesh
+        // is ours to force.
+        if (label.mesh != null && label.mesh.vertexCount == 0 && !string.IsNullOrEmpty(placement.Text))
+            label.ForceMeshUpdate();
+
+        // A graphic needs a mesh AND a material, and both are normally pushed to the
+        // CanvasRenderer by a deferred rebuild -- the same one a screen capture is already
+        // inside. Measured after a capture: "mesh=32 mats=0 mat=NONE", geometry present and
+        // nothing to draw it with, unchanged across every later rebuild.
+        //
+        // These two lines are TextMeshPro's own UpdateMaterial, verbatim. It is protected, so
+        // it cannot be called directly; copying its body is safer than improvising, and the
+        // first attempt proved why. That version added SetTexture(mainTexture) as well, by
+        // analogy with UGUI's base implementation -- but TMP deliberately does NOT, because
+        // for distance-field text the atlas comes from the material. Overriding the renderer's
+        // texture rendered every glyph as a solid block.
+        var renderer = label.canvasRenderer;
+        if (renderer != null && renderer.materialCount == 0 && label.fontSharedMaterial != null)
+        {
+            renderer.materialCount = 1;
+            renderer.SetMaterial(label.materialForRendering, 0);
+        }
+
         ApplyShadow(label, index, placement);
     }
 
