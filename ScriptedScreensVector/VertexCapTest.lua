@@ -10,11 +10,11 @@
 --
 -- WHAT TO LOOK FOR, in order:
 --
---   MOTES = 2000   under the ceiling. A full field, no border, no complaint.
---   MOTES = 9000   over it. A MAGENTA HATCHED BORDER round the surface, and in the log or in
+--   MOTES = 1500   under the ceiling. A full field, no border, no complaint.
+--   MOTES = 3000   over it. A MAGENTA HATCHED BORDER round the surface, and in the log or in
 --                  `vector_stats`:
 --
---                      problems: scene is too large: a fill was dropped at 250000 vertices
+--                      problems: scene is too large for one mesh: a fill was dropped at 60000 vertices
 --
 --                  The field is still mostly there -- what was refused is whatever came after
 --                  the ceiling, which is the point: you can see how much is missing.
@@ -34,7 +34,7 @@ local size = ui:size()
 local W, H = 480, 480
 if size then W, H = size.w, size.h end
 
-local MOTES = 9000        -- try 2000 (under) and 9000 (over)
+local MOTES = 3000        -- try 1500 (under) and 3000 (over)
 
 ui:clear()
 

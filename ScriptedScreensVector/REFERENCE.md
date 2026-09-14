@@ -715,9 +715,13 @@ gradient drew ninety-six bands. Rings nearer the focus also carry fewer outline 
 because a ring at a tenth of the radius has a tenth of the circumference.
 
 Together those roughly halve a typical fill and cut a small multi-stop one by an order of
-magnitude. It matters because a surface has a hard **60,000-vertex ceiling** that fails by
-dropping geometry silently, so an expensive gradient does not slow the console down — it makes
-something else on it disappear. `vector_stats` reports the count.
+magnitude. It matters because a surface has a hard **60,000-vertex ceiling**, so an expensive gradient
+does not slow the console down — it makes something else on it disappear. Going over is
+reported since 0.10.4, naming what was dropped, and `vector_stats` shows the count.
+
+That ceiling is **not a setting**. It is UGUI's own limit — the UI throws at 65,000 — and this
+layer hands its mesh to a `CanvasRenderer` whose batcher works in 16-bit indices throughout.
+Raising it means splitting a surface across several meshes, not changing a number.
 
 ### `SYM` / `USE` — symbols
 

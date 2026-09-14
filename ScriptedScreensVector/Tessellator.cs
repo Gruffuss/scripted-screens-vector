@@ -29,16 +29,15 @@ internal static class Tessellator
 {
     /// <summary>Most vertices one surface's mesh may hold.</summary>
     /// <remarks>
-    /// Was 60,000: a margin under the 65,535 a 16-bit index buffer can address. The mesh uses
-    /// 32-bit indices now, so the hardware ceiling is gone and this is purely a sanity bound
-    /// -- a runaway scene should still not be able to eat memory without limit.
+    /// A margin under 65,535, and **not a choice**. The mesh is presented through a
+    /// <c>CanvasRenderer</c>, and UGUI's batcher works in 16-bit indices, so a mesh past that
+    /// is not merely unsupported -- it took the game down natively, with nothing in the log.
     ///
-    /// A vertex costs 24 bytes here (position, colour, one UV) plus its share of indices, so
-    /// 250,000 is about 9 MB per surface at full stretch. Deliberately not a config knob: the
-    /// right value is not a judgement anyone has had to make, and the scene that reaches it
-    /// now says so instead of failing quietly.
+    /// Raising it means leaving one CanvasRenderer behind, splitting a surface across several
+    /// child graphics with a mesh each. That is a real option and nobody has needed it yet;
+    /// what was actually missing was being TOLD when a scene hit the ceiling, which it now is.
     /// </remarks>
-    private const int MaxVertices = 250000;
+    private const int MaxVertices = 60000;
     private const int MinCornerSegments = 3;
     private const int MaxCornerSegments = 16;
     private const int MinEllipseSegments = 6;
@@ -282,7 +281,7 @@ internal static class Tessellator
         // went missing, which reads as a mistake in the scene rather than as a ceiling.
         var starved = TakeStarved();
         if (starved != null)
-            scene.Problem($"scene is too large: {starved} was dropped at {MaxVertices} vertices");
+            scene.Problem($"scene is too large for one mesh: {starved} was dropped at {MaxVertices} vertices");
 
         // A scene that drew nothing, or one that parsed with problems, gets a visible
         // marker. Silence is the worst possible failure mode here: a bad clip id, a rejected

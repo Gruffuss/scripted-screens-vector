@@ -880,16 +880,11 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         _mesh = new Mesh { name = "VectorSurface" };
 
-        // 32-BIT INDICES. The default is 16-bit, which cannot address past 65,535 vertices --
-        // and this renderer's ceiling was a margin under that, not a choice. Hitting it drops
-        // geometry, and no amount of spreading the work over frames helps: every vertex has to
-        // be in the SAME mesh at the same instant for the picture to be complete, so a vertex
-        // deferred is a hole, not a delay.
-        //
-        // The cost is the index buffer doubling, four bytes per index instead of two. For a
-        // busy console that is a few hundred kilobytes, against geometry that silently
-        // vanished before.
-        _mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+        // NO 32-BIT INDEX FORMAT HERE. Setting it crashes the game natively, with nothing in
+        // the log: this mesh goes to a CanvasRenderer, and UGUI's batcher assumes 16-bit
+        // indices throughout. The property exists on Mesh and the enum value is in the shipped
+        // build -- which is exactly the trap this project has hit before. Verifying that two
+        // APIs exist is not verifying that they compose.
         _mesh.MarkDynamic();
     }
 
