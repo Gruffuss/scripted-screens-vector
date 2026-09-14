@@ -96,13 +96,25 @@ internal static class TextOrder
         }
     }
 
-    /// <summary>Do two canvas-space boxes share any area? Empty boxes overlap nothing.</summary>
-    private static bool Overlaps(Rect a, Rect b)
+    /// <summary>
+    /// Do two canvas-space boxes share real area? Empty boxes, and boxes that merely touch,
+    /// overlap nothing.
+    /// </summary>
+    /// <remarks>
+    /// Layout puts boxes flush against each other constantly -- a button whose bottom is the
+    /// next row's top -- and after the transform the shared edge differs in the last float
+    /// digit. Counted as an overlap it forced a mesh cut for a label nothing covers; the
+    /// "click me" label on the HTML test page was one. A quarter of a canvas unit is well under
+    /// a pixel at any viewing distance, so nothing that genuinely covers text is missed.
+    /// </remarks>
+    internal static bool Overlaps(Rect a, Rect b)
     {
+        const float Touch = 0.25f;
+
         if (b.width <= 0f || b.height <= 0f || a.width <= 0f || a.height <= 0f)
             return false;
 
-        return a.xMin < b.xMax && b.xMin < a.xMax
-            && a.yMin < b.yMax && b.yMin < a.yMax;
+        return a.xMin < b.xMax - Touch && b.xMin < a.xMax - Touch
+            && a.yMin < b.yMax - Touch && b.yMin < a.yMax - Touch;
     }
 }

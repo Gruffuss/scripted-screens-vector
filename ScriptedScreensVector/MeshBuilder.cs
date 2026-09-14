@@ -269,7 +269,11 @@ internal sealed class MeshBuilder
         _colours.Add(colour);
         _uv0.Add(uv);
 
-        if (!_trackBounds)
+        // Transparent vertices do not count: a feather ring or the fading edge of a shadow
+        // cannot cover a label. Counted, they made every pair of flush boxes overlap by a
+        // feather's width -- which grows with viewing distance -- and forced mesh cuts for
+        // labels nothing covers.
+        if (!_trackBounds || colour.a <= 2)
             return;
 
         if (position.x < _minX) _minX = position.x;

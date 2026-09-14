@@ -90,4 +90,40 @@ internal static class TextShadowTests
 
         run.Check("textshadow: no SDF scale yields zero, not NaN", finite ? 1d : 0d, 1d, 0.001d, 0, 0);
     }
+
+    /// <summary>
+    /// An offset shadow too big for the quad moves to a copy; a glow does not.
+    /// </summary>
+    /// <remarks>
+    /// LiberationSans in game: both page warnings imply sampling / gradient scale = 8.65.
+    /// A 13-point heading with `2 2 3` fit at 43% in the quad; as a copy only blur and spread
+    /// count. A 14-point `0 0 6` glow has no offset to take out and stays at 54%.
+    /// </remarks>
+    internal static void OffsetShadowsMoveToACopy(TestRun run)
+    {
+        const float Gradient = 10f;
+        const float Sampling = 86.5f;
+
+        var heading = new VecShadow(2f, 2f, 3f, 0f, UnityEngine.Color.black);
+        var headingInQuad = TextShadow.Fit(heading, Gradient, Sampling, 13f);
+        var headingCast = TextShadow.ShouldCast(heading, Gradient, Sampling, 13f, out var headingFit);
+
+        run.Check("text shadow: the heading case reproduces the 43% from the log",
+            UnityEngine.Mathf.Abs(headingInQuad.Scale - 0.43f) < 0.01f, $"{headingInQuad.Scale:P0}");
+        run.Check("text shadow: an offset shadow moves to a copy and fits whole",
+            headingCast && headingFit.Scale > 0.99f && headingFit.OffsetX == 0f && headingFit.OffsetY == 0f,
+            $"cast {headingCast}, scale {headingFit.Scale:P0}");
+
+        var glow = new VecShadow(0f, 0f, 6f, 0f, UnityEngine.Color.cyan);
+        var glowCast = TextShadow.ShouldCast(glow, Gradient, Sampling, 14f, out var glowFit);
+
+        run.Check("text shadow: a glow keeps one label and its honest 54%",
+            !glowCast && UnityEngine.Mathf.Abs(glowFit.Scale - 0.54f) < 0.01f,
+            $"cast {glowCast}, scale {glowFit.Scale:P0}");
+
+        var small = new VecShadow(1f, 1f, 1f, 0f, UnityEngine.Color.black);
+        var smallCast = TextShadow.ShouldCast(small, Gradient, Sampling, 14f, out _);
+
+        run.Check("text shadow: one that already fits stays on the label", !smallCast, $"cast {smallCast}");
+    }
 }

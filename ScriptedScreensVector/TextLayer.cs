@@ -42,6 +42,16 @@ internal sealed class TextLayer
     /// </remarks>
     private readonly HashSet<int> _shadowed = new();
     private readonly List<RectTransform> _masks = new();
+
+    /// <summary>
+    /// Offset copies that draw a text shadow too large for the label's own quad, by index.
+    /// </summary>
+    /// <remarks>
+    /// Created only for a placement whose shadow needs one, inside the same clip object as
+    /// its label and before it, so it clips and orders exactly as the label does. See
+    /// <see cref="TextShadow.ShouldCast"/>.
+    /// </remarks>
+    private readonly List<TextMeshProUGUI?> _casters = new();
     private readonly Transform _parent;
 
     internal TextLayer(Transform parent)
@@ -61,6 +71,9 @@ internal sealed class TextLayer
         {
             if (_pool[i] != null)
                 _pool[i].gameObject.SetActive(false);
+
+            if (i < _casters.Count && _casters[i] != null)
+                _casters[i]!.gameObject.SetActive(false);
 
             // A hidden label keeps its material, and the pool may hand it to a placement with
             // no shadow later. Forget it now so that placement clears it.
@@ -207,22 +220,12 @@ internal sealed class TextLayer
     /// </remarks>
     private void ApplyShadow(TextMeshProUGUI label, int index, TextPlacement placement)
     {
+        var caster = index < _casters.Count ? _casters[index] : null;
+
         if (placement.Shadow == null)
         {
-            // Only touch the material if we are the ones who instanced it.
-            if (_shadowed.Remove(index))
-            {
-                ShaderUtilities.GetShaderPropertyIDs();
-
-                var current = label.fontMaterial;
-                if (current != null)
-                {
-                    current.DisableKeyword(ShaderUtilities.Keyword_Underlay);
-                    current.SetColor(ShaderUtilities.ID_UnderlayColor, Color.clear);
-                    label.UpdateMeshPadding();
-                }
-            }
-
+            ClearUnderlay(label, index);
+            HideCaster(caster);
             return;
         }
 
@@ -233,10 +236,13 @@ internal sealed class TextLayer
         ShaderUtilities.GetShaderPropertyIDs();
 
         var shadow = placement.Shadow.Value;
-        var material = label.fontMaterial;
         var font = label.font;
 
-        if (material == null || font == null || !material.HasProperty(ShaderUtilities.ID_UnderlayOffsetX))
+        // Read from the SHARED material: reading `fontMaterial` instances one, and a label whose
+        // shadow ends up on its caster should not pay for an instance it never uses.
+        var shared = label.fontSharedMaterial;
+
+        if (shared == null || font == null || !shared.HasProperty(ShaderUtilities.ID_UnderlayOffsetX))
         {
             // The face has no underlay in its shader. Silence here would be the whole bug
             // again, so it is said once per surface rather than per label per frame.
@@ -244,8 +250,8 @@ internal sealed class TextLayer
             return;
         }
 
-        var gradient = material.HasProperty(ShaderUtilities.ID_GradientScale)
-            ? material.GetFloat(ShaderUtilities.ID_GradientScale)
+        var gradient = shared.HasProperty(ShaderUtilities.ID_GradientScale)
+            ? shared.GetFloat(ShaderUtilities.ID_GradientScale)
             : 0f;
 
         var sampling = font.faceInfo.pointSize;
@@ -257,29 +263,149 @@ internal sealed class TextLayer
             return;
         }
 
-        var fit = TextShadow.Fit(shadow, gradient, sampling, size);
+        var cast = TextShadow.ShouldCast(shadow, gradient, sampling, size, out var fit);
 
         if (fit.Scale < 0.999f)
         {
             Warn($"text shadow is larger than the font's SDF padding allows; reduced to {fit.Scale * 100f:F0}% "
-                 + "(use a smaller offset and blur, or a font atlas with more padding)");
+                 + "(use a smaller blur, or a font atlas with more padding)");
         }
 
+        if (cast)
+        {
+            // The shadow moves to an offset copy; the label itself draws none.
+            ClearUnderlay(label, index);
+            caster = EnsureCaster(index);
+            Mirror(caster, label, shadow);
+            WriteUnderlay(caster, fit, shadow.Colour, hideFace: true);
+            return;
+        }
+
+        HideCaster(caster);
+        WriteUnderlay(label, fit, shadow.Colour, hideFace: false);
+        _shadowed.Add(index);
+    }
+
+    /// <summary>Turns a label's underlay off, if this layer is the one that turned it on.</summary>
+    private void ClearUnderlay(TextMeshProUGUI label, int index)
+    {
+        // Only touch the material if we are the ones who instanced it.
+        if (!_shadowed.Remove(index))
+            return;
+
+        ShaderUtilities.GetShaderPropertyIDs();
+
+        var current = label.fontMaterial;
+        if (current == null)
+            return;
+
+        current.DisableKeyword(ShaderUtilities.Keyword_Underlay);
+        current.SetColor(ShaderUtilities.ID_UnderlayColor, Color.clear);
+        label.UpdateMeshPadding();
+    }
+
+    /// <summary>Writes a fitted underlay onto a label's own material instance.</summary>
+    private static void WriteUnderlay(TextMeshProUGUI target, TextShadowFit fit, Color colour, bool hideFace)
+    {
+        var material = target.fontMaterial;
+        if (material == null)
+            return;
+
         material.EnableKeyword(ShaderUtilities.Keyword_Underlay);
-        material.SetColor(ShaderUtilities.ID_UnderlayColor, shadow.Colour);
+        material.SetColor(ShaderUtilities.ID_UnderlayColor, colour);
         material.SetFloat(ShaderUtilities.ID_UnderlayOffsetX, fit.OffsetX);
         material.SetFloat(ShaderUtilities.ID_UnderlayOffsetY, fit.OffsetY);
         material.SetFloat(ShaderUtilities.ID_UnderlayDilate, Mathf.Clamp(fit.Dilate, -1f, 1f));
         material.SetFloat(ShaderUtilities.ID_UnderlaySoftness, Mathf.Clamp01(fit.Softness));
+
+        // A caster shows only its underlay. The face is hidden through the MATERIAL's face
+        // colour rather than the label's vertex colour, so nothing that multiplies by vertex
+        // alpha can take the underlay down with it.
+        if (hideFace && material.HasProperty(ShaderUtilities.ID_FaceColor))
+            material.SetColor(ShaderUtilities.ID_FaceColor, new Color(1f, 1f, 1f, 0f));
 
         // TMP caches each glyph quad's padding and only recomputes it when told. Writing the
         // underlay straight onto the material does not tell it, so every quad kept the tight
         // padding it had before the shadow existed and the glow was cut off exactly at each
         // letter's edge. GetPadding does account for the underlay (read in the decompiled
         // ShaderUtilities); it simply was never being asked again.
-        label.UpdateMeshPadding();
+        target.UpdateMeshPadding();
+    }
 
-        _shadowed.Add(index);
+    private TextMeshProUGUI EnsureCaster(int index)
+    {
+        while (_casters.Count <= index)
+            _casters.Add(null);
+
+        var caster = _casters[index];
+        if (caster != null)
+        {
+            caster.gameObject.SetActive(true);
+            return caster;
+        }
+
+        var host = new GameObject("VecTextShadow", typeof(RectTransform), typeof(TextMeshProUGUI));
+        caster = host.GetComponent<TextMeshProUGUI>();
+        caster.rectTransform.SetParent(_masks[index], worldPositionStays: false);
+
+        // Before the label, so the label draws over its own shadow.
+        caster.rectTransform.SetSiblingIndex(0);
+        caster.raycastTarget = false;
+        caster.richText = true;
+
+        _casters[index] = caster;
+        return caster;
+    }
+
+    private static void HideCaster(TextMeshProUGUI? caster)
+    {
+        if (caster != null && caster.gameObject.activeSelf)
+            caster.gameObject.SetActive(false);
+    }
+
+    /// <summary>Makes a caster an exact copy of its label, moved by the shadow's offset.</summary>
+    private static void Mirror(TextMeshProUGUI caster, TextMeshProUGUI label, VecShadow shadow)
+    {
+        // Font first: assigning one resets the shared material, and the underlay is written
+        // onto a fresh instance afterwards.
+        if (caster.font != label.font)
+            caster.font = label.font;
+
+        caster.text = label.text;
+        caster.fontSize = label.fontSize;
+        caster.characterSpacing = label.characterSpacing;
+        caster.fontStyle = label.fontStyle;
+        caster.alignment = label.alignment;
+        caster.enableWordWrapping = label.enableWordWrapping;
+        caster.lineSpacing = label.lineSpacing;
+        caster.overflowMode = label.overflowMode;
+        caster.enableAutoSizing = label.enableAutoSizing;
+        caster.fontSizeMin = label.fontSizeMin;
+        caster.fontSizeMax = label.fontSizeMax;
+        caster.color = Color.white;
+
+        var from = label.rectTransform;
+        var to = caster.rectTransform;
+        to.anchorMin = from.anchorMin;
+        to.anchorMax = from.anchorMax;
+        to.pivot = from.pivot;
+        to.sizeDelta = from.sizeDelta;
+        to.localRotation = from.localRotation;
+        to.localScale = from.localScale;
+
+        // Canvas units, and scenes are +Y down while the canvas is +Y up.
+        to.anchoredPosition = from.anchoredPosition + new Vector2(shadow.Dx, -shadow.Dy);
+
+        // The same two capture guards the label takes in Show, for the same reason.
+        if (caster.mesh != null && caster.mesh.vertexCount == 0 && !string.IsNullOrEmpty(caster.text))
+            caster.ForceMeshUpdate();
+
+        var renderer = caster.canvasRenderer;
+        if (renderer != null && renderer.materialCount == 0 && caster.fontSharedMaterial != null)
+        {
+            renderer.materialCount = 1;
+            renderer.SetMaterial(caster.materialForRendering, 0);
+        }
     }
 
     /// <summary>One of each distinct complaint, not one per label per frame.</summary>
@@ -379,6 +505,7 @@ internal sealed class TextLayer
 
         _masks.Clear();
         _pool.Clear();
+        _casters.Clear();
         _shadowed.Clear();
     }
 }

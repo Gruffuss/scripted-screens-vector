@@ -255,6 +255,13 @@ evaluates the real Gaussian and stacks contours across it.
 Two limits: the shadow is not knocked out under the shape, so a **translucent** shape sits
 over its own shadow and reads darker than a CSS mockup; and `inset` is not implemented.
 
+**On text, `sh` works like CSS `text-shadow`** and takes one entry. Offset is free — a shadow
+that would not fit is drawn by an offset copy of the label — but **blur is capped by the font**:
+the glow is baked into the font's distance field, which only reaches so far past each letter.
+On the game's LiberationSans that is about `fontSize / 8.65` canvas units of blur-plus-spread,
+so a `0 0 6` glow on 14-point text draws at about half size. `vector_stats` lists any such
+reduction under `TEXT`; the fix is a smaller blur. `examples/10-text.lua` shows both cases.
+
 ### Scrolling a list — `SC`
 
 A list longer than its box goes in an `SC`. Children are written in content coordinates and
@@ -416,8 +423,9 @@ a panel could never be slid over a readout.
 The cost is one extra mesh, so one draw call, per label a later shape **actually overlaps** —
 not per label. A page of tiles where each label sits inside its own tile stays in a single mesh;
 `12-click.lua` has seven labels over nineteen shapes and stays in one. Dense layouts — nested
-panels, label boxes that touch later boxes, outlines drawn last — cut more; one measured at 13
-meshes over 48 shapes, which cost 0.07 ms of extra upload and is not worth avoiding.
+panels, label boxes wider than their text — cut more; one measured at 11 meshes over 48 shapes,
+which cost well under a tenth of a millisecond of upload and is not worth avoiding. Boxes that
+only touch, and transparent edges like feathers and shadow tails, never count as covering.
 
 If you want the old rule back for one scene:
 
@@ -654,10 +662,10 @@ What is worth knowing is *what* costs. Measured on a 1395 px console:
 |---|---|
 | a filled rectangle | 4 |
 | with a feather | 64 |
-| with one `sh` shadow | 640 |
+| with one `sh` shadow | 640 before 0.11.19, up to half that since |
 
-A shadow is about nine cards' worth of geometry, because its ring count follows the blur's
-on-screen size. If a design puts one on every tile in a grid, that is where the geometry goes,
+A shadow is still the most geometry an ordinary shape can carry, because its ring count follows
+the blur's on-screen size. If a design puts one on every tile in a grid, that is where the geometry goes,
 and a smaller blur radius is the direct lever. Nothing breaks if you ignore this — it is a
 cost, not a limit.
 

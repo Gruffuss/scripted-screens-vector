@@ -27,6 +27,7 @@
 --   * `f` is a flat colour, sampled at the node's origin. No gradient fills on type.
 --   * a group's opacity reaches it as the LABEL's alpha, not by fading it with the mesh --
 --     which is the right answer, but it means `o` cannot tint type the way it tints a fill
+--   * a shadow's BLUR is capped by the font's distance field (offset is not) -- section 6
 --
 -- DRAW ORDER IS ORDINARY, though it took work to make it so: a shape declared after a `T`
 -- covers it, one declared before it does not. See 14-ztext.
@@ -126,6 +127,24 @@ ui:element({
             { op = "T", x = 10, y = 76, w = 180, h = 10,
               text = "code face: <b>0123</b> 456", size = 7, font = "code",
               align = "center", f = "#3A5570" },
+
+            -- 6. TEXT SHADOWS. `sh` takes CSS text-shadow values, one entry on text. The two
+            --    halves of it behave differently, and both are shown here:
+            --
+            --    OFFSET IS FREE. A drop shadow whose offset would not fit is drawn by an
+            --    offset copy of the label, so it can sit as far from the text as you like.
+            { op = "T", x = 8, y = 150, w = 60, h = 14,
+              text = "DROP", size = 9, align = "center", valign = "middle", f = "#EAF4F8",
+              sh = { { 1, 1.5, 1.5, 0, "#000000" } } },
+
+            --    BLUR IS CAPPED BY THE FONT. A glow is baked into the font's distance field,
+            --    which only reaches about size / 8.65 past each letter on the game's
+            --    LiberationSans -- here a little over one unit. This asks for twice that, so it
+            --    draws at about half, and `vector_stats` lists the reduction under TEXT. That
+            --    listing is the point of this one: a smaller blur is the fix.
+            { op = "T", x = 132, y = 150, w = 60, h = 14,
+              text = "GLOW", size = 9, align = "center", valign = "middle", f = "#5FD9A8",
+              sh = { { 0, 0, 4, 0, "#5FD9A8" } } },
         },
     },
 })

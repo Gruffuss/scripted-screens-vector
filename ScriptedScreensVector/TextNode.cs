@@ -293,4 +293,35 @@ internal static class TextShadow
 
         return fit;
     }
+
+    /// <summary>
+    /// Whether this shadow comes out bigger drawn as its own offset copy of the text.
+    /// </summary>
+    /// <remarks>
+    /// Inside a glyph's quad, offset, spread and blur all share one SDF padding budget. A
+    /// separate copy of the label moved by the offset takes the offset out of that budget
+    /// entirely -- position is free -- so only blur and spread have to fit. Measured on the
+    /// game's LiberationSans, a `2 2 3` shadow on 13-point headings fit at 43% in the quad and
+    /// fits whole as a copy.
+    ///
+    /// A shadow with no offset gains nothing and keeps the cheaper single-label path, which is
+    /// also why a glow (`0 0 6`) stays capped: its blur alone is past the font's padding, and
+    /// no arrangement of labels changes what the distance field holds.
+    /// </remarks>
+    internal static bool ShouldCast(VecShadow shadow, float gradientScale, float samplingPointSize, float fontSize, out TextShadowFit fit)
+    {
+        fit = Fit(shadow, gradientScale, samplingPointSize, fontSize);
+
+        if (fit.Scale >= 0.999f || (Mathf.Abs(shadow.Dx) < 0.001f && Mathf.Abs(shadow.Dy) < 0.001f))
+            return false;
+
+        var still = new VecShadow(0f, 0f, shadow.Blur, shadow.Spread, shadow.Colour);
+        var split = Fit(still, gradientScale, samplingPointSize, fontSize);
+
+        if (split.Scale <= fit.Scale + 0.001f)
+            return false;
+
+        fit = split;
+        return true;
+    }
 }

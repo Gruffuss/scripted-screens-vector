@@ -118,9 +118,17 @@ internal static class Shadow
 
         // Ring count follows the blur's on-screen size: a two-pixel shadow needs no more
         // resolution than a two-pixel gradient does.
+        //
+        // One ring per FOUR screen pixels of reach, not two. The density was inherited from the
+        // colour-gradient rule, where banding across a saturated ramp is the visible failure; a
+        // shadow is a dark translucent ramp and a step of the same size is far harder to see.
+        // Measured offline against a 400-ring reference, the page's `4 6 10` shadow at the size
+        // it is viewed: max error 5.3/255 at two pixels, 12.0/255 at four, mean 0.011 and 0.016
+        // -- isolated edge pixels, invisible even amplified sixteen times. Up to half the
+        // vertices below the 24-ring cap; ~25% on that shadow, which sits at the cap.
         var rings = sigma <= 0.0001f
             ? 1
-            : Mathf.Clamp(Mathf.CeilToInt(reach * Mathf.Max(0.0001f, screenScale) / 2f), MinRings, MaxRings);
+            : Mathf.Clamp(Mathf.CeilToInt(reach * Mathf.Max(0.0001f, screenScale) / 4f), MinRings, MaxRings);
 
         // Innermost contour: fully covered, so it is filled solid rather than ramped.
         Offset(outline, inner, shift, shadow.Spread - reach, winding);

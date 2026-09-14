@@ -140,6 +140,14 @@ If [StationeersLua](https://steamcommunity.com/workshop/) is installed, the mod 
 vertices, rebuild rate, tessellation and upload cost, on-screen size, whether the scene is
 animated or scroll-driven, and **the problems and unresolved data names above**.
 
+Two more sections appear when they apply, and "no problems" is printed only when every section
+is empty:
+
+- `TEXT` — anything the text layer had to compromise on, such as a shadow reduced to fit the
+  font's padding. These used to reach the BepInEx log only.
+- `DROPPED` — a mesh piece too large to upload, which means everything drawn in it is missing
+  from the console. A single shape past 60,000 vertices is the only way to get one.
+
 ```
 vector_stats            -- all surfaces
 vector_stats scene=gas  -- one
@@ -174,12 +182,14 @@ grows with vertex count.
 |---|---|
 | a filled rectangle | 4 |
 | the same rectangle with a feather | 64 |
-| the same rectangle with one `sh` | 640 |
+| the same rectangle with one `sh` | 640 before 0.11.19, up to half that since |
 | a small circle with a feather | 40 |
 
-A box-shadow is far and away the most expensive thing a scene can ask for — roughly nine
-cards' worth each — because its ring count follows the blur's on-screen size. Reducing the
-blur radius is the direct lever.
+A box-shadow is the most expensive ordinary thing a scene can ask for, because its ring count
+follows the blur's on-screen size. Since 0.11.19 it lays one ring per four screen pixels of
+reach rather than two — checked against a 400-ring reference, the difference is a few isolated
+pixels at 12/255 — so a shadow below the 24-ring cap costs half what it did, and one at the cap
+about a quarter less. Reducing the blur radius is still the direct lever.
 
 ### Screen capture
 
@@ -209,11 +219,13 @@ Measured in game:
 | | shapes | meshes |
 |---|---|---|
 | `examples/12-click.lua` — labels beside the shapes after them | 19 | 1 |
-| a dense page of nested panels, label boxes touching later boxes | 48 | 13 |
+| a dense page of nested panels, label boxes touching later boxes | 48 | 11 |
 
-A label whose box stays clear of everything declared after it costs nothing. Nested panels,
-generous label boxes and decoration drawn late (outlines, highlights, overlays) are what produce
-cuts. **Neither case is worth worrying about**: on the 48-shape page the whole difference was
+A label whose box stays clear of everything declared after it costs nothing. What produces cuts
+is a label **box** reaching over a later shape: nested panels, and label boxes made wider than
+their text so it never wraps. Boxes that merely touch do not count, and neither does anything
+transparent — a feather or the fading edge of a shadow cannot cover text — which took that page
+from 13 meshes to 11. **Neither case is worth worrying about**: on the 48-shape page the whole difference was
 0.06 → 0.13 ms of mesh upload, against a 16.7 ms frame, and tessellation is unchanged because it
 is the same geometry handed over in more pieces.
 
@@ -686,10 +698,17 @@ builds its own mesh above ours — so a `T` shadow is the SDF shader's underlay 
 `sh` syntax, three differences:
 
 - **One shadow only.** The underlay is a single layer. A second is reported, not drawn.
-- **Size is capped by the font's SDF padding.** Offset, spread and blur share one budget of
-  roughly `gradientScale` atlas texels. A request past it is scaled down *as a whole*, so the
-  shadow keeps its shape, and the reduction is logged with its percentage rather than left to
-  look like the numbers were ignored.
+- **Blur and spread are capped by the font's SDF padding.** They share one budget of roughly
+  `gradientScale` atlas texels, which for the game's LiberationSans works out to about
+  `fontSize / 8.65` canvas units. A request past it is scaled down *as a whole*, so the shadow
+  keeps its shape, and the reduction is listed under `TEXT` in `vector_stats`.
+- **Offset is not capped.** A shadow with an offset that would not fit is drawn by an offset
+  copy of the label instead of inside the label's own quad, so the offset stops counting
+  against the budget. A `2 2 3` shadow on 13-point text fits whole this way; inside the quad it
+  was shrunk to 43%.
+- **A glow is the case that stays capped.** With no offset there is nothing to take out: a
+  `0 0 6` glow on 14-point LiberationSans needs about twice the padding the font has and draws
+  at 54%. Use a smaller blur, or a font with more padding.
 - `spread` maps to dilate and `blur` to softness, both approximations of the geometric
   version rather than the same arithmetic.
 
@@ -793,6 +812,15 @@ because a ring at a tenth of the radius has a tenth of the circumference.
 
 Together those roughly halve a typical fill and cut a small multi-stop one by an order of
 magnitude — worth knowing, though no longer a wall. See **Size limits** below.
+
+**Since 0.11.18, `units = "bbox"` radials use the band fill too**, and bands follow the gradient
+on any shape. Two faults meant neither was true before: the band fill tested the gradient's
+0..1 focus against the shape's real coordinates, so no bounding-box radial ever qualified and
+all of them fell back to a subdivided fill that reached 60,000 vertices on one box; and a ring
+only carried colour at the outline's own points, which on a rounded rect are all in the
+corners, so the bands took the box's shape. Outlines now get a point every 2.5 screen pixels
+before rings are built. Measured on a 90x50 box: about 16,000–21,000 vertices at any size,
+where the subdivided fill grew from 43,000 to 99,000 with size.
 
 ### `SYM` / `USE` — symbols
 

@@ -139,6 +139,8 @@ internal static class Program
         TextOrderTests.DrawOrderIsTheDefault(run);
         TextOrderTests.BoundsAreNotTrackedByDefault(run);
         TextOrderTests.BoundsTrackingCost(run);
+        TextOrderTests.TouchingBoxesDoNotCut(run);
+        TextShadowTests.OffsetShadowsMoveToACopy(run);
 
         Console.WriteLine();
         GradientTests.LinearParameter(run);

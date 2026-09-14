@@ -297,4 +297,20 @@ internal static class TextOrderTests
 
         return watch.Elapsed.TotalMilliseconds;
     }
+
+    /// <summary>Boxes that only share an edge must not force a cut.</summary>
+    internal static void TouchingBoxesDoNotCut(TestRun run)
+    {
+        var builder = new MeshBuilder();
+        builder.TrackBounds(true);
+
+        AddShape(builder, Rect.MinMaxRect(0f, 0f, 100f, 29f));
+        var labels = new List<TextPlacement> { Label(Rect.MinMaxRect(0f, 0f, 100f, 29.0001f), 1) };
+        AddShape(builder, Rect.MinMaxRect(0f, 29f, 100f, 48f));     // the next row, flush below
+
+        TextOrder.Assign(labels, builder);
+        var slices = builder.Slices();
+
+        run.Check("ztext: a box flush against the label does not split the mesh", slices == 1, $"slices {slices}");
+    }
 }

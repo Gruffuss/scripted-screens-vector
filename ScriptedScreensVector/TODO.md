@@ -5,38 +5,20 @@ fix is, and why it was left — so picking one up does not mean rediscovering it
 
 ---
 
-## Shadow ring density is inherited from colour gradients and is probably twice what it needs
+## Shadow ring density — halved in 0.11.19.0
 
-**Measured, 40 cards at 1395 px, one `sh` each:**
+One ring per four screen pixels of reach instead of two. Checked offline, not by arithmetic:
+the page's `4 6 10` box shadow rendered through the real tessellator at its viewed size
+(4.76 px per unit) against a 400-ring reference.
 
-| | vertices per card |
-|---|---|
-| with one box-shadow | 640 |
-| no shadow (control) | 64 |
+| rings | vertices (incl. box) | max error | mean error |
+|---|---|---|---|
+| per 2 px (old) | 1,240 | 5.3/255 | 0.011/255 |
+| per 4 px (now) | 976 | 12.0/255 | 0.016/255 |
 
-So a single box-shadow is **576 vertices, nine times the card it sits under**, and on a page
-of tiles it is where the whole budget goes. The 2x2 console was measured at 91 vertices per
-shape for a page of boxes; a filled rectangle is four.
-
-**Where the number comes from.** `Shadow.Emit` picks its ring count as roughly one ring per
-two screen pixels of blur reach, clamped 4..24. At that size it resolved to 16 rings of the
-card's 32 outline points.
-
-**Why it is probably too fine.** That density was inherited from the radial gradient rule,
-where the visible failure is banding across a saturated colour ramp. A shadow is a dark
-translucent ramp against a background, where a step of the same size is far harder to see —
-the eye is being asked to resolve a few percent of alpha, not a hue change. Halving it is one
-constant.
-
-**How to check it properly.** Push two scenes to a console from one spot: the same card grid
-at the current density and at half, and look. The probe scenes used for the feather
-measurement are the right shape for it. Do not decide this from arithmetic — the record on
-predicting what is visible in this renderer is poor, and the feather turned out to matter
-precisely where it looked like it did not (dense overlapping fields, not arranged grids).
-
-**Why it was left.** Nothing is being dropped any more now that a surface can span several
-meshes, so this is a cost question rather than a correctness one. It is worth doing, it is
-just not urgent.
+The max errors are isolated edge pixels; the error map is black even amplified sixteen times.
+That shadow sits at the 24-ring cap, so it saved ~25%; below the cap the saving is half.
+Still wants one look in game at close range, since the reference is the model, not a screen.
 
 ---
 
@@ -67,6 +49,8 @@ because the surface's own renderer always draws before its children. It stays on
 that means giving the surface an empty slice 0, which costs a draw call on every scene to
 serve a case nothing has asked for yet.
 
+---
+
 ## Capture logging could say whether pixels arrived
 
 The HTML mod's capture logs sample the result — centre and corner pixels, plus layout sizes —
@@ -78,31 +62,40 @@ vertex count, because that is exactly the case the current line cannot distingui
 
 ---
 
-## `ztext` cuts more on HTML pages than on hand-authored ones, and nobody knows why
+## Why dense pages cut more than hand-built ones — answered
 
-Measured in game on 0.11.12.0, with text in draw order on by default:
+Found from the HTML mod's scene dump (`scenes/page.txt`) run offline through the real
+tessellator and `TextOrder`. The test page had 12 cuts (13 meshes):
 
-| scene | shapes | meshes |
-|---|---|---|
-| `12-click.lua` (hand-authored) | 19 | 1 |
-| `html:page` (HTML mod) | 48 | **13** |
-| `html:gas` (HTML mod) | 754 | **9** |
+| cuts | cause |
+|---|---|
+| `z 1`, `z 2` | **genuine** — z-index boxes really overlap those labels |
+| `one`, `two`, `five`, `t33`..`t37` | the label box is **wider than its text** (the HTML emitter's slack, e.g. `one` is 279 wide on a 201 tile) and runs into the next tile |
+| `PAINT` | the 845-wide heading box touched the **faint outer edge of a box shadow** |
+| `click me` | flush boxes: shape bounds included the **feather ring**, so touching boxes overlapped by a feather's width |
 
-**This is not a performance problem and was wrongly presented as one.** The extra upload is
-0.06 -> 0.13 ms on `html:page` and 0.34 -> 0.71 ms on gas — sub-millisecond, against a 16.7 ms
-frame. Tessellation is unchanged, because it is the same geometry handed over in more pieces.
+Fixed in 0.11.19.0: vertices at alpha <= 2 no longer count toward shape bounds (feathers and
+shadow tails cannot cover text), and boxes touching within 0.25 canvas units do not overlap.
+The page is now 10 cuts, 11 meshes.
 
-**What it does mean is that the prediction was wrong.** "A cut is close to never" held for
-scenes a person placed and not for scenes a layout engine generated, which is exactly the
-population the original design note warned about.
+**Left alone deliberately:** the eight slack cuts. They change nothing on screen and cost a
+fraction of a millisecond of upload. Removing them needs the text's real width, which only
+TextMeshPro knows and only on the main thread after the label is built — a two-pass design
+(measure, then rebuild once) that is not worth it for an invisible cost. Revisit only if mesh
+count ever matters.
 
-**The suspicion, untested:** the HTML emitter gives a label slack on the side its alignment
-allows, so TextMeshPro does not wrap a shrink-wrapped box. That makes a label's rect wider than
-its text, and the overlap test uses the rect. Spurious overlaps with neighbouring tiles would
-follow, and would scale with page size rather than with real occlusion.
+---
 
-**How to settle it:** log which labels force a cut, and against which shape, under
-`Diagnostics.Enabled`. One line per cut names the label text and both boxes, and the answer is
-either "the slack" or "genuinely overlapping boxes" in a single look. Do that before changing
-the overlap test — the record on guessing about this renderer is poor, and the cheap wrong fix
-(shrinking the test box) would reintroduce labels drawing over things that really do cover them.
+## Text shadows larger than the font's padding
+
+Since 0.11.19.0 a shadow with an OFFSET that does not fit the glyph quad is drawn by an offset
+copy of the label, so only blur and spread count against the SDF padding. On the game's
+LiberationSans (sampling / gradient scale measured at 8.65 from the in-game warnings) the test
+page's `2 2 3` headings went from 43% to whole.
+
+**Still capped: glows.** A `0 0 6` glow on 14-point text needs 3.0 units of reach against a
+1.62-unit budget and stays at 54%, reported under TEXT in `vector_stats`. Nothing on the vector
+side changes what the distance field holds. The fixes are a smaller blur on the page, or a font
+with more padding: the fonts mod builds its atlases at padding 5 (`AtlasPadding`), which is
+*less* than LiberationSans, so raising it would cost atlas space the 272-character set nearly
+fills at 48pt. Not attempted.
