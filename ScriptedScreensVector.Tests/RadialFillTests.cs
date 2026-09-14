@@ -179,4 +179,51 @@ internal static class RadialFillTests
 
         run.Check("radial: the budget prediction matches the emit", roundedRect, summed, 0.0001d, 0, 0);
     }
+
+    /// <summary>
+    /// A bounding-box radial must take the band fill, whatever the shape's position.
+    /// </summary>
+    /// <remarks>
+    /// The gate used to test the gradient's raw focus, which in `units = "bbox"` is a 0..1
+    /// fraction, against the outline in shape space -- so a shape anywhere but the origin never
+    /// qualified and fell into ear clipping plus subdivision. Reported at ~49,000 vertices for
+    /// one 90x50 rounded rect. The test uses that exact box and focus, at its real position.
+    /// </remarks>
+    internal static void BoundingBoxRadialTakesTheBands(TestRun run)
+    {
+        var box = new List<UnityEngine.Vector2>
+        {
+            new(10f, 243f), new(100f, 243f), new(100f, 293f), new(10f, 293f),
+        };
+
+        var gradient = new ScriptedScreensVector.Gradient
+        {
+            Radial = true,
+            BoundingBox = true,
+            Focus = new UnityEngine.Vector2(0.3f, 0.3f),
+        };
+
+        var paint = new ScriptedScreensVector.Paint(UnityEngine.Color.white, gradient, 1f)
+            .WithBounds(new UnityEngine.Vector2(10f, 243f), new UnityEngine.Vector2(90f, 50f));
+
+        run.Check("radial: a bbox radial away from the origin takes the band fill",
+            ScriptedScreensVector.Tessellator.RadialBandsFit(box, paint),
+            "focus (0.3,0.3) of a box at x 10..100, y 243..293");
+
+        // The other direction: a focus genuinely outside the shape must still be refused, or
+        // the rings would be built around a point they cannot radiate from.
+        var outside = new ScriptedScreensVector.Gradient
+        {
+            Radial = true,
+            BoundingBox = true,
+            Focus = new UnityEngine.Vector2(1.5f, 0.5f),
+        };
+
+        var outsidePaint = new ScriptedScreensVector.Paint(UnityEngine.Color.white, outside, 1f)
+            .WithBounds(new UnityEngine.Vector2(10f, 243f), new UnityEngine.Vector2(90f, 50f));
+
+        run.Check("radial: a focus outside the shape still falls back",
+            !ScriptedScreensVector.Tessellator.RadialBandsFit(box, outsidePaint),
+            "focus (1.5,0.5) is past the right edge");
+    }
 }

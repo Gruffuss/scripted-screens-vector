@@ -63,6 +63,50 @@ internal sealed class VectorSlice : MaskableGraphic
             canvasRenderer.SetMesh(_mesh);
     }
 
+    // A slice created during a screen capture is created INSIDE UGUI's graphic rebuild loop:
+    // the capture's inline build runs from UpdateGeometry, and draw-order text now splits most
+    // text-bearing scenes into several slices. Enabling a Graphic there asks the registry to
+    // queue it, the registry refuses, and Unity logs an error per request -- 66 of them for one
+    // capture of a seven-mesh page.
+    //
+    // Nothing is lost by it (the capture was checked and is complete), but a slice never needs
+    // the queue anyway: its mesh is handed over directly by Present. So while a rebuild is in
+    // progress, do the one job the queue would have done -- set the material -- here and now.
+    // Outside a rebuild, UGUI's normal path is left alone.
+    //
+    // Deferring slice creation to the next Update would silence it too, and break the capture:
+    // the clone is taken inside the same call, so it would have no slices past the first.
+
+    public override void SetVerticesDirty()
+    {
+        if (!CanvasUpdateRegistry.IsRebuildingGraphics())
+        {
+            base.SetVerticesDirty();
+            return;
+        }
+
+        if (_mesh != null)
+            canvasRenderer.SetMesh(_mesh);
+    }
+
+    public override void SetMaterialDirty()
+    {
+        if (!CanvasUpdateRegistry.IsRebuildingGraphics())
+        {
+            base.SetMaterialDirty();
+            return;
+        }
+
+        UpdateMaterial();
+    }
+
+    public override void SetLayoutDirty()
+    {
+        // A slice stretches over its surface and has no layout of its own to recompute.
+        if (!CanvasUpdateRegistry.IsRebuildingGraphics())
+            base.SetLayoutDirty();
+    }
+
     protected override void OnDestroy()
     {
         if (_mesh != null && _ownsMesh)

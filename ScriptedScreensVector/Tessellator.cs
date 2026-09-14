@@ -1169,7 +1169,7 @@ internal static class Tessellator
         // radiates from the focus follows it exactly. Ear clipping instead produces slivers
         // reaching across the shape, and subdividing a sliver only yields smaller slivers --
         // hence the residual streaking that survived the refinement fix.
-        if (paint.IsGradient && paint.Gradient!.Radial && holes == null && Encloses(contour, paint.Gradient.Focus))
+        if (holes == null && RadialBandsFit(contour, paint))
         {
             FillRadialBands(vh, contour, paint, frame.Matrix, frame.Scale);
         }
@@ -1751,6 +1751,24 @@ internal static class Tessellator
             previousBase = thisBase;
             previousCount = points;
         }
+    }
+
+    /// <summary>
+    /// Whether a fill can be built as concentric bands around its gradient's focus.
+    /// </summary>
+    /// <remarks>
+    /// The focus has to be tested in the SHAPE's space. In `units = "bbox"` the gradient's own
+    /// focus is a 0..1 fraction, and testing that raw against an outline at, say, x 10..100,
+    /// y 243..293 never finds it inside -- so every bounding-box radial fell through to ear
+    /// clipping plus subdivision. Measured: one 90x50 rounded rect cost ~49,000 vertices that
+    /// way against a page total of 4,786 without it. FillRadialBands already mapped the focus
+    /// back; only this gate had forgotten.
+    /// </remarks>
+    internal static bool RadialBandsFit(List<Vector2> contour, Paint paint)
+    {
+        return paint.IsGradient
+               && paint.Gradient!.Radial
+               && Encloses(contour, paint.FromGradientSpace(paint.Gradient.Focus));
     }
 
     /// <summary>Point-in-polygon by crossing count, used to validate the banding fallback.</summary>
