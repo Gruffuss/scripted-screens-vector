@@ -1844,6 +1844,10 @@ internal static class Tessellator
         // it did not, because only that path lays down one vertex per contour point in order.
         var shared = -1;
 
+        // Set when a hole crosses the clip: the fill, already clipped triangle by triangle.
+        List<Vector2>? soupVertices = null;
+        List<int>? soupIndices = null;
+
         if (frame.Clip != null)
         {
             // Clipping a filled shape reshapes its boundary, so it happens before
@@ -1852,12 +1856,62 @@ internal static class Tessellator
             if (contour.Count < 3)
                 return;
 
-            // A hole straddling the clip boundary needs a boolean subtraction, not a convex
-            // clip. Say so rather than drawing something quietly wrong.
+            // A hole wholly inside the clip is untouched by it, so it is kept and bridged into
+            // the clipped outline as usual. One wholly outside went with the part clipped away.
+            // A hole crossing the clip boundary -- or the cut between two pieces of a concave
+            // clip -- is handled by triangulating the unclipped shape and clipping each triangle,
+            // which is exact since a triangle clipped by a convex region stays convex. Every hole
+            // used to be dropped, so a path with a hole inside a clipped group drew solid -- which
+            // is every evenodd path in an inline svg on an HTML page.
             if (holes is { Count: > 0 })
             {
-                ScriptedScreensVectorPlugin.Log?.LogWarning("clipped fills cannot carry holes; holes ignored");
-                holes = null;
+                List<List<Vector2>>? kept = null;
+                var straddles = false;
+
+                foreach (var hole in holes)
+                {
+                    var inside = 0;
+                    foreach (var point in hole)
+                    {
+                        if (frame.Clip.Contains(point))
+                            inside++;
+                    }
+
+                    if (inside == hole.Count)
+                        (kept ??= new List<List<Vector2>>()).Add(hole);
+                    else if (inside > 0 || frame.Clip.ClipPolygon(hole).Count >= 3)
+                        straddles = true;
+                }
+
+                if (straddles)
+                {
+                    if (!Triangulator.Triangulate(outer, holes, out var whole, out var wholeIndices))
+                        return;
+
+                    // ponytail: unshared vertices per clipped triangle; fine for the rare crossing hole.
+                    soupVertices = new List<Vector2>();
+                    soupIndices = new List<int>();
+                    var triangle = new List<Vector2>(3);
+                    for (var i = 0; i + 2 < wholeIndices.Count; i += 3)
+                    {
+                        triangle.Clear();
+                        triangle.Add(whole[wholeIndices[i]]);
+                        triangle.Add(whole[wholeIndices[i + 1]]);
+                        triangle.Add(whole[wholeIndices[i + 2]]);
+
+                        var piece = frame.Clip.ClipPolygon(triangle);
+                        var first = soupVertices.Count;
+                        soupVertices.AddRange(piece);
+                        for (var k = 1; k + 1 < piece.Count; k++)
+                        {
+                            soupIndices.Add(first);
+                            soupIndices.Add(first + k);
+                            soupIndices.Add(first + k + 1);
+                        }
+                    }
+                }
+
+                holes = straddles ? holes : kept;
             }
         }
 
@@ -1896,6 +1950,10 @@ internal static class Tessellator
             {
                 // Everything up to and including the outline still runs; only the vertex
                 // emission is skipped.
+            }
+            else if (soupVertices != null)
+            {
+                EmitTriangles(vh, soupVertices, soupIndices!, paint, frame.Matrix);
             }
             else if (holes == null && !NeedsRefinement(paint) && IsConvex(contour))
             {

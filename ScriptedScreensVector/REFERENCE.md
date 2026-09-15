@@ -1067,7 +1067,10 @@ clip that splits in two doubles the vertices of what it clips. Pieces meet exact
 no seam and no double coverage. Text under it is masked to the true outline with a stencil,
 and hit regions and labels are recorded once.
 
-A clipped fill cannot carry holes; they are dropped with a warning.
+A clipped fill keeps its holes, including one the clip boundary cuts through. A hole wholly
+inside the clip costs nothing extra. One crossing the boundary, or the cut between two pieces
+of a concave clip, makes that shape triangulate before clipping, so it draws with unshared
+vertices: a few more than usual, only for that shape.
 
 ---
 

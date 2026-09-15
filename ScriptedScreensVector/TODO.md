@@ -5,6 +5,15 @@ fix is, and why it was left — so picking one up does not mean rediscovering it
 
 ---
 
+## Circle clip coarse in a capture of an unwatched console (seen 2026-09-15)
+
+`InGameTest-holes.lua` on 563: captured while stats said `on screen size unknown`, the
+`CP { C rx=38 }` clip came out a hexagon; in the player's view it is round. Unknown size should
+mean full quality. Cause not traced: arithmetic with the fallback scale of 1 gives 48 segments,
+not 6, so something else supplies the scale on that path. Capture-only; play is unaffected.
+
+---
+
 ## Shadow ring density — halved in 0.11.19.0
 
 One ring per four screen pixels of reach instead of two. Checked offline, not by arithmetic:

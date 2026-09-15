@@ -636,8 +636,8 @@ composites on top of what is already drawn there. Two shapes at 0.62 meeting und
 read as 0.86: a bright rule where the join should be invisible.
 
 **A concave clip multiplies what it clips.** It is split into convex pieces and everything
-under it is drawn once per piece, so an L-shape doubles the geometry of its contents. A
-clipped fill cannot carry holes. Clip outlines are static: `t` inside one is silently
+under it is drawn once per piece, so an L-shape doubles the geometry of its contents.
+Clip outlines are static: `t` inside one is silently
 constant. They are in scene coordinates and stay put when the group using them is transformed.
 
 **A repeat instantiates its children unchanged.** Nothing varies by itself; an expression over
