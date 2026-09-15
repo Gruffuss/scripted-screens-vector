@@ -71,7 +71,7 @@ ui:element({
     rect = { unit = "px", x = 12, y = 40, w = (W - 36) / 2, h = H - 80 },
     props = {
         scene = "src_a",
-        w = 100, h = 200,
+        w = 100, h = 200, fit = "contain",
 
         defs = {
             { op = "GL", id = "liquid", units = "bbox", x1 = 0, y1 = 0, x2 = 0, y2 = 1,
@@ -116,7 +116,7 @@ ui:element({
         scene = "src_b",
         src = [==[
 # viewbox and fit live on SCENE, not on the element props
-SCENE w=100 h=200 fit=stretch
+SCENE w=100 h=200 fit=contain
 
 DEFS {
     GL id=liquid units=bbox x1=0 y1=0 x2=0 y2=1 stops=[[0,#5FD9A8],[1,#2E8B6E]]

@@ -134,7 +134,7 @@ internal static class Program
         TextOrderTests.EarlierShapeIsIgnored(run);
         TextOrderTests.AGridOfLabelledTilesStaysOneMesh(run);
         TextOrderTests.ForcedCutBeatsTheVertexBudget(run);
-        TextOrderTests.LabelBeforeAllGeometryStaysVisible(run);
+        TextOrderTests.LabelBeforeAllGeometryGoesUnder(run);
         TextOrderTests.ZtextSurvivesTheSrcForm(run);
         TextOrderTests.DrawOrderIsTheDefault(run);
         TextOrderTests.BoundsAreNotTrackedByDefault(run);
@@ -160,6 +160,7 @@ internal static class Program
         RequirementTests.ConicAngles(run);
         RequirementTests.Filters(run);
         RequirementTests.GroupMatrix(run);
+        RequirementTests.LabelShear(run);
         RequirementTests.Partition(run);
         RequirementTests.ImageFit(run);
         RequirementTests.ForcedScrollOnce(run);

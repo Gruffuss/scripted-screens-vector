@@ -49,6 +49,13 @@ internal struct TextPlacement
     /// <summary>Filters and mask of the enclosing groups, applied per glyph vertex.</summary>
     internal VertexTint? Tint;
 
+    /// <summary>
+    /// What the group's transform does to the text beyond rotating and uniformly scaling it --
+    /// a skew, or a stretch along one axis -- as a 2x2 matrix (m00, m01, m10, m11) in the label's
+    /// own space, +Y up. Applied to the glyph vertices. Null when there is none.
+    /// </summary>
+    internal Vector4? Shear;
+
     /// <summary>`f=@gradient`: sampled at every glyph vertex. Null for a flat colour.</summary>
     internal TextGradient? Gradient;
 
@@ -126,7 +133,49 @@ internal struct ImagePlacement
 internal struct HitRegion
 {
     internal string Id;
+
+    /// <summary>Bounds of <see cref="Outline"/>, for a cheap first test.</summary>
     internal Rect Rect;
+
+    /// <summary>The shape's own outline in canvas space.</summary>
+    internal Vector2[] Outline;
+
+    /// <summary>The clip it is drawn through, in canvas space, or null when unclipped.</summary>
+    internal Vector2[]? Clip;
+
+    /// <summary>
+    /// True when a canvas point is on the drawn shape: inside its outline and inside its clip.
+    /// </summary>
+    /// <remarks>
+    /// This was the bounding rectangle alone, so a circle took clicks in its corners, a turned
+    /// shape took them across its upright bounds, and a clipped one took them where the clip had
+    /// cut it away -- the empty corners around a star-shaped clip, or a list row scrolled out of
+    /// sight above its container. A browser only hits what is drawn.
+    /// </remarks>
+    internal bool Contains(Vector2 point)
+    {
+        return Rect.Contains(point)
+               && (Outline == null || Outline.Length < 3 || Inside(Outline, point))
+               && (Clip == null || Clip.Length < 3 || Inside(Clip, point));
+    }
+
+    /// <summary>Even-odd point in polygon; right for any simple outline, convex or not.</summary>
+    internal static bool Inside(Vector2[] polygon, Vector2 point)
+    {
+        var inside = false;
+        for (int i = 0, j = polygon.Length - 1; i < polygon.Length; j = i++)
+        {
+            var a = polygon[i];
+            var b = polygon[j];
+            if ((a.y > point.y) != (b.y > point.y)
+                && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x)
+            {
+                inside = !inside;
+            }
+        }
+
+        return inside;
+    }
 }
 
 /// <summary>Where an <c>SC</c> container landed, and how much room it has to scroll.</summary>

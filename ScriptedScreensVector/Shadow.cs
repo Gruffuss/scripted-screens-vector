@@ -332,8 +332,8 @@ internal static class Shadow
             for (var i = 0; i < count; i++)
             {
                 var next = (i + 1) % count;
-                EmitPiece(vh, region, field, matrix, triangle, piece, outer[i], outer[next], inner[next]);
-                EmitPiece(vh, region, field, matrix, triangle, piece, outer[i], inner[next], inner[i]);
+                EmitPiece(vh, region, field, matrix, triangle, piece, outer[i], outer[next], inner[next], levels[l - 1], levels[l - 1], levels[l]);
+                EmitPiece(vh, region, field, matrix, triangle, piece, outer[i], inner[next], inner[i], levels[l - 1], levels[l], levels[l]);
             }
 
             (outer, inner) = (inner, outer);
@@ -430,14 +430,21 @@ internal static class Shadow
         return limit == float.MaxValue ? float.MaxValue : limit * 0.9f;
     }
 
+    /// <remarks>
+    /// Corners sit on ring contours whose depth is known, so their alpha comes straight from
+    /// that depth. Measuring depth against every edge of the outline, for every vertex, made two
+    /// inset shadows cost 25 ms of a 36 ms rebuild. Only a vertex the clip created -- one that is
+    /// on no ring -- is measured.
+    /// </remarks>
     private static void EmitPiece(MeshBuilder vh, ClipRegion region, InsetField field, Matrix4x4 matrix,
-        List<Vector2> triangle, List<Vector2> piece, Vector2 a, Vector2 b, Vector2 c)
+        List<Vector2> triangle, List<Vector2> piece, Vector2 a, Vector2 b, Vector2 c, float ua, float ub, float uc)
     {
-        if (field.Alpha(a) <= 0.002f && field.Alpha(b) <= 0.002f && field.Alpha(c) <= 0.002f
-            && field.Alpha((a + b + c) / 3f) <= 0.002f)
-        {
+        // Alpha falls with depth, so a triangle between two clear rings is clear throughout.
+        var aa = field.AlphaAtDepth(ua);
+        var ab = field.AlphaAtDepth(ub);
+        var ac = field.AlphaAtDepth(uc);
+        if (aa <= 0.002f && ab <= 0.002f && ac <= 0.002f)
             return;
-        }
 
         triangle.Clear();
         triangle.Add(a);
@@ -449,6 +456,15 @@ internal static class Shadow
             return;
 
         var origin = vh.currentVertCount;
+        if (ReferenceEquals(cut, triangle))
+        {
+            vh.AddVert(matrix.MultiplyPoint3x4(a), field.Colour(aa), Vector2.zero);
+            vh.AddVert(matrix.MultiplyPoint3x4(b), field.Colour(ab), Vector2.zero);
+            vh.AddVert(matrix.MultiplyPoint3x4(c), field.Colour(ac), Vector2.zero);
+            vh.AddTriangle(origin, origin + 1, origin + 2);
+            return;
+        }
+
         foreach (var point in cut)
             vh.AddVert(matrix.MultiplyPoint3x4(point), field.Colour(point), Vector2.zero);
 
@@ -534,7 +550,19 @@ internal static class Shadow
 
         internal float Alpha(Vector2 p)
         {
-            return _colour.a * (1f - Coverage(Depth(p) - _spread, _sigma));
+            return AlphaAtDepth(Depth(p));
+        }
+
+        internal float AlphaAtDepth(float depth)
+        {
+            return _colour.a * (1f - Coverage(depth - _spread, _sigma));
+        }
+
+        internal Color32 Colour(float alpha)
+        {
+            var c = _colour;
+            c.a = alpha;
+            return c;
         }
 
         internal Color32 Colour(Vector2 p)

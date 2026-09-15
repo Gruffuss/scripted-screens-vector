@@ -61,6 +61,11 @@ internal static class Tessellator
     /// <summary>Screen pixels per canvas unit for the surface currently being tessellated.</summary>
     [ThreadStatic] private static float ScreenScale;
 
+    /// <summary>Canvas back to scene space, undoing the viewbox fit; and the fit's X scale and Y/X ratio.</summary>
+    [ThreadStatic] private static Matrix4x4 _viewboxInverse;
+    [ThreadStatic] private static float _viewboxScaleX;
+    [ThreadStatic] private static float _viewboxRatio;
+
     /// <summary>
     /// Per-op-type time and counts for the current rebuild.
     /// </summary>
@@ -294,6 +299,10 @@ internal static class Tessellator
         var viewbox =
             Matrix4x4.Translate(new Vector3(target.xMin + offset.x, target.yMax - offset.y, 0f)) *
             Matrix4x4.Scale(new Vector3(scale.x, -scale.y, 1f));
+
+        _viewboxInverse = AffineInverse(viewbox);
+        _viewboxScaleX = Mathf.Max(0.0001f, Mathf.Abs(scale.x));
+        _viewboxRatio = Mathf.Abs(scale.y) / _viewboxScaleX;
 
         var stack = new Stack<Frame>();
         stack.Push(new Frame
@@ -816,12 +825,23 @@ internal static class Tessellator
     private static void EmitGroupChildren(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted, MaskInfo? mask)
     {
         var from = vh.currentVertCount;
+        var labelsFrom = TextFound?.Count ?? 0;
 
         foreach (var child in node.Children)
             EmitNode(vh, scene, child, context, stack, ref emitted);
 
         if (mask != null)
-            vh.MaskRange(from, mask, NeedsRefinement(new Paint(Color.white, mask.Gradient, 1f)));
+        {
+            List<Rect>? labels = null;
+            if (TextFound != null && TextFound.Count > labelsFrom)
+            {
+                labels = new List<Rect>(TextFound.Count - labelsFrom);
+                for (var i = labelsFrom; i < TextFound.Count; i++)
+                    labels.Add(TextFound[i].Rect);
+            }
+
+            vh.MaskRange(from, mask, NeedsRefinement(new Paint(Color.white, mask.Gradient, 1f)), ScreenScale, labels);
+        }
     }
 
     /// <summary>
@@ -930,6 +950,40 @@ internal static class Tessellator
     /// dial's readout turned against its needle, correct only at 0 degrees. Measured before the
     /// fix: needle +60, text -60. Pinned by TextShadowTests.LabelsTurnWithTheirGroup.
     /// </remarks>
+    /// <summary>
+    /// The part of a frame's transform a turned, evenly scaled label box cannot carry, in the
+    /// label's own space (+Y up), or null when the frame only rotates and scales evenly.
+    /// </summary>
+    /// <remarks>
+    /// The matrix maps scene space (+Y down) to canvas (+Y up), so the label's up is scene -Y:
+    /// its axes land on c1 = M(1,0) and c2 = M(0,-1). Expressed in the turned basis (u along c1,
+    /// v a quarter turn from it) and divided by the scale the label is laid out at, that is
+    /// [[|c1|, c2.u], [0, c2.v]] / scale -- the identity for any rotation and even scale.
+    /// </remarks>
+    internal static Vector4? LabelShear(Matrix4x4 matrix, float scale)
+    {
+        if (scale <= 0.0001f)
+            return null;
+
+        var c1 = new Vector2(matrix.m00, matrix.m10);
+        var c2 = new Vector2(-matrix.m01, -matrix.m11);
+        var length = c1.magnitude;
+        if (length < 1e-6f)
+            return null;
+
+        var u = c1 / length;
+        var v = new Vector2(-u.y, u.x);
+
+        var a = length / scale;
+        var b = Vector2.Dot(c2, u) / scale;
+        var d = Vector2.Dot(c2, v) / scale;
+
+        if (Mathf.Abs(a - 1f) < 0.001f && Mathf.Abs(b) < 0.001f && Mathf.Abs(d - 1f) < 0.001f)
+            return null;
+
+        return new Vector4(a, b, 0f, d);
+    }
+
     internal static Rect LabelBox(Matrix4x4 matrix, float x, float y, float w, float h, out float rotation)
     {
         var centre = matrix.MultiplyPoint3x4(new Vector2(x + w * 0.5f, y + h * 0.5f));
@@ -965,6 +1019,24 @@ internal static class Tessellator
         // did -- is only right at 0 degrees: under a rotating group the box changed shape as the
         // needle swung, 45 degrees making it square whatever the text.
         var box = LabelBox(frame.Matrix, x, y, w, h, out var rotation);
+
+        // A skew or a one-axis stretch cannot be expressed by a RectTransform, which only turns
+        // and scales evenly: `m=[1,0,-0.5,1,0,0]` sheared the box around upright letters. The
+        // label is laid out at the frame's even scale instead and the rest goes to the glyphs.
+        //
+        // Only the SCENE's own transforms count, not the viewbox fit. With `fit=stretch` into a box
+        // of another shape the fit scales X and Y differently; shapes follow it, and text never
+        // has -- it keeps its letterforms. Taking the fit into the shear squeezed every label in
+        // such a scene (example 14, seen in game 2026-09-15). The fit is undone first.
+        var sceneMatrix = Matrix4x4.Scale(new Vector3(1f, -1f, 1f)) * _viewboxInverse * frame.Matrix;
+        var shear = LabelShear(sceneMatrix, frame.Scale / _viewboxScaleX);
+        if (shear.HasValue)
+        {
+            var centre = box.center;
+            var across = w * frame.Scale;
+            var down = h * frame.Scale * _viewboxRatio;
+            box = new Rect(centre.x - across * 0.5f, centre.y - down * 0.5f, across, down);
+        }
 
         var paint = ResolvePaint(scene, node, context, frame, stroke: false);
 
@@ -1072,6 +1144,7 @@ internal static class Tessellator
             ClipPolygon = clipPolygon,
             ShapeIndex = shapeIndex,
             Tint = vh.Tint,
+            Shear = shear,
             Gradient = textGradient,
             FirstLine = node.FirstLine?.Scaled(frame.Scale),
         });
@@ -1323,7 +1396,7 @@ internal static class Tessellator
     private static void FillAndStroke(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame, List<Vector2> outline, bool closed)
     {
         if (node.Clickable && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
-            RecordHit(node.Id!, outline, frame.Matrix, context);
+            RecordHit(node.Id!, outline, frame.Matrix, frame.CanvasClip, context);
 
         // Shadows first: they sit beneath the shape, and in declaration order like CSS.
         if (closed)
@@ -2088,7 +2161,7 @@ internal static class Tessellator
         }
     }
 
-    private static void RecordHit(string id, List<Vector2> outline, Matrix4x4 matrix, EvalContext context)
+    private static void RecordHit(string id, List<Vector2> outline, Matrix4x4 matrix, List<Vector2>? clip, EvalContext context)
     {
         if (HitsFound == null || outline.Count == 0)
             return;
@@ -2099,17 +2172,25 @@ internal static class Tessellator
                      .ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
+        var canvas = new Vector2[outline.Count];
         var min = (Vector2)matrix.MultiplyPoint3x4(outline[0]);
         var max = min;
 
-        foreach (var point in outline)
+        for (var i = 0; i < outline.Count; i++)
         {
-            var p = (Vector2)matrix.MultiplyPoint3x4(point);
+            var p = (Vector2)matrix.MultiplyPoint3x4(outline[i]);
+            canvas[i] = p;
             min = Vector2.Min(min, p);
             max = Vector2.Max(max, p);
         }
 
-        HitsFound.Add(new HitRegion { Id = id, Rect = Rect.MinMaxRect(min.x, min.y, max.x, max.y) });
+        HitsFound.Add(new HitRegion
+        {
+            Id = id,
+            Rect = Rect.MinMaxRect(min.x, min.y, max.x, max.y),
+            Outline = canvas,
+            Clip = clip?.ToArray(),
+        });
     }
 
     private static double Elapsed(long mark)

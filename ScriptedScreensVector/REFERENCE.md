@@ -233,9 +233,11 @@ Deciding costs about 0.19 ms per 40,000 vertices — measured on .NET 8, so read
 rather than a figure, since the game runs Mono and the two do not scale together. It is on the
 tessellation worker, not the frame.
 
-**One case it cannot serve:** a label declared before any shape. The surface's own renderer
-draws before its children, so there is nothing to put such a label behind; it stays on top
-rather than disappearing.
+**A label covered by the very first shape** goes under it too. The surface's own renderer
+draws before its children, so in that one case the first mesh is left empty and the geometry
+starts at the second, with the label between them: one extra draw call, only when it happens.
+Before 0.11.21 such a label stayed on top -- a caption drawn over the picture declared after
+it.
 
 **When to reach for `ztext = 0`:** a scene that deliberately floats a readout above artwork
 drawn after it, and wants that regardless of declaration order.
@@ -291,8 +293,13 @@ Applied scale → rotate → translate, about `a`. Nests without limit.
 
 **`m` is a CSS matrix**, `x' = a·x + c·y + e`, `y' = b·x + d·y + f`, and it is the innermost
 factor, as in `transform: translate() rotate() scale() matrix()`: points go through the
-matrix first, then the scale, rotation and translation. Text and stroke widths scale by
+matrix first, then the scale, rotation and translation. Stroke widths scale by
 `sqrt(|ad − bc|)`. A matrix of any other length is a problem, not a silent identity.
+
+**Text follows a skew or an uneven scale** from `m` or `s = {sx, sy}`: the letters lean and
+stretch with the group, as CSS transforms them. The viewbox `fit` is not part of that -- with
+`fit = "stretch"` into a box of another shape, shapes stretch to fill it and text keeps its
+letterforms, as it always has.
 
 **Filters** take CSS's amounts: `bri=1` `con=1` `sat=1` `hue=0` `gray=0` `sep=0` `inv=0` change
 nothing; `gray`, `sep` and `inv` clamp to `0..1`, `hue` is in degrees. Several on one group
@@ -307,10 +314,14 @@ shadows. Two limits:
   tint the picture flat instead. It draws unfiltered and the scene reports it.
 
 **`mask`** is `mask-image` with a gradient: every vertex under the group takes the gradient's
-alpha at its position, and text takes it per glyph vertex. With `units = "bbox"` the gradient
-spans **the group's content**, measured after it is drawn. A two-stop linear mask is exact on
-any geometry; a radial, conic or many-stop one subdivides the triangles it crosses. An
-undeclared gradient is a problem.
+alpha at its position, and text takes it at its glyph corners. With `units = "bbox"` the
+gradient spans **the group's content** -- its shapes and its labels' boxes -- measured after it
+is drawn. A two-stop linear mask is exact on any geometry. A radial, conic or many-stop one cuts
+the group's shapes on a grid of cells a few screen pixels across, so the alpha follows the ramp
+wherever it changes; the cost follows the masked area on screen, and shapes the mask does not
+vary across are left alone. A conic mask is also cut along its start angle, so it keeps the
+hard edge CSS draws there. Text cannot be cut: a letter straddling a conic's start angle fades
+across it rather than being split. An undeclared gradient is a problem.
 
 ```lua
 { op = "G", mask = "@fade_right", gray = 0.6, c = { ... } }
@@ -758,6 +769,11 @@ travels as the event's *value* rather than its id. One handler serves the whole 
 `click = 1` is opt-in and separate from `id`, because an id is also how a node is patched and
 patch targets are common; making all of them swallow clicks would be a surprise. A scene with
 no clickable node stays transparent to the pointer exactly as before.
+
+**A click lands on what is drawn:** inside the node's own outline and inside any clip it is
+drawn through. Before 0.11.21 it was the outline's bounding rectangle, so a circle took clicks
+in its corners, a turned shape across its upright bounds, and a clipped one where the clip had
+cut it away -- including list rows scrolled out of sight.
 
 **A clickable node inside a repeat reports its index.** One node stands for n rows, so the id
 alone cannot say which was hit; the value becomes `id:i`:

@@ -45,7 +45,8 @@ ui:element({
 
             -- 1. WRONG for a surface: 30 separate rectangles, 30 flat tops.
             --    Look closely and the top edge is visibly stepped.
-            { op = "RP", n = 30, c = {
+            -- (24 columns, so it stops short of the path drawn at the top right.)
+            { op = "RP", n = 24, c = {
                 { op = "R", x = "=6+i*3.6", y = WAVE, w = 3.6, h = "=34-(22-6*sin(i*0.45+t*1.6))",
                   f = "#8B4A4A" },
             } },
@@ -73,9 +74,12 @@ ui:element({
               s = "#F59E0B", sw = 2, cap = "round" },
 
             -- 5. P takes SVG path data. Uppercase absolute, lowercase relative.
-            --    Two subpaths make a hole: the largest is the outline, the rest are holes.
+            --    Two subpaths make a hole with fr = "evenodd": every further contour is a hole.
+            --    Under the default, nonzero, an inner contour is a hole only when it winds the
+            --    OTHER way from the outline; these two wind the same way, so without evenodd the
+            --    inner one would be filled as a second region and there would be no hole.
             { op = "P", d = "M 96 8 L 114 8 L 114 44 L 96 44 Z M 101 14 L 109 14 L 109 38 L 101 38 Z",
-              f = "#1E3247" },
+              fr = "evenodd", f = "#1E3247" },
 
             -- 6. fo2: an opacity ramp ALONG EACH COLUMN, from `fo` at the
             --    sampled edge to `fo2` at the far one.

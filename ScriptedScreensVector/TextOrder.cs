@@ -57,13 +57,21 @@ internal static class TextOrder
 
             // Nothing covers it: leave it in the top layer, where every label is today. This
             // is the common case and it is what keeps the mesh in one piece.
-            if (cutBefore <= 0)
+            if (cutBefore < 0)
             {
-                // cutBefore == 0 means the very first shape covers it, and slice 0 is the
-                // surface's own renderer, which always draws before any child. A label
-                // cannot go under that, so it stays on top -- visible text rather than a
-                // label hidden by a mesh nobody can get in front of.
                 placement.SliceDepth = -1;
+                placements[i] = placement;
+                continue;
+            }
+
+            // The very first shape covers it. Slice 0 is the surface's own renderer, which
+            // always draws before any child, so the geometry moves to slice 1 behind an empty
+            // slice 0 and the label goes between them.
+            if (cutBefore == 0)
+            {
+                builder.LeadingEmpty = true;
+                placement.CutVertex = 0;
+                placement.SliceDepth = 0;
                 placements[i] = placement;
                 continue;
             }

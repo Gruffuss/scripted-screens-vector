@@ -68,7 +68,7 @@ ui:element({
     rect = { unit = "px", x = 10, y = 20, w = W / 2 - 15, h = H - 40 },
     props = {
         scene = "ztext_on",
-        w = 200, h = 240,
+        w = 200, h = 240, fit = "contain",   -- even scale: the box is taller than the scene
         -- No ztext here: draw order is what you get without asking.
         root = column("default"),
     },
@@ -79,7 +79,7 @@ ui:element({
     rect = { unit = "px", x = W / 2 + 5, y = 20, w = W / 2 - 15, h = H - 40 },
     props = {
         scene = "ztext_off",
-        w = 200, h = 240,
+        w = 200, h = 240, fit = "contain",   -- even scale: the box is taller than the scene
         ztext = 0,
         root = column("ztext = 0"),
     },

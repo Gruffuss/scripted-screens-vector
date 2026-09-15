@@ -81,7 +81,7 @@ T x=110 y=196 w=90 h=10 text=MATRIX size=7 cspace=2 align=center f=#5A7085
 G clip=ell {
     R x=200 y=160 w=100 h=140 f=#233A52
     RP n=8 { R x==200+i*14 y=160 w=6 h=140 f=#2E4B69 }
-    T x=205 y=175 w=90 h=14 text="L-SHAPED CLIP" size=8 f=#EAF4F8
+    T x=213 y=175 w=76 h=14 text="L-SHAPED CLIP" size=8 f=#EAF4F8
 }
 
 # IMG: uncomment with a URL you trust. Nothing draws until it loads.

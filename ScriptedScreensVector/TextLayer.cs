@@ -238,19 +238,26 @@ internal sealed class TextLayer
         while (_gradients.Count <= index)
             _gradients.Add(null);
 
-        var hadTint = _tints[index] != null || _gradients[index] != null;
+        while (_shears.Count <= index)
+            _shears.Add(null);
+
+        var hadTint = _tints[index] != null || _gradients[index] != null || _shears[index] != null;
         _tints[index] = placement.Tint;
         _gradients[index] = placement.Gradient;
+        _shears[index] = placement.Shear;
         ApplyFirstLine(label, index, placement);
 
         // The recolour happens in TMP's pre-render hook, so the mesh has to be regenerated for
         // it to run. Asking TMP to (havePropertiesChanged) relies on its deferred rebuild, which a
         // capture's rebuild loop swallows -- the colours were lost for good. Rebuilt here instead.
-        if (placement.Tint != null || placement.Gradient != null || hadTint)
+        if (placement.Tint != null || placement.Gradient != null || placement.Shear != null || hadTint)
             label.ForceMeshUpdate();
 
         ApplyShadow(label, index, placement);
     }
+
+    /// <summary>Per placement: a skew or stretch applied to the glyph vertices.</summary>
+    private readonly List<Vector4?> _shears = new();
 
     /// <summary>Per placement: a gradient fill, looked up per glyph vertex.</summary>
     private readonly List<TextGradient?> _gradients = new();
@@ -327,10 +334,11 @@ internal sealed class TextLayer
     {
         var tint = slot < _tints.Count ? _tints[slot] : null;
         var gradient = fill && slot < _gradients.Count ? _gradients[slot] : null;
-        if ((tint == null && gradient == null) || info == null)
+        var shear = slot < _shears.Count ? _shears[slot] : null;
+        if ((tint == null && gradient == null && shear == null) || info == null)
             return;
 
-        var positioned = gradient != null || tint!.NeedsPosition;
+        var positioned = gradient != null || (tint != null && tint.NeedsPosition);
 
         for (var m = 0; m < info.materialCount && m < info.meshInfo.Length; m++)
         {
@@ -341,10 +349,21 @@ internal sealed class TextLayer
             var count = Mathf.Min(mesh.vertexCount, mesh.colors32.Length);
             for (var i = 0; i < count; i++)
             {
+                // A skew or stretch first, about the label's pivot: it is where the glyph really
+                // is, and a gradient or mask must be sampled there.
+                if (shear is { } k && i < mesh.vertices.Length)
+                {
+                    var p = mesh.vertices[i];
+                    mesh.vertices[i] = new Vector3(k.x * p.x + k.y * p.y, k.z * p.x + k.w * p.y, p.z);
+                }
+
                 // Glyph vertices are in the label's space; a mask is written in the surface's.
                 var at = positioned
                     ? _parent.InverseTransformPoint(label.transform.TransformPoint(mesh.vertices[i]))
                     : Vector3.zero;
+
+                if (gradient == null && tint == null)
+                    continue;
 
                 Color colour = mesh.colors32[i];
                 if (gradient != null)
@@ -364,7 +383,7 @@ internal sealed class TextLayer
                     GlyphColours.Creating = false;
                 }
 
-                keeper.Store(mesh.colors32, count);
+                keeper.Store(mesh.colors32, mesh.vertices, count);
             }
         }
     }
@@ -500,6 +519,9 @@ internal sealed class TextLayer
                 copy.gameObject.SetActive(true);
                 Mirror(copy, label, shadow);
                 WriteUnderlay(copy, fit, shadow.Colour, hideFace: true);
+
+                if (NeedsHook(index))
+                    copy.ForceMeshUpdate();
             }
 
             // CSS paints the first shadow on top: the last copy goes lowest.
@@ -590,6 +612,24 @@ internal sealed class TextLayer
             ShaderUtilities.UpdateShaderRatios(material);
             parts.Face.UpdateMeshPadding();
         }
+
+        // A colour set after the glyphs were built only recolours them; the pre-render hook does
+        // not run, so the colours it keeps for screen captures stayed as they were at creation --
+        // a white shade, which is no band at all. Rebuilt here when that hook does something.
+        if (NeedsHook(index))
+        {
+            mask.ForceMeshUpdate();
+            parts.Shade.ForceMeshUpdate();
+            parts.Face.ForceMeshUpdate();
+        }
+    }
+
+    /// <summary>True when this placement's glyphs go through the pre-render hook: a tint, a gradient or a skew.</summary>
+    private bool NeedsHook(int index)
+    {
+        return (index < _tints.Count && _tints[index] != null)
+               || (index < _gradients.Count && _gradients[index] != null)
+               || (index < _shears.Count && _shears[index] != null);
     }
 
     /// <summary>A copy of the label inside the inset mask, moved by an offset in canvas units.</summary>
@@ -907,6 +947,7 @@ internal sealed class TextLayer
         _copies.Clear();
         _insets.Clear();
         _gradients.Clear();
+        _shears.Clear();
         _firstLines.Clear();
         _shadowed.Clear();
     }

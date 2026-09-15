@@ -38,7 +38,7 @@ internal static class ColourFilter
         return -1;
     }
 
-    internal static Color Apply(Color c, int op, float amount)
+    internal static Color Apply(Color c, int op, float amount, bool clamp = true)
     {
         float r = c.r, g = c.g, b = c.b;
 
@@ -106,7 +106,7 @@ internal static class ColourFilter
             }
         }
 
-        return new Color(Mathf.Clamp01(r), Mathf.Clamp01(g), Mathf.Clamp01(b), c.a);
+        return clamp ? new Color(Mathf.Clamp01(r), Mathf.Clamp01(g), Mathf.Clamp01(b), c.a) : new Color(r, g, b, c.a);
     }
 
     private static void Mix(ref float r, ref float g, ref float b,
@@ -135,6 +135,12 @@ internal sealed class MaskInfo
     internal float AlphaAt(Vector3 canvas)
     {
         var local = (Vector2)CanvasToLocal.MultiplyPoint3x4(canvas);
+
+        // A conic's angle is measured in the group's own space, as a conic fill measures it in
+        // the shape's: through bounding-box fractions a wide group would bend every angle.
+        if (Gradient is { Conic: true, BoundingBox: true })
+            return Gradient.Sample(Gradient.ConicParameter(local - (Min + Vector2.Scale(Gradient.Start, Size)))).a;
+
         if (Gradient.BoundingBox)
         {
             local = new Vector2(
@@ -143,6 +149,27 @@ internal sealed class MaskInfo
         }
 
         return Gradient.At(local).a;
+    }
+
+    /// <summary>
+    /// For a conic mask: where its start angle runs, in canvas space. Vertex colours cannot
+    /// carry the jump from 1 back to 0 there, so the mesh is cut along it.
+    /// </summary>
+    internal bool Seam(out Vector2 origin, out Vector2 direction)
+    {
+        origin = Vector2.zero;
+        direction = Vector2.up;
+        if (!Gradient.Conic)
+            return false;
+
+        var centre = Gradient.BoundingBox ? Min + Vector2.Scale(Gradient.Start, Size) : Gradient.Start;
+        var radians = Gradient.Angle * Mathf.Deg2Rad;
+        var heading = new Vector2(Mathf.Sin(radians), -Mathf.Cos(radians));
+
+        var toCanvas = Tessellator.AffineInverse(CanvasToLocal);
+        origin = toCanvas.MultiplyPoint3x4(centre);
+        direction = ((Vector2)toCanvas.MultiplyVector(heading)).normalized;
+        return direction.sqrMagnitude > 0.5f;
     }
 
     /// <summary>Mask alpha range over a triangle: corners, centroid and edge midpoints.</summary>
@@ -183,12 +210,46 @@ internal sealed class VertexTint
     /// <summary>Set after the group's content is known when the mask is `units = "bbox"`.</summary>
     internal MaskInfo? Mask;
 
+    /// <summary>Each filter as a 3x4 matrix (row-major, offset last), built once per group.</summary>
+    private readonly float[] _matrices;
+
     internal VertexTint(VertexTint? parent, List<int> ops, List<float> amounts, MaskInfo? mask)
     {
         Parent = parent;
         _ops = ops.ToArray();
         _amounts = amounts.ToArray();
         Mask = mask;
+
+        // Colour filters were evaluated from scratch for every vertex, cosines and all: 5.7 ms
+        // of a 36 ms rebuild on a test console. They are affine maps, so each becomes a matrix
+        // here and a vertex costs twelve multiplies and a clamp per filter.
+        _matrices = new float[_ops.Length * 12];
+        for (var i = 0; i < _ops.Length; i++)
+        {
+            var r = ColourFilter.Apply(new Color(1f, 0f, 0f, 1f), _ops[i], _amounts[i], clamp: false);
+            var g = ColourFilter.Apply(new Color(0f, 1f, 0f, 1f), _ops[i], _amounts[i], clamp: false);
+            var b = ColourFilter.Apply(new Color(0f, 0f, 1f, 1f), _ops[i], _amounts[i], clamp: false);
+            var o = ColourFilter.Apply(new Color(0f, 0f, 0f, 1f), _ops[i], _amounts[i], clamp: false);
+
+            var m = i * 12;
+            _matrices[m] = r.r - o.r; _matrices[m + 1] = g.r - o.r; _matrices[m + 2] = b.r - o.r; _matrices[m + 3] = o.r;
+            _matrices[m + 4] = r.g - o.g; _matrices[m + 5] = g.g - o.g; _matrices[m + 6] = b.g - o.g; _matrices[m + 7] = o.g;
+            _matrices[m + 8] = r.b - o.b; _matrices[m + 9] = g.b - o.b; _matrices[m + 10] = b.b - o.b; _matrices[m + 11] = o.b;
+        }
+    }
+
+    private Color Filter(Color colour)
+    {
+        for (var i = 0; i < _ops.Length; i++)
+        {
+            var m = i * 12;
+            var r = _matrices[m] * colour.r + _matrices[m + 1] * colour.g + _matrices[m + 2] * colour.b + _matrices[m + 3];
+            var g = _matrices[m + 4] * colour.r + _matrices[m + 5] * colour.g + _matrices[m + 6] * colour.b + _matrices[m + 7];
+            var b = _matrices[m + 8] * colour.r + _matrices[m + 9] * colour.g + _matrices[m + 10] * colour.b + _matrices[m + 11];
+            colour = new Color(Mathf.Clamp01(r), Mathf.Clamp01(g), Mathf.Clamp01(b), colour.a);
+        }
+
+        return colour;
     }
 
     internal bool NeedsPosition => Mask != null || (Parent?.NeedsPosition ?? false);
@@ -197,8 +258,7 @@ internal sealed class VertexTint
 
     internal Color Apply(Color colour, Vector3 canvas)
     {
-        for (var i = 0; i < _ops.Length; i++)
-            colour = ColourFilter.Apply(colour, _ops[i], _amounts[i]);
+        colour = Filter(colour);
 
         if (Mask != null)
             colour.a *= Mask.AlphaAt(canvas);
@@ -209,8 +269,7 @@ internal sealed class VertexTint
     /// <summary>Filters only, for colours with no position: shadow and underlay colours.</summary>
     internal Color ApplyFilters(Color colour)
     {
-        for (var i = 0; i < _ops.Length; i++)
-            colour = ColourFilter.Apply(colour, _ops[i], _amounts[i]);
+        colour = Filter(colour);
 
         return Parent != null ? Parent.ApplyFilters(colour) : colour;
     }

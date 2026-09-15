@@ -20,6 +20,9 @@ internal sealed class GlyphColours : MonoBehaviour
 {
     [SerializeField] private Color32[] _colours = System.Array.Empty<Color32>();
 
+    /// <summary>The glyph positions too: a skewed label is sheared in the same hook.</summary>
+    [SerializeField] private Vector3[] _vertices = System.Array.Empty<Vector3>();
+
     /// <summary>True on the label TextLayer made; a capture's copy is created with it false.</summary>
     [System.NonSerialized] internal bool Owned;
 
@@ -28,12 +31,16 @@ internal sealed class GlyphColours : MonoBehaviour
 
     private TextMeshProUGUI? _label;
 
-    internal void Store(Color32[] colours, int count)
+    internal void Store(Color32[] colours, Vector3[] vertices, int count)
     {
         if (_colours.Length != count)
             _colours = new Color32[count];
 
+        if (_vertices.Length != count)
+            _vertices = new Vector3[count];
+
         System.Array.Copy(colours, _colours, count);
+        System.Array.Copy(vertices, _vertices, Mathf.Min(count, vertices.Length));
     }
 
     private void OnEnable()
@@ -46,7 +53,6 @@ internal sealed class GlyphColours : MonoBehaviour
 
         _label = GetComponent<TextMeshProUGUI>();
         _label.OnPreRenderText += Replay;
-        _label.havePropertiesChanged = true;
     }
 
     private void Replay(TMP_TextInfo info)
@@ -55,10 +61,14 @@ internal sealed class GlyphColours : MonoBehaviour
             return;
 
         var mesh = info.meshInfo[0];
+
         if (mesh.colors32 == null || mesh.colors32.Length < _colours.Length || _colours.Length == 0)
             return;
 
         var count = Mathf.Min(mesh.vertexCount, _colours.Length);
         System.Array.Copy(_colours, mesh.colors32, count);
+
+        if (mesh.vertices != null && mesh.vertices.Length >= count && _vertices.Length >= count)
+            System.Array.Copy(_vertices, mesh.vertices, count);
     }
 }

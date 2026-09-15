@@ -412,7 +412,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         string? hit = null;
         for (var i = 0; i < _hits.Count; i++)
         {
-            if (_hits[i].Rect.Contains(local))
+            if (_hits[i].Contains(local))
                 hit = _hits[i].Id;
         }
 

@@ -72,6 +72,27 @@ internal static class RequirementTests
         run.Check("matrix: e and f translate", Mathf.Abs(moved.x - 7f) < 0.001f && Mathf.Abs(moved.y - 9f) < 0.001f, $"{moved}");
     }
 
+    internal static void LabelShear(TestRun run)
+    {
+        // Scene onto a canvas with the Y flip, as Tessellator builds it.
+        var viewbox = Matrix4x4.Translate(new Vector3(0f, 200f, 0f)) * Matrix4x4.Scale(new Vector3(2f, -2f, 1f));
+
+        var turned = viewbox * Tessellator.GroupMatrix(50f, 50f, 0f, 0f, 37f, 1.5f, 1.5f, null);
+        run.Check("shear: a rotation and even scale leave labels alone", Tessellator.LabelShear(turned, 3f) == null, "");
+
+        // matrix(1,0,-0.5,1): x' = x - 0.5 y. Scene up is -y, so going up the label moves +0.5 in x.
+        var skewed = viewbox * Tessellator.GroupMatrix(0f, 0f, 0f, 0f, 0f, 1f, 1f, new[] { 1f, 0f, -0.5f, 1f, 0f, 0f });
+        var k = Tessellator.LabelShear(skewed, 2f);
+        run.Check("shear: skew goes to the glyphs, up leans right", k is { } s && Mathf.Abs(s.x - 1f) < 0.001f && Mathf.Abs(s.y - 0.5f) < 0.001f && Mathf.Abs(s.w - 1f) < 0.001f,
+            k.HasValue ? k.Value.ToString() : "null");
+
+        // scale(2,1) with the label laid out at the frame's scale of 2: half height left to apply.
+        var wide = viewbox * Tessellator.GroupMatrix(0f, 0f, 0f, 0f, 0f, 2f, 1f, null);
+        var q = Tessellator.LabelShear(wide, 4f);
+        run.Check("shear: a one-axis stretch squashes the other axis", q is { } t && Mathf.Abs(t.x - 1f) < 0.001f && Mathf.Abs(t.w - 0.5f) < 0.001f,
+            q.HasValue ? q.Value.ToString() : "null");
+    }
+
     internal static void Partition(TestRun run)
     {
         var l = new List<Vector2> { new(0, 0), new(100, 0), new(100, 40), new(40, 40), new(40, 100), new(0, 100) };

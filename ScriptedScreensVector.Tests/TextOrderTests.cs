@@ -156,13 +156,14 @@ internal static class TextOrderTests
             $"{slices} meshes over {used} vertices");
     }
 
-    /// <summary>A label before every shape stays visible rather than hiding under slice 0.</summary>
+    /// <summary>A label covered by the very first shape goes under it, behind an empty first mesh.</summary>
     /// <remarks>
-    /// The surface's own renderer draws before any child, so nothing can be placed under it.
-    /// A label in that position keeps the old behaviour — on top — because failing toward
-    /// readable text is better than failing toward a label nobody can see.
+    /// The surface's own renderer draws before any child, so nothing can be placed under slice 0.
+    /// This used to leave such a label on top -- a caption drawn over the picture declared after
+    /// it, seen in game 2026-09-15. Now the first mesh is left empty and the geometry starts at
+    /// slice 1, so the label draws between them. One extra draw call, only in this case.
     /// </remarks>
-    internal static void LabelBeforeAllGeometryStaysVisible(TestRun run)
+    internal static void LabelBeforeAllGeometryGoesUnder(TestRun run)
     {
         var builder = new MeshBuilder();
         builder.TrackBounds(true);
@@ -174,9 +175,18 @@ internal static class TextOrderTests
         var slices = builder.Slices();
         TextOrder.Resolve(labels, builder, slices);
 
-        run.Check("ztext: a label before all geometry is not cut under slice 0",
-            slices == 1 && labels[0].SliceDepth == 1,
+        run.Check("ztext: a label under the first shape draws after an empty first mesh",
+            slices == 2 && labels[0].SliceDepth == 1 && builder.SlicesBefore(builder.ShapeStart(0)) == 1,
             $"{slices} meshes, depth {labels[0].SliceDepth}");
+
+        // Nothing covering it: no empty mesh, one draw call as before.
+        var plain = new MeshBuilder();
+        plain.TrackBounds(true);
+        var free = new List<TextPlacement> { Label(Rect.MinMaxRect(10f, 100f, 60f, 130f), 0) };
+        AddShape(plain, Rect.MinMaxRect(0f, 0f, 100f, 40f));
+        TextOrder.Assign(free, plain);
+        var one = plain.Slices();
+        run.Check("ztext: an uncovered first label adds no mesh", one == 1, $"{one} meshes");
     }
 
     /// <summary>`ztext` must survive the scene-text form, which is how the HTML mod arrives.</summary>

@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.11.21.0</Version>
+	<Version>0.11.22.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -68,6 +68,17 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.11.22[/b]
+[list]
+[*] Text follows a group's skew or uneven scale (m, s), as CSS transforms do; the viewbox fit still leaves letterforms alone.
+[*] Radial and conic masks follow their gradient smoothly on any shape, with no specks, and a conic mask keeps a hard edge at its start angle.
+[*] Fixed: a click landed anywhere in a node's bounding rectangle -- a circle's corners, a clipped shape's cut-away parts, list rows scrolled out of sight. Clicks now land only on what is drawn.
+[*] Fixed: a label covered by the scene's very first shape stayed on top of it.
+[*] Fixed: a gradient mask over a group holding only text hid the text entirely.
+[*] Fixed: screen captures logged an error per masked label and lost masked text afterwards, and showed images white, text without its gradient or filter colours, and inset text shadows missing.
+[*] Inset shadows, masks and colour filters cost less to rebuild.
+[*] Examples: 05's path hole and layout, 13 and 14 no longer stretched, 15's clipped label.
+[/list]
 [b]0.11.21[/b]
 [list]
 [*] [b]Inset shadows[/b] on shapes (sixth sh field "inset", convex shapes) and on text. Text takes several shadows.

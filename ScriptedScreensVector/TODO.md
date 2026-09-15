@@ -44,10 +44,8 @@ the HTML mod's `z-index` cases — has never been looked at for draw-call count.
 one extra draw call per covered label. If a real page ever feels heavy with `ztext = 1` on,
 `vector_stats` reports `across N meshes` and that is the number to read.
 
-**Known limit, by design:** a label declared before any shape cannot be put underneath,
-because the surface's own renderer always draws before its children. It stays on top. Fixing
-that means giving the surface an empty slice 0, which costs a draw call on every scene to
-serve a case nothing has asked for yet.
+**Resolved in 0.11.21:** a label covered by the scene's first shape now goes under it. The
+surface gets an empty slice 0 only in that case, so other scenes pay nothing.
 
 ---
 
