@@ -270,6 +270,7 @@ ignored, so annotations are harmless.
 | `YS` | sampled band — a filled strip |
 | `LS` | sampled polyline — a stroked line |
 | `SP` | spline through literal points |
+| `IMG` | a picture from a URL, in scene order |
 
 ### `G` — group
 
@@ -281,9 +282,39 @@ ignored, so annotations are harmless.
 | `a` | `{x, y}` | anchor the transform pivots about, default `{0, 0}` |
 | `o` | number/expr | group opacity `0..1`, multiplied into all descendants |
 | `clip` | string | id of a `CP` in `defs` |
+| `m` | `{a, b, c, d, e, f}` | CSS `matrix()`, applied after `t r s` (innermost) |
+| `bri` `con` `sat` `hue` `gray` `sep` `inv` | number/expr | colour filters, CSS `filter()` semantics |
+| `mask` | `"@gradient"` | multiplies every colour under the group by the gradient's alpha |
 | `c` | array | child nodes |
 
 Applied scale → rotate → translate, about `a`. Nests without limit.
+
+**`m` is a CSS matrix**, `x' = a·x + c·y + e`, `y' = b·x + d·y + f`, and it is the innermost
+factor, as in `transform: translate() rotate() scale() matrix()`: points go through the
+matrix first, then the scale, rotation and translation. Text and stroke widths scale by
+`sqrt(|ad − bc|)`. A matrix of any other length is a problem, not a silent identity.
+
+**Filters** take CSS's amounts: `bri=1` `con=1` `sat=1` `hue=0` `gray=0` `sep=0` `inv=0` change
+nothing; `gray`, `sep` and `inv` clamp to `0..1`, `hue` is in degrees. Several on one group
+apply **in the order written**, as a CSS filter list does, and a nested group's filters apply
+before its parent's. They reach fills, strokes, feathers, shadows and text, including text
+shadows. Two limits:
+
+- They act on **vertex colours**, so a gradient is filtered at its vertices and interpolated
+  between them. Exact for flat colours; within a triangle, contrast clamping and hue rotation
+  can differ slightly from filtering every pixel.
+- **An `IMG` is not filtered.** Its colour is in the texture, and filtering the vertex would
+  tint the picture flat instead. It draws unfiltered and the scene reports it.
+
+**`mask`** is `mask-image` with a gradient: every vertex under the group takes the gradient's
+alpha at its position, and text takes it per glyph vertex. With `units = "bbox"` the gradient
+spans **the group's content**, measured after it is drawn. A two-stop linear mask is exact on
+any geometry; a radial, conic or many-stop one subdivides the triangles it crosses. An
+undeclared gradient is a problem.
+
+```lua
+{ op = "G", mask = "@fade_right", gray = 0.6, c = { ... } }
+```
 
 ### `RP` — repeat
 
@@ -401,6 +432,8 @@ waveform primitive.
 | `ch` | number/expr | total content height; at or below `h` nothing scrolls |
 | `rx` / `ry` | number/expr | corner radii, same rules and per-corner form as `R` |
 | `o` | number/expr | container opacity, multiplied into all descendants |
+| `so` | number/expr | a scroll offset to jump to — applied only when `sov` changes |
+| `sov` | number/expr | version for `so`; required with it |
 | `c` | array | children, in the enclosing coordinates, translated by the scroll offset |
 
 A group that clips to its own box and slides its children inside it. **Children are written in
@@ -424,6 +457,16 @@ through the chip makes it cost half a second and a slice of the instruction budg
 
 Wheel is a fifth of the viewport per notch; drag moves content with the pointer. Both clamp to
 `0 .. ch - h`, so a container whose content fits cannot be moved at all.
+
+**Setting the offset from a script: `so` and `sov`.** `so` alone would pin the list, fighting
+every wheel notch. Instead the offset is applied **once per new `sov`**: bump the version when
+the script wants to jump (to the newest log line, to a selected row), and the player's wheel
+and drag own the offset again straight after. Both may be data bindings:
+
+```lua
+{ op = "SC", id = "log", x = 4, y = 20, w = 192, h = 120, ch = 480,
+  so = "=$jump_to", sov = "=$jump_version", c = { ... } }
+```
 
 **`sy` and `vh` report *this* container inside it.** `sy` is the scroll offset, **zero at
 rest**, and `vh` is the container's height -- so pinned artwork is written at the container's
@@ -451,8 +494,8 @@ container, where it will be clipped away and look like nothing happened.
 - **No scrollbar is drawn.** Draw one: with the container at `y`, a thumb of height
   `h*h/ch` sits at `y + sy + sy*(h - h*h/ch)/(ch - h)`. Two expressions, and a scene that
   wants a different indicator is not fighting a built-in one.
-- **A text node inside is clipped by the container's box**, which is the case RectMask2D
-  handles. Rounded corners cut geometry but not text; see `T`.
+- **A text node inside is clipped by the container's box.** A square box uses RectMask2D; a
+  rounded one masks text to its real outline with a stencil. See `T`.
 
 ### `T` — text
 
@@ -466,14 +509,15 @@ container, where it will be clipped away and look like nothing happened.
 | `size` | font size in scene units; scales with the transform |
 | `f` | colour, as on any shape |
 | `fo` | opacity `0..1`, as on any shape; multiplied by the enclosing group's `o` |
-| `align` | `left` (default), `center`, `right` |
+| `align` | `left` (default), `center`, `right`, `justified` (extra width goes between words, as CSS) |
 | `valign` | `top` (default), `middle`, `bottom` |
 | `font` | a registered TMP family, e.g. from the companion fonts mod |
 | `weight` | `bold`, or a number ≥ 600 |
 | `cspace` | character spacing |
 | `wrap` | `1` lets the text run to more than one line inside its box |
 | `lh` | line height as a multiple of the font size, CSS style; omitted uses the font's own |
-| `sh` | one drop shadow, drawn by the font's underlay — see Shadows |
+| `sh` | text shadows, several allowed, one of them `inset` — see Shadows |
+| `fl` | first-line overrides, `"f=#fff size=12 weight=bold font='Name'"` — see below |
 | `fit` | `none` (default), `ellipsis`, `shrink` |
 | `min_size` | floor for `shrink` |
 
@@ -493,6 +537,23 @@ rather than as a long string. A paragraph says so:
 
 `lh` is a multiple, as in CSS `line-height: 1.4`, not an absolute.
 
+**`f` may be a gradient.** `f = "@name"` samples the gradient at every glyph's corners, so a
+linear ramp is exact within each glyph and continuous across the label; radial and conic are
+exact at the corners and interpolated between them. With `units = "bbox"` the ramp spans the
+text's box (`x y w h`), not the glyphs' ink. Rich-text `<color>` tags multiply into it. It is the
+face only: text shadows keep their own colours, and a text outline is not supported.
+
+**`fl` styles the first line**, like CSS `::first-line`: a string of `f`, `size` (scene units,
+scaled like `size`), `weight` and `font`, quoted where a value has spaces. Only the text engine
+knows where a line breaks, so the label is laid out once, the break read, and rich tags placed
+around that span; if the tags move the break, it is placed once more. Recomputed only when the
+text, box or style changes.
+
+```lua
+{ op = "T", x = 8, y = 8, w = 180, h = 60, wrap = 1, text = "$body",
+  size = 9, fl = "size=12 weight=bold f=#EAF4F8" }
+```
+
 **Text is not part of the mesh, and that shapes what it can do.** TMP builds its own geometry
 on its own GameObject and is main-thread only, while tessellation runs on a worker — so the
 walk records where each `T` landed and the labels are created and updated when the job lands.
@@ -503,7 +564,8 @@ walk records where each `T` landed and the labels are created and updated when t
 | fade with the group | **yes** — `o` and `fo` reach the label as its own alpha |
 | updates from `data` | **yes** — strings are data values now, so `text = "$name"` works like a number |
 | rich text, registered fonts | **yes** — it is real TMP |
-| clipping | **axis-aligned rect only**, via `RectMask2D`. A rounded or rotated clip does not cut text until stencil clipping lands |
+| clipping | **to the clip's real outline.** An axis-aligned rectangle uses `RectMask2D`; a rounded, elliptical or concave clip masks through the stencil, at one extra draw call per masked label |
+| filters and masks | **yes** — a group's filters and `mask` reach the glyphs' vertex colours |
 | update rate | at the **rebuild** rate, not instantly |
 
 `ellipsis` and `shrink` are TMP's own overflow modes, so fitting is done by the engine that
@@ -575,6 +637,36 @@ Catmull-Rom, so the curve passes **through** its points rather than being pulled
 
 ---
 
+### `IMG` — image
+
+| Key | Meaning |
+|-----|---------|
+| `x`, `y`, `w`, `h` | the box |
+| `src` | URL (`https://`, `file://`) |
+| `fit` | `fill` (default, stretch), `contain`, `cover` — CSS `object-fit` |
+| `rx` / `ry` | corner radii, as `R` |
+| `o` | opacity `0..1`, multiplied by the enclosing group's |
+| `uv` | `{u0, v0, u1, v1}`: the part of the picture shown, fractions of the texture, **v from the top**; default `{0, 0, 1, 1}` |
+
+```
+IMG x=10 y=10 w=80 h=45 src=https://example.com/map.png fit=cover rx=6
+```
+
+**Nothing is drawn until the picture has loaded**, then the surface rebuilds once. Each source is
+fetched once per session and shared by every console that uses it. A failed load is a scene
+problem naming the error.
+
+An image draws **in scene order**: shapes declared after it cover it and ones before it are
+underneath. That needs a mesh of its own, so each image is one more draw call. Clips, masks and
+group opacity apply; colour filters do not — see `G`.
+
+`contain` draws only where the picture is, leaving the rest of the box empty; `cover` fills
+the box and crops the picture's long side. Corner radii cut the box in all three.
+
+With `uv`, the cropped part is the picture: `fit` works from its size, not the texture's. That is
+what a sprite sheet, a nine-slice border (nine `IMG` nodes) or canvas `drawImage` with a source
+rectangle needs.
+
 ## Paint
 
 Applies to any shape node.
@@ -585,6 +677,11 @@ Applies to any shape node.
 |-----|---------|
 | `f` | `#rrggbb`, `#rrggbbaa`, `@gradientId`, `$dataName`, `none`, or a gradient sample (below) |
 | `fo` | fill opacity `0..1`, expression-capable |
+
+**Opacity blends in linear light**, the way the game's UI does, not in the sRGB numbers a browser
+averages. Half-opaque `#EAF4F8` over `#0D161C` shows as about `#ACB5B7`, where a browser shows
+`#7B858A`, so anything faded reads lighter than the same value in a CSS mockup. Applies to every
+alpha: `fo`, `so`, `o`, colour alpha, gradients, masks and shadows.
 | `fr` | `nonzero` (default) or `evenodd` |
 
 **Gradient sample** — the way to animate a colour:
@@ -597,6 +694,16 @@ Samples the ramp at an expression and yields a flat colour. Needed because the e
 evaluator is scalar: `f = "=lerp(...)"` has nothing to return, since a colour is not a number.
 
 **The same form works on `s`**, so an outline can follow a value exactly as a fill does.
+
+**In the text scene format**, which has no map syntax, write it as `fat` and `sat`:
+
+```
+R x=10 y=10 w=80 h=20 f=@status fat==clamp($level,0,1)
+L p=[10,40,90,40] s=@status sat==$level sw=2
+```
+
+`fat` samples the fill's gradient and `sat` the stroke's; both need `f` / `s` to be a
+`@gradient`, and both work on `T`.
 
 **Fill rules.** `evenodd`: every further contour is a hole. `nonzero`: a contour is a hole
 only when wound *against* the outer one. This is a winding comparison, exact for nested
@@ -672,12 +779,16 @@ ring will claim more than it draws.
 
 | Key | Meaning |
 |-----|---------|
-| `sh` | list of drop shadows, `{ { dx, dy, blur, spread, "#rrggbbaa" }, ... }` |
+| `sh` | list of shadows, `{ { dx, dy, blur, spread, "#rrggbbaa" [, "inset"] }, ... }` |
 
 CSS `box-shadow` semantics and order: the shape offset by `dx`/`dy`, grown by `spread`,
 filled with the colour, blurred with a Gaussian whose sigma is **half** the blur radius,
 drawn beneath the shape. Several compose in declaration order. A single shadow may be
 written unwrapped.
+
+**Shadows fade with their shape**: the group's `o` and the shape's `fo` multiply into the shadow,
+as CSS `opacity` takes a box-shadow with its box. Before 0.11.21 they did not, and a faded card
+kept a full-strength halo. The shadow colour's own alpha is separate and unaffected.
 
 ```lua
 { op = "R", x = 8, y = 8, w = 60, h = 28, rx = 14, f = "#FFFFFF",
@@ -697,7 +808,17 @@ boolean this renderer does not have.
 builds its own mesh above ours — so a `T` shadow is the SDF shader's underlay instead. Same
 `sh` syntax, three differences:
 
-- **One shadow only.** The underlay is a single layer. A second is reported, not drawn.
+- **Several are allowed.** The first outset shadow uses the label's own underlay; every further
+  one is drawn by another copy of the label beneath it, the last written lowest as CSS stacks
+  them. Each copy is a TMP object, so a label with three shadows costs three labels.
+- **`inset` works on text too.** Inside the glyphs (a copy of the label used as a stencil
+  mask), the letters are painted in the shadow colour and the face is painted back over them
+  moved by the offset, so the shadow shows along the edges facing away from it. Blur softens and
+  spread shrinks that moved face, so those two share the padding budget below; the offset is a
+  position and does not. One inset shadow per label; a second is reported. Costs three more TMP
+  objects and a stencil pass. CSS has no inset text shadow.
+  TMP's own inner underlay (`UNDERLAY_INNER`) is not used: the game's text shaders declare it
+  but draw nothing with it, checked four ways on a console.
 - **Blur and spread are capped by the font's SDF padding.** They share one budget of roughly
   `gradientScale` atlas texels, which for the game's LiberationSans works out to about
   `fontSize / 8.65` canvas units. A request past it is scaled down *as a whole*, so the shadow
@@ -721,7 +842,17 @@ builds its own mesh above ours — so a `T` shadow is the SDF shader's underlay 
   a translucent shape does not darken over its own shadow. That needs a polygon boolean here.
   Opaque shapes are unaffected; a translucent one will read darker than the mockup. Geometry
   only — the text underlay draws strictly behind its glyphs and has no such problem.
-- `inset` is not implemented.
+- **`inset`** — a sixth field `"inset"` (or `1`) — draws inside the shape, over the fill and
+  under the stroke: the shape moved by `dx`/`dy` and shrunk by `spread`, inverted, blurred and
+  clipped to the shape, as CSS draws it. Needs a **convex** outline (`R`, `C`, a convex `Y`, `SP`
+  or `P`); a concave one is refused with a problem rather than leaking past its edges. Costs
+  roughly three times the vertices of an outset shadow of the same blur, since its rings are cut
+  to the shape triangle by triangle.
+
+  ```lua
+  { op = "R", x = 8, y = 8, w = 120, h = 40, rx = 8, f = "#0B1622",
+    sh = { { 0, 2, 6, 0, "#00000099", "inset" } } }
+  ```
 
 Blending is straight source-over on sRGB bytes — the space the colours are written in — so a
 shadow composites at the value the design specifies.
@@ -822,6 +953,27 @@ corners, so the bands took the box's shape. Outlines now get a point every 2.5 s
 before rings are built. Measured on a 90x50 box: about 16,000–21,000 vertices at any size,
 where the subdivided fill grew from 43,000 to 99,000 with size.
 
+### `GC` — conic gradient
+
+| Key | Meaning |
+|-----|---------|
+| `id` | name |
+| `cx`, `cy` | centre |
+| `a` | start angle, degrees **clockwise from twelve o'clock**, as CSS `conic-gradient(from a)` |
+| `units` | as above; with `bbox` the centre is a fraction of the shape's box |
+| `stops` | as above, positions `0..1` around the turn |
+
+```lua
+{ op = "GC", id = "dial", cx = 0.5, cy = 0.5, a = -120, units = "bbox",
+  stops = { { 0, "#5FD9A8" }, { 0.66, "#F59E0B" }, { 1, "#E23D3D" } } }
+```
+
+The angle is measured in the **shape's own space**, so in `bbox` units a wide box does not bend
+the angles. A convex shape is filled as wedges from the centre, one per ~2.5 screen pixels of
+rim, aligned so no triangle crosses the start angle — which is what gives the hard edge CSS
+draws there when the ends of the ramp differ. A concave shape falls back to subdivision, where
+the seam is resolved to the subdivision's depth rather than exactly.
+
 ### `SYM` / `USE` — symbols
 
 Declare a reusable subtree in `defs`, instantiate it anywhere:
@@ -889,9 +1041,15 @@ the same group.
 | `id` | name, referenced from a group's `clip` |
 | `c` | one shape |
 
-**Must be convex** — rectangle, rounded rectangle, ellipse, convex polygon. Outlines are in
+Rectangle, rounded rectangle, ellipse, polygon or path — **convex or not**. Outlines are in
 **scene coordinates** and stay put when the referencing group is transformed. Clip outlines
-are static; `t` inside one is silently constant.
+are static; `t` inside one is silently constant. A path clips to its outer contour.
+
+**A concave clip costs more than a convex one.** Clipping stays geometric: the outline is split
+into convex pieces and every shape under the group is emitted once per piece, so an L-shaped
+clip that splits in two doubles the vertices of what it clips. Pieces meet exactly, so there is
+no seam and no double coverage. Text under it is masked to the true outline with a stencil,
+and hit regions and labels are recorded once.
 
 A clipped fill cannot carry holes; they are dropped with a warning.
 
@@ -1008,9 +1166,7 @@ according to `fit`.
 | | Why |
 |---|---|
 | blur and backdrop effects | need an offscreen pass or a custom shader. Drop shadows **are** supported — see `sh` |
-| text in a gradient, or clipped to a rounded shape | `T` is a real TMP child, so its fill is flat and its clip is an axis-aligned rect |
 | horizontal scrolling | `SC` is vertical only |
-| non-convex clipping | needs a stencil buffer; convex covers every layout so far |
 | self-intersecting fills | ear clipping is undefined on them; detection costs more than the fill |
 | holes inside a clipped fill | needs boolean subtraction |
 | expressions in `d` or in gradient coordinates | both are static; use `units = "bbox"` |

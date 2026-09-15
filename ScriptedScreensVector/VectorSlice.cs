@@ -36,6 +36,20 @@ internal sealed class VectorSlice : MaskableGraphic
         raycastTarget = false;
     }
 
+    [SerializeField] private Texture? _texture;
+
+    /// <summary>An `IMG` texture when this slice carries one, else the default white.</summary>
+    public override Texture mainTexture => _texture != null ? _texture : base.mainTexture;
+
+    internal void SetTexture(Texture? texture)
+    {
+        if (_texture == texture)
+            return;
+
+        _texture = texture;
+        SetMaterialDirty();
+    }
+
     /// <summary>Shows one slice of the surface's geometry.</summary>
     internal void Present(MeshBuilder builder, int slice)
     {

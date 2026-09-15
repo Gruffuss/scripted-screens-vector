@@ -88,6 +88,7 @@ internal static class Tessellator
 
     /// <summary>Clickable node bounds found during the walk, in draw order.</summary>
     [ThreadStatic] internal static List<HitRegion>? HitsFound;
+    [ThreadStatic] internal static List<ImagePlacement>? ImagesFound;
 
     [ThreadStatic] internal static List<ScrollRegion>? ScrollsFound;
 
@@ -196,7 +197,19 @@ internal static class Tessellator
         /// which is exactly how this reached a user instead of a test.
         /// </remarks>
         internal Matrix4x4 SceneToLocal;
+
+        /// <summary>
+        /// A concave clip, as convex pieces in local coordinates. When set, <see cref="Clip"/>
+        /// is unused and every leaf is emitted once per piece.
+        /// </summary>
+        internal List<ClipRegion>? Pieces;
+
+        /// <summary>The whole clip outline in canvas space, for masking labels. Null when unclipped.</summary>
+        internal List<Vector2>? CanvasClip;
     }
+
+    /// <summary>True on the second and later piece of a concave clip: geometry only, no text, hits or scrolls.</summary>
+    [ThreadStatic] private static bool _repeatPiece;
 
     /// <summary>
     /// Tessellates a scene and harvests its diagnostics before returning.
@@ -225,6 +238,10 @@ internal static class Tessellator
         stats.Hits.Clear();
         if (HitsFound != null)
             stats.Hits.AddRange(HitsFound);
+
+        stats.Images.Clear();
+        if (ImagesFound != null)
+            stats.Images.AddRange(ImagesFound);
 
         stats.Starved = PeekStarved();
         _starved = null;
@@ -261,6 +278,7 @@ internal static class Tessellator
 
         (TextFound ??= new List<TextPlacement>(16)).Clear();
         (HitsFound ??= new List<HitRegion>(16)).Clear();
+        (ImagesFound ??= new List<ImagePlacement>(4)).Clear();
         (ScrollsFound ??= new List<ScrollRegion>(4)).Clear();
 
         vh.TrackBounds(scene.TextInOrder);
@@ -362,14 +380,135 @@ internal static class Tessellator
             VecOp.Rect => RectOutline(node, context, 1f),
             VecOp.Ellipse => EllipseOutline(node, context),
             VecOp.Polyline => FromFlat(node.Points),
+            VecOp.Path => PathOutline(node),
             _ => new List<Vector2>(),
         };
+    }
+
+    private static List<Vector2> PathOutline(VecNode node)
+    {
+        if (node.Path == null || node.Path.IsEmpty)
+            return new List<Vector2>();
+
+        // Flattened at a fine fixed scale: a clip outline is built once, not per rebuild.
+        var outer = Outermost(node.Path.Flatten(4f));
+        return outer == null ? new List<Vector2>() : new List<Vector2>(outer);
+    }
+
+    private static bool IsLeaf(VecOp op)
+    {
+        return op is VecOp.Rect or VecOp.Ellipse or VecOp.Band or VecOp.Polyline or VecOp.SampledLine
+            or VecOp.Spline or VecOp.Path or VecOp.Image;
+    }
+
+    /// <summary>Emits a leaf once per piece of a concave clip.</summary>
+    private static void EmitPieces(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
+    {
+        var frame = stack.Pop();
+        var saved = _repeatPiece;
+
+        for (var k = 0; k < frame.Pieces!.Count; k++)
+        {
+            var piece = frame;
+            piece.Pieces = null;
+            piece.Clip = frame.Pieces[k];
+            stack.Push(piece);
+
+            _repeatPiece = saved || k > 0;
+            EmitNode(vh, scene, node, context, stack, ref emitted);
+            stack.Pop();
+        }
+
+        _repeatPiece = saved;
+        stack.Push(frame);
+    }
+
+    /// <summary>
+    /// A child frame's clip: the parent's (single region or pieces) re-expressed through
+    /// <paramref name="inverse"/>, intersected with an outline of its own in local space.
+    /// </summary>
+    private static void CombineClip(Frame parent, Matrix4x4 inverse, List<Vector2>? own, out ClipRegion? clip, out List<ClipRegion>? pieces)
+    {
+        List<ClipRegion>? inherited = null;
+        if (parent.Pieces != null)
+        {
+            inherited = new List<ClipRegion>(parent.Pieces.Count);
+            foreach (var piece in parent.Pieces)
+                inherited.Add(piece.Transform(inverse));
+        }
+        else if (parent.Clip != null)
+        {
+            inherited = new List<ClipRegion> { parent.Clip.Transform(inverse) };
+        }
+
+        if (own == null)
+        {
+            clip = inherited is { Count: 1 } ? inherited[0] : null;
+            pieces = inherited is { Count: 1 } ? null : inherited;
+            return;
+        }
+
+        var parts = ConvexPartition.Split(own);
+        var result = new List<ClipRegion>();
+
+        foreach (var part in parts)
+        {
+            if (inherited == null)
+            {
+                var region = ClipRegion.FromPolygon(part);
+                if (region != null)
+                    result.Add(region);
+
+                continue;
+            }
+
+            foreach (var outer in inherited)
+            {
+                var region = ClipRegion.FromPolygon(new List<Vector2>(outer.ClipPolygon(part)));
+                if (region != null)
+                    result.Add(region);
+            }
+        }
+
+        // One piece is an ordinary convex clip. None means nothing inside survives, which is
+        // an empty piece list rather than "unclipped".
+        clip = result.Count == 1 ? result[0] : null;
+        pieces = result.Count == 1 ? null : result;
+    }
+
+    /// <summary>A label's clip outline in canvas space: its own, cut by the parent's when that one is convex.</summary>
+    private static List<Vector2>? CombineCanvasClip(List<Vector2>? parent, List<Vector2>? own)
+    {
+        if (own == null)
+            return parent;
+
+        if (parent == null)
+            return own;
+
+        // ponytail: a concave parent is not intersected; the label keeps its own outline.
+        var region = Tessellator.IsConvex(parent) ? ClipRegion.FromPolygon(parent) : null;
+        return region == null ? own : new List<Vector2>(region.ClipPolygon(own));
+    }
+
+    private static List<Vector2> ToCanvas(Matrix4x4 matrix, List<Vector2> points)
+    {
+        var result = new List<Vector2>(points.Count);
+        foreach (var point in points)
+            result.Add(matrix.MultiplyPoint3x4(point));
+
+        return result;
     }
 
     private static void EmitNode(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
     {
         if (Starved(vh, 1, "a node"))
             return;
+
+        if (stack.Peek().Pieces != null && IsLeaf(node.Op))
+        {
+            EmitPieces(vh, scene, node, context, stack, ref emitted);
+            return;
+        }
 
         switch (node.Op)
         {
@@ -379,19 +518,16 @@ internal static class Tessellator
                 var parent = stack.Peek();
                 var anchor = new Vector2(node.Ax.Evaluate(context), node.Ay.Evaluate(context));
 
-                // Spec order: scale, then rotate, then translate, all about the anchor.
-                var local =
-                    Matrix4x4.Translate(new Vector3(node.Tx.Evaluate(context), node.Ty.Evaluate(context), 0f)) *
-                    Matrix4x4.Translate(anchor) *
-                    Matrix4x4.Rotate(Quaternion.Euler(0f, 0f, -node.Rotate.Evaluate(context))) *
-                    Matrix4x4.Scale(new Vector3(node.Sx.Evaluate(context), node.Sy.Evaluate(context), 1f)) *
-                    Matrix4x4.Translate(-anchor);
+                var sx = node.Sx.Evaluate(context);
+                var local = GroupMatrix(
+                    node.Tx.Evaluate(context), node.Ty.Evaluate(context), anchor.x, anchor.y,
+                    node.Rotate.Evaluate(context), sx, node.Sy.Evaluate(context), node.GroupMatrix);
 
                 // An inherited clip was expressed in the parent's coordinates; re-express it
                 // in this group's, so it keeps clipping the same area of the picture.
-                var inverse = local.inverse;
-                var clip = parent.Clip?.Transform(inverse);
+                var inverse = AffineInverse(local);
                 var sceneToLocal = inverse * parent.SceneToLocal;
+                List<Vector2>? ownOutline = null;
 
                 if (!string.IsNullOrEmpty(node.ClipRef))
                 {
@@ -404,19 +540,13 @@ internal static class Tessellator
                         foreach (var point in declared)
                             outline.Add(sceneToLocal.MultiplyPoint3x4(point));
 
-                        // Intersecting two convex regions: clip one boundary by the other.
-                        // The result is still convex, so the half-plane representation
-                        // survives.
-                        var own = clip == null ? outline : clip.ClipPolygon(outline);
-                        var region = ClipRegion.FromPolygon(own);
-
                         // A rejected clip used to fall back to NO clip, which is the least
                         // safe default available: "draw everything" rather than "draw
                         // nothing" or "complain".
-                        if (region == null)
+                        if (Mathf.Abs(Triangulator.SignedArea(outline)) < 0.000001f)
                             scene.Problem($"clip \"{node.ClipRef}\" is degenerate; group drawn unclipped");
-
-                        clip = region ?? clip;
+                        else
+                            ownOutline = outline;
                     }
                     else
                     {
@@ -424,22 +554,39 @@ internal static class Tessellator
                     }
                 }
 
+                // Convex clips intersect into one region; a concave one becomes convex pieces,
+                // each intersected with whatever this group inherited.
+                CombineClip(parent, inverse, ownOutline, out var clip, out var pieces);
+                var canvasClip = CombineCanvasClip(parent.CanvasClip,
+                    ownOutline == null ? null : ToCanvas(parent.Matrix * local, ownOutline));
+
+                var matrixScale = node.GroupMatrix is { } gm
+                    ? Mathf.Sqrt(Mathf.Abs(gm[0] * gm[3] - gm[1] * gm[2]))
+                    : 1f;
+
                 stack.Push(new Frame
                 {
                     Matrix = parent.Matrix * local,
                     Opacity = parent.Opacity * Mathf.Clamp01(node.Opacity.Evaluate(context)),
                     Clip = clip,
-                    Scale = parent.Scale * Mathf.Abs(node.Sx.Evaluate(context)),
+                    Pieces = pieces,
+                    CanvasClip = canvasClip,
+                    Scale = parent.Scale * Mathf.Abs(sx) * matrixScale,
                     SceneToLocal = sceneToLocal,
                 });
+
+                // Filters and a mask tint every colour emitted under the group, labels included.
+                var savedTint = vh.Tint;
+                if (node.Filters != null || node.MaskGradient != null)
+                    vh.Tint = GroupTint(vh, scene, node, context, parent.Matrix * local);
 
                 // Charged before descending, so a group's own cost (transform build, clip
                 // re-expression) is separated from its children's.
                 Charge(VecOp.Group, mark);
 
-                foreach (var child in node.Children)
-                    EmitNode(vh, scene, child, context, stack, ref emitted);
+                EmitGroupChildren(vh, scene, node, context, stack, ref emitted, vh.Tint == savedTint ? null : vh.Tint!.Mask);
 
+                vh.Tint = savedTint;
                 stack.Pop();
                 break;
             }
@@ -531,9 +678,18 @@ internal static class Tessellator
                 break;
             }
 
+            case VecOp.Image:
+            {
+                var mark = Stopwatch.GetTimestamp();
+                EmitImage(vh, scene, node, context, stack.Peek());
+                emitted++;
+                Charge(VecOp.Image, mark);
+                break;
+            }
+
             case VecOp.Text:
             {
-                CollectText(scene, node, context, stack.Peek(), vh.ShapeCount);
+                CollectText(vh, scene, node, context, stack.Peek(), vh.ShapeCount);
                 emitted++;
                 break;
             }
@@ -563,6 +719,203 @@ internal static class Tessellator
     /// enforce, and anything rounder waits for the stencil path.
     /// </remarks>
     /// <summary>
+    /// A group's local transform: scale, rotate, then translate about the anchor, with an
+    /// optional CSS matrix() innermost.
+    /// </summary>
+    /// <remarks>
+    /// Built by hand rather than through <c>Quaternion.Euler</c>, which is a native call: that
+    /// kept every rotated group out of the headless tests. The rotation matches what
+    /// <c>Matrix4x4.Rotate(Quaternion.Euler(0, 0, -r))</c> produced -- counter-clockwise in the
+    /// flipped canvas, clockwise on screen, as scenes are written.
+    ///
+    /// CSS reads `transform: translate rotate scale matrix` left to right as matrices multiplied
+    /// in that order, so the matrix is the innermost factor and acts on points first.
+    /// </remarks>
+    internal static Matrix4x4 GroupMatrix(float tx, float ty, float ax, float ay, float rotateDegrees, float sx, float sy, float[]? m)
+    {
+        var radians = -rotateDegrees * Mathf.Deg2Rad;
+        var cos = Mathf.Cos(radians);
+        var sin = Mathf.Sin(radians);
+
+        var rotation = Matrix4x4.identity;
+        rotation.m00 = cos;
+        rotation.m01 = -sin;
+        rotation.m10 = sin;
+        rotation.m11 = cos;
+
+        var css = Matrix4x4.identity;
+        if (m is { Length: 6 })
+        {
+            // matrix(a, b, c, d, e, f): x' = a x + c y + e, y' = b x + d y + f.
+            css.m00 = m[0];
+            css.m10 = m[1];
+            css.m01 = m[2];
+            css.m11 = m[3];
+            css.m03 = m[4];
+            css.m13 = m[5];
+        }
+
+        return Matrix4x4.Translate(new Vector3(tx, ty, 0f)) *
+               Matrix4x4.Translate(new Vector3(ax, ay, 0f)) *
+               rotation *
+               Matrix4x4.Scale(new Vector3(sx, sy, 1f)) *
+               css *
+               Matrix4x4.Translate(new Vector3(-ax, -ay, 0f));
+    }
+
+    /// <summary>Inverse of a 2-D affine matrix, without the native <c>Matrix4x4.inverse</c>.</summary>
+    internal static Matrix4x4 AffineInverse(Matrix4x4 m)
+    {
+        var det = m.m00 * m.m11 - m.m01 * m.m10;
+        if (Mathf.Abs(det) < 1e-12f)
+            return Matrix4x4.identity;
+
+        var i = Matrix4x4.identity;
+        i.m00 = m.m11 / det;
+        i.m01 = -m.m01 / det;
+        i.m10 = -m.m10 / det;
+        i.m11 = m.m00 / det;
+        i.m03 = -(i.m00 * m.m03 + i.m01 * m.m13);
+        i.m13 = -(i.m10 * m.m03 + i.m11 * m.m13);
+        return i;
+    }
+
+    /// <summary>The tint a group applies: its filters, evaluated now, over its parent's.</summary>
+    private static VertexTint GroupTint(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Matrix4x4 groupMatrix)
+    {
+        var ops = new List<int>();
+        var amounts = new List<float>();
+
+        if (node.Filters != null)
+        {
+            foreach (var (op, amount) in node.Filters)
+            {
+                ops.Add(op);
+                amounts.Add(amount.Evaluate(context));
+            }
+        }
+
+        MaskInfo? mask = null;
+        if (node.MaskGradient != null)
+        {
+            if (scene.Gradients.TryGetValue(node.MaskGradient, out var gradient))
+                mask = new MaskInfo { Gradient = gradient, CanvasToLocal = AffineInverse(groupMatrix) };
+            else
+                scene.Problem($"mask gradient \"{node.MaskGradient}\" is not declared in defs");
+        }
+
+        return new VertexTint(vh.Tint, ops, amounts, mask);
+    }
+
+    /// <summary>Emits a group's children, then multiplies its mask into what they drew.</summary>
+    /// <remarks>
+    /// The mask is applied after the children rather than per vertex as they are added, because
+    /// a `units = "bbox"` mask spans the group's content and that is only known once it exists.
+    /// Labels read the same <see cref="MaskInfo"/> later, by which time its bounds are set.
+    /// </remarks>
+    private static void EmitGroupChildren(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted, MaskInfo? mask)
+    {
+        var from = vh.currentVertCount;
+
+        foreach (var child in node.Children)
+            EmitNode(vh, scene, child, context, stack, ref emitted);
+
+        if (mask != null)
+            vh.MaskRange(from, mask, NeedsRefinement(new Paint(Color.white, mask.Gradient, 1f)));
+    }
+
+    /// <summary>
+    /// A conic fill as wedges from its centre, each coloured within its own span of angles.
+    /// </summary>
+    /// <remarks>
+    /// Vertex colours cannot cross the seam where 360 degrees meets 0: a triangle spanning it
+    /// blends from one end of the ramp to the other, straight through every colour between.
+    /// Wedges start exactly at the gradient's start angle, and each vertex's angle is taken
+    /// relative to its own wedge's middle, so no triangle ever interpolates across the seam --
+    /// and a ramp whose ends differ gets the hard edge CSS draws there.
+    ///
+    /// Wedges are cut from a convex outline with the convex clipper, so this path needs a convex
+    /// shape; anything else falls back to triangulation with subdivision.
+    /// </remarks>
+    private static void FillConicWedges(MeshBuilder vh, List<Vector2> contour, Paint paint, Matrix4x4 matrix, float scale)
+    {
+        var gradient = paint.Gradient!;
+        var region = ClipRegion.FromPolygon(contour);
+        if (region == null)
+            return;
+
+        var centre = paint.FromGradientSpace(gradient.Start);
+
+        var radius = 0f;
+        foreach (var point in contour)
+            radius = Mathf.Max(radius, (point - centre).magnitude);
+
+        if (radius < 0.0001f)
+            return;
+
+        var wedges = ConicWedges(radius * scale * ScreenScale, gradient.StopCount);
+        var step = 360f / wedges;
+        var reach = radius * 2f + 1f;
+
+        var triangle = QuadScratch;
+        var piece = new List<Vector2>(8);
+
+        for (var k = 0; k < wedges; k++)
+        {
+            var from = gradient.Angle + k * step;
+            var middle = from + step * 0.5f;
+
+            triangle.Clear();
+            triangle.Add(centre);
+            triangle.Add(centre + Direction(from) * reach);
+            triangle.Add(centre + Direction(from + step) * reach);
+
+            var cut = region.ClipPolygon(triangle, piece);
+            if (cut.Count < 3 || Starved(vh, cut.Count, "a conic gradient"))
+                continue;
+
+            var origin = vh.currentVertCount;
+            foreach (var point in cut)
+            {
+                var offset = point - centre;
+                var relative = offset.sqrMagnitude < 1e-10f ? 0f : Mathf.DeltaAngle(middle, Gradient.Heading(offset));
+
+                Color colour = gradient.Sample(ConicWedgeParameter(k, step, relative));
+                colour.a *= paint.Alpha;
+                vh.AddVert(matrix.MultiplyPoint3x4(point), colour, Vector2.zero);
+            }
+
+            for (var i = 1; i < cut.Count - 1; i++)
+                vh.AddTriangle(origin, origin + i, origin + i + 1);
+        }
+    }
+
+    /// <summary>Wedge count: ~2.5 screen px of arc at the rim, enough for the stops, 36..360.</summary>
+    internal static int ConicWedges(float screenRadius, int stopCount)
+    {
+        var byArc = Mathf.CeilToInt(2f * Mathf.PI * Mathf.Max(0f, screenRadius) / 2.5f);
+        var byStops = 8 * Mathf.Max(1, stopCount - 1);
+        return Mathf.Clamp(Mathf.Max(byArc, byStops), 36, 360);
+    }
+
+    /// <summary>
+    /// The ramp parameter of a vertex in wedge <paramref name="k"/>, from its angle relative to
+    /// the wedge's middle. Never wraps: the result stays within the wedge's own span.
+    /// </summary>
+    internal static float ConicWedgeParameter(int k, float step, float relativeDegrees)
+    {
+        var within = Mathf.Clamp(relativeDegrees, -step * 0.5f, step * 0.5f);
+        return (k * step + step * 0.5f + within) / 360f;
+    }
+
+    /// <summary>Unit vector at a heading, degrees clockwise from twelve o'clock, scene space.</summary>
+    private static Vector2 Direction(float degrees)
+    {
+        var radians = degrees * Mathf.Deg2Rad;
+        return new Vector2(Mathf.Sin(radians), -Mathf.Cos(radians));
+    }
+
+    /// <summary>
     /// Where a label goes and how far it is turned, from the frame carrying it.
     /// </summary>
     /// <remarks>
@@ -587,9 +940,9 @@ internal static class Tessellator
         return new Rect(centre.x - across * 0.5f, centre.y - down * 0.5f, across, down);
     }
 
-    private static void CollectText(VecScene scene, VecNode node, EvalContext context, Frame frame, int shapeIndex)
+    private static void CollectText(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame, int shapeIndex)
     {
-        if (TextFound == null || NoFill)
+        if (TextFound == null || NoFill || _repeatPiece)
             return;
 
         // Note an invisible `T` is still collected. The label pool is keyed by placement
@@ -621,8 +974,25 @@ internal static class Tessellator
         // whether a shape can COVER a label, never whether it can tint one. Without this a
         // `G o=0.3` fades all its artwork and leaves the text -- the readable part -- at full
         // strength, which is the opposite of what was asked for.
+        // ResolvePaint has already multiplied `fo` and the group's opacity into the paint. This
+        // line used to multiply them in a second time, so text at `o=0.5` drew at 0.25.
         Color colour = paint.At(new Vector2(x, y));
-        colour.a *= frame.Opacity * Mathf.Clamp01(node.FillOpacity.Evaluate(context));
+
+        // A gradient fill is looked up per glyph vertex by the text layer. The label itself is
+        // then white at the opacity a flat colour would have had, so rich-text colours still
+        // multiply and fading is unchanged.
+        TextGradient? textGradient = null;
+        if (paint.IsGradient)
+        {
+            var full = new Paint(Color.white, paint.Gradient, 1f);
+            textGradient = new TextGradient
+            {
+                Paint = full.WithBounds(new Vector2(x, y), new Vector2(w, h)),
+                CanvasToLocal = AffineInverse(frame.Matrix),
+            };
+
+            colour = new Color(1f, 1f, 1f, colour.a);
+        }
 
         // A label faded to nothing is not placed at all. TMP work is main-thread work, and
         // the two-shapes-with-opposing-opacity idiom means a scene showing one of two states
@@ -631,28 +1001,52 @@ internal static class Tessellator
         if (colour.a <= 0.002f)
             return;
 
+        // RectMask2D serves an axis-aligned rectangle; anything else also carries its outline,
+        // which TextLayer masks with a stencil.
         Rect? clip = null;
-        if (frame.Clip != null)
-            clip = frame.Clip.Bounds(frame.Matrix);
+        List<Vector2>? clipPolygon = null;
+        if (frame.CanvasClip is { Count: >= 3 } outline)
+        {
+            clip = BoundsOf(outline);
+            if (!IsAxisAlignedRect(outline, clip.Value))
+                clipPolygon = outline;
+        }
 
-        // Text takes ONE shadow, because the text engine's underlay is one layer. Several
-        // are reported rather than quietly collapsed -- a designer who wrote two expects two.
+        // The first outset shadow goes to the label's own underlay (or its offset copy); later
+        // ones each get a copy of the label; an inset one is drawn by a copy laid over it.
         VecShadow? textShadow = null;
+        VecShadow? insetShadow = null;
+        List<VecShadow>? extraShadows = null;
         if (node.Shadows is { Length: > 0 })
         {
-            var first = node.Shadows[0];
+            foreach (var entry in node.Shadows)
+            {
+                // Scaled here, with the same factor as the font size, so TextLayer receives
+                // canvas units and does not need the frame.
+                var scaled = new VecShadow(
+                    entry.Dx * frame.Scale,
+                    entry.Dy * frame.Scale,
+                    entry.Blur * frame.Scale,
+                    entry.Spread * frame.Scale,
+                    vh.Tint?.ApplyFilters(entry.Colour) ?? entry.Colour,
+                    entry.Inset);
 
-            // Scaled here, with the same factor as the font size, so TextLayer receives canvas
-            // units and does not need the frame.
-            textShadow = new VecShadow(
-                first.Dx * frame.Scale,
-                first.Dy * frame.Scale,
-                first.Blur * frame.Scale,
-                first.Spread * frame.Scale,
-                first.Colour);
-
-            if (node.Shadows.Length > 1)
-                scene.Problem($"T{(string.IsNullOrEmpty(node.Id) ? "" : " \"" + node.Id + "\"")}: text takes one shadow, {node.Shadows.Length} given");
+                if (entry.Inset)
+                {
+                    if (insetShadow == null)
+                        insetShadow = scaled;
+                    else
+                        scene.Problem($"T{(string.IsNullOrEmpty(node.Id) ? "" : " \"" + node.Id + "\"")}: text takes one inset shadow; later ones not drawn");
+                }
+                else if (textShadow == null)
+                {
+                    textShadow = scaled;
+                }
+                else
+                {
+                    (extraShadows ??= new List<VecShadow>()).Add(scaled);
+                }
+            }
         }
 
         TextFound.Add(new TextPlacement
@@ -672,9 +1066,157 @@ internal static class Tessellator
             Wrap = node.Wrap,
             LineHeight = node.LineHeight,
             Shadow = textShadow,
+            ExtraShadows = extraShadows?.ToArray(),
+            InsetShadow = insetShadow,
             ClipRect = clip,
+            ClipPolygon = clipPolygon,
             ShapeIndex = shapeIndex,
+            Tint = vh.Tint,
+            Gradient = textGradient,
+            FirstLine = node.FirstLine?.Scaled(frame.Scale),
         });
+    }
+
+    /// <summary>
+    /// An image: its box (with corner radii) filled with the texture, as its own shape between
+    /// two forced mesh cuts so its mesh can carry the texture alone.
+    /// </summary>
+    private static void EmitImage(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame)
+    {
+        var src = node.ImageSource;
+        if (string.IsNullOrEmpty(src))
+            return;
+
+        if (!ImageCache.TryGet(src!, out var texW, out var texH, out var error))
+        {
+            if (error != null)
+                scene.Problem($"IMG \"{src}\": {error}");
+            else if (!_repeatPiece)
+                ImagesFound?.Add(new ImagePlacement { Src = src!, ShapeIndex = -1 });
+
+            return;
+        }
+
+        var x = node.X.Evaluate(context);
+        var y = node.Y.Evaluate(context);
+        var w = node.W.Evaluate(context);
+        var h = node.H.Evaluate(context);
+        var box = RectOutline(node, context, frame.Scale * ScreenScale, new List<Vector2>(64));
+        if (box.Count < 3 || texW <= 0 || texH <= 0)
+            return;
+
+        // The natural size fit works from is the cropped part's, not the whole texture's.
+        var crop = node.ImageCrop;
+        var picture = ImageRect(x, y, w, h, Mathf.Max(1, Mathf.RoundToInt(texW * crop.width)), Mathf.Max(1, Mathf.RoundToInt(texH * crop.height)), node.ImageFit);
+
+        // Contain leaves the box partly empty: the drawn area is the box cut to the picture.
+        var shape = box;
+        if (node.ImageFit == 1)
+        {
+            var within = ClipRegion.FromPolygon(new List<Vector2>
+            {
+                new(picture.xMin, picture.yMin), new(picture.xMax, picture.yMin),
+                new(picture.xMax, picture.yMax), new(picture.xMin, picture.yMax),
+            });
+
+            shape = within == null ? new List<Vector2>() : new List<Vector2>(within.ClipPolygon(box));
+        }
+
+        if (frame.Clip != null)
+            shape = new List<Vector2>(frame.Clip.ClipPolygon(shape));
+
+        if (shape.Count < 3 || Starved(vh, shape.Count, "an image"))
+            return;
+
+        var alpha = Mathf.Clamp01(node.Opacity.Evaluate(context)) * frame.Opacity;
+        Color32 colour = new Color(1f, 1f, 1f, alpha);
+
+        // A mesh of its own: cut before, draw, cut after.
+        vh.ForceCutBefore(vh.ShapeCount);
+        var shapeIndex = vh.ShapeCount;
+
+        // Filters act on vertex colours, and an image's colour is in its texels: filtering the
+        // white vertex would tint the picture flat rather than, say, invert it. So an image is
+        // left unfiltered and says so. A group mask still applies, since that is alpha.
+        var tint = vh.Tint;
+        if (tint is { HasFilters: true })
+            scene.Problem($"IMG \"{src}\": colour filters do not apply to images; drawn unfiltered");
+
+        vh.Tint = null;
+
+        var origin = vh.currentVertCount;
+        foreach (var point in shape)
+            vh.AddVert(frame.Matrix.MultiplyPoint3x4(point), colour, ImageUv(picture, point, crop));
+
+        vh.Tint = tint;
+
+        for (var i = 1; i < shape.Count - 1; i++)
+            vh.AddTriangle(origin, origin + i, origin + i + 1);
+
+        vh.MarkShape();
+        vh.ForceCutBefore(vh.ShapeCount);
+
+        // Every piece of a concave clip is its own mesh, so each is recorded for its texture.
+        ImagesFound?.Add(new ImagePlacement { Src = src!, ShapeIndex = shapeIndex });
+    }
+
+    /// <summary>Where the picture lies for CSS object-fit: fill (0), contain (1), cover (2).</summary>
+    internal static Rect ImageRect(float x, float y, float w, float h, int texW, int texH, int fit)
+    {
+        if (fit == 0 || w <= 0f || h <= 0f)
+            return new Rect(x, y, w, h);
+
+        var boxAspect = w / h;
+        var picAspect = texW / (float)texH;
+
+        // Contain fits the long side; cover fills the short one and overflows the other.
+        var widthLimited = fit == 1 ? picAspect > boxAspect : picAspect < boxAspect;
+        var pw = widthLimited ? w : h * picAspect;
+        var ph = widthLimited ? w / picAspect : h;
+
+        return new Rect(x + (w - pw) * 0.5f, y + (h - ph) * 0.5f, pw, ph);
+    }
+
+    /// <summary>Texture coordinate of a scene point. Scenes are +Y down, textures +V up.</summary>
+    internal static Vector2 ImageUv(Rect picture, Vector2 point)
+    {
+        return ImageUv(picture, point, new Rect(0f, 0f, 1f, 1f));
+    }
+
+    /// <summary>The same, within a crop of the texture given top-down, as `uv` is written.</summary>
+    internal static Vector2 ImageUv(Rect picture, Vector2 point, Rect crop)
+    {
+        var fx = (point.x - picture.xMin) / Mathf.Max(0.0001f, picture.width);
+        var fy = (point.y - picture.yMin) / Mathf.Max(0.0001f, picture.height);
+        return new Vector2(crop.xMin + fx * crop.width, 1f - (crop.yMin + fy * crop.height));
+    }
+
+    private static Rect BoundsOf(List<Vector2> points)
+    {
+        var min = points[0];
+        var max = points[0];
+        foreach (var point in points)
+        {
+            min = Vector2.Min(min, point);
+            max = Vector2.Max(max, point);
+        }
+
+        return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+    }
+
+    /// <summary>True when every point sits on the edge of <paramref name="bounds"/> and it has four corners' worth of area.</summary>
+    internal static bool IsAxisAlignedRect(List<Vector2> points, Rect bounds)
+    {
+        const float Tolerance = 0.01f;
+        foreach (var p in points)
+        {
+            var onX = Mathf.Abs(p.x - bounds.xMin) < Tolerance || Mathf.Abs(p.x - bounds.xMax) < Tolerance;
+            var onY = Mathf.Abs(p.y - bounds.yMin) < Tolerance || Mathf.Abs(p.y - bounds.yMax) < Tolerance;
+            if (!(onX && onY))
+                return false;
+        }
+
+        return Mathf.Abs(Mathf.Abs(Triangulator.SignedArea(points)) - bounds.width * bounds.height) < Tolerance * (bounds.width + bounds.height + 1f);
     }
 
     private static List<Vector2> RectOutline(VecNode node, EvalContext context, float scale)
@@ -780,15 +1322,19 @@ internal static class Tessellator
 
     private static void FillAndStroke(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame, List<Vector2> outline, bool closed)
     {
-        if (node.Clickable && !string.IsNullOrEmpty(node.Id))
+        if (node.Clickable && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
             RecordHit(node.Id!, outline, frame.Matrix, context);
 
         // Shadows first: they sit beneath the shape, and in declaration order like CSS.
         if (closed)
-            EmitShadows(vh, node, outline, frame);
+            EmitShadows(vh, node, context, outline, frame);
 
         if (node.HasFill)
             FillContour(vh, node, context, frame, outline, null, ResolvePaint(scene, node, context, frame, stroke: false));
+
+        // Inset shadows sit over the fill and under the stroke, as CSS paints them.
+        if (closed)
+            EmitInsetShadows(vh, scene, node, context, outline, frame);
 
         StrokeOutline(vh, scene, node, context, frame, outline, closed);
     }
@@ -980,13 +1526,68 @@ internal static class Tessellator
     /// and silently drew nothing, which is the quiet-ignore failure the attribute whitelist
     /// exists to catch and cannot, because `sh` is a real key on a real op.
     /// </remarks>
-    private static void EmitShadows(MeshBuilder vh, VecNode node, List<Vector2> outline, Frame frame)
+    private static void EmitShadows(MeshBuilder vh, VecNode node, EvalContext context, List<Vector2> outline, Frame frame)
     {
         if (node.Shadows == null || outline.Count < 3)
             return;
 
+        var opacity = ShadowOpacity(node, context, frame);
+
         foreach (var shadow in node.Shadows)
-            Shadow.Emit(vh, outline, shadow, frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+        {
+            if (!shadow.Inset)
+                Shadow.Emit(vh, outline, Faded(shadow, opacity), frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+        }
+    }
+
+    /// <summary>
+    /// How far a shape's shadows fade: the group's `o` and the shape's own `fo`.
+    /// </summary>
+    /// <remarks>
+    /// Shadows used to take neither, so `G o=0.2` faded a card to a ghost and left its halo at
+    /// full strength -- the opposite of CSS, where `opacity` takes the box-shadow with the box.
+    /// `fo` counts too: a shape faded to nothing already casts nothing (it is skipped whole), and
+    /// a shape halfway there should not cast a full shadow. A shadow's own colour alpha is a
+    /// separate thing and is untouched, which is what a nearly transparent carrier fill relies on.
+    /// </remarks>
+    private static float ShadowOpacity(VecNode node, EvalContext context, Frame frame)
+    {
+        return frame.Opacity * Mathf.Clamp01(node.FillOpacity.Evaluate(context));
+    }
+
+    private static VecShadow Faded(VecShadow shadow, float opacity)
+    {
+        if (opacity >= 0.9999f)
+            return shadow;
+
+        var colour = shadow.Colour;
+        colour.a *= opacity;
+        return new VecShadow(shadow.Dx, shadow.Dy, shadow.Blur, shadow.Spread, colour, shadow.Inset);
+    }
+
+    /// <summary>Inset shadows, inside the outline. Convex outlines only.</summary>
+    private static void EmitInsetShadows(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, List<Vector2> outline, Frame frame)
+    {
+        if (node.Shadows == null || outline.Count < 3)
+            return;
+
+        var opacity = ShadowOpacity(node, context, frame);
+
+        foreach (var shadow in node.Shadows)
+        {
+            if (!shadow.Inset)
+                continue;
+
+            // The rings are clipped to the shape by the convex clipper, so a concave outline
+            // cannot be served. Refused out loud rather than drawn leaking past the shape.
+            if (!IsConvex(outline))
+            {
+                scene.Problem($"{node.Op}{(string.IsNullOrEmpty(node.Id) ? "" : " \"" + node.Id + "\"")}: inset shadow needs a convex shape; not drawn");
+                continue;
+            }
+
+            Shadow.EmitInset(vh, outline, Faded(shadow, opacity), frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+        }
     }
 
     private static void EmitPath(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame)
@@ -1039,8 +1640,9 @@ internal static class Tessellator
 
         if (node.HasFill && node.Closed)
         {
-            EmitShadows(vh, node, points, frame);
+            EmitShadows(vh, node, context, points, frame);
             FillContour(vh, node, context, frame, points, null, ResolvePaint(scene, node, context, frame, stroke: false));
+            EmitInsetShadows(vh, scene, node, context, points, frame);
         }
 
         StrokeOutline(vh, scene, node, context, frame, points, node.Closed);
@@ -1087,9 +1689,12 @@ internal static class Tessellator
             // for holes inside a clipped fill.
             var outer = Outermost(subpaths);
             if (outer != null)
-                EmitShadows(vh, node, outer, frame);
+                EmitShadows(vh, node, context, outer, frame);
 
             FillSubpaths(vh, scene, node, context, frame, subpaths);
+
+            if (outer != null)
+                EmitInsetShadows(vh, scene, node, context, outer, frame);
         }
 
         foreach (var sub in subpaths)
@@ -1204,6 +1809,10 @@ internal static class Tessellator
         if (holes == null && RadialBandsFit(contour, paint))
         {
             FillRadialBands(vh, contour, paint, frame.Matrix, frame.Scale);
+        }
+        else if (holes == null && !NoFill && paint.Gradient is { Conic: true } && IsConvex(contour))
+        {
+            FillConicWedges(vh, contour, paint, frame.Matrix, frame.Scale);
         }
         else
         {
@@ -1543,16 +2152,24 @@ internal static class Tessellator
         if (box.Count < 3)
             return;
 
-        var clipped = parent.Clip == null ? box : parent.Clip.ClipPolygon(box);
-        var region = ClipRegion.FromPolygon(clipped);
-
-        if (region == null)
+        if (Mathf.Abs(Triangulator.SignedArea(box)) < 0.000001f)
         {
             scene.Problem($"SC \"{node.Id}\" is degenerate; its children are not drawn");
             return;
         }
 
-        if (ScrollsFound != null && !string.IsNullOrEmpty(node.Id))
+        var inverse = Matrix4x4.Translate(new Vector3(0f, offset, 0f));
+
+        // The viewport clips in the parent's space; its children are shifted by the offset,
+        // so the combined clip is built there and then moved with them.
+        CombineClip(parent, Matrix4x4.identity, box, out var viewport, out var viewportPieces);
+        if (viewportPieces != null)
+        {
+            for (var k = 0; k < viewportPieces.Count; k++)
+                viewportPieces[k] = viewportPieces[k].Transform(inverse);
+        }
+
+        if (ScrollsFound != null && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
         {
             var min = (Vector2)parent.Matrix.MultiplyPoint3x4(box[0]);
             var max = min;
@@ -1574,13 +2191,14 @@ internal static class Tessellator
         }
 
         var local = Matrix4x4.Translate(new Vector3(0f, -offset, 0f));
-        var inverse = Matrix4x4.Translate(new Vector3(0f, offset, 0f));
 
         stack.Push(new Frame
         {
             Matrix = parent.Matrix * local,
             Opacity = parent.Opacity * Mathf.Clamp01(node.Opacity.Evaluate(context)),
-            Clip = region.Transform(inverse),
+            Clip = viewport?.Transform(inverse),
+            Pieces = viewportPieces,
+            CanvasClip = CombineCanvasClip(parent.CanvasClip, ToCanvas(parent.Matrix, box)),
             Scale = parent.Scale,
             SceneToLocal = inverse * parent.SceneToLocal,
         });
@@ -1646,7 +2264,7 @@ internal static class Tessellator
 
     private static bool NeedsRefinement(Paint paint)
     {
-        return paint.IsGradient && (paint.Gradient!.Radial || paint.Gradient.StopCount > 2);
+        return paint.IsGradient && (paint.Gradient!.Radial || paint.Gradient.Conic || paint.Gradient.StopCount > 2);
     }
 
     /// <summary>
@@ -1681,7 +2299,7 @@ internal static class Tessellator
         return origin;
     }
 
-    private static bool IsConvex(List<Vector2> points)
+    internal static bool IsConvex(List<Vector2> points)
     {
         if (points.Count < 4)
             return true;
@@ -1842,7 +2460,7 @@ internal static class Tessellator
     /// </remarks>
     private static void EmitTriangles(MeshBuilder vh, List<Vector2> vertices, List<int> indices, Paint paint, Matrix4x4 matrix)
     {
-        var refine = paint.IsGradient && (paint.Gradient!.Radial || paint.Gradient.StopCount > 2);
+        var refine = NeedsRefinement(paint);
 
         for (var i = 0; i + 2 < indices.Count; i += 3)
         {

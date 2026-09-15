@@ -21,6 +21,12 @@ internal sealed class Gradient
 {
     internal bool Radial;
 
+    /// <summary>Conic: parameter is the angle around <see cref="Start"/>, from <see cref="Angle"/>.</summary>
+    internal bool Conic;
+
+    /// <summary>Conic start angle, degrees clockwise from twelve o'clock.</summary>
+    internal float Angle;
+
     /// <summary>
     /// Coordinates are fractions of the filled shape's bounding box rather than scene units.
     /// </summary>
@@ -51,6 +57,9 @@ internal sealed class Gradient
     /// <summary>Gradient parameter at a point, in 0..1 before clamping.</summary>
     internal float Parameter(Vector2 point)
     {
+        if (Conic)
+            return ConicParameter(point - Start);
+
         if (!Radial)
         {
             var axis = End - Start;
@@ -65,6 +74,21 @@ internal sealed class Gradient
             return 0f;
 
         return Vector2.Distance(point, Focus) / Radius;
+    }
+
+    /// <summary>Conic parameter of an offset from the centre, 0..1 clockwise from <see cref="Angle"/>.</summary>
+    internal float ConicParameter(Vector2 offset)
+    {
+        if (offset.sqrMagnitude < 1e-12f)
+            return 0f;
+
+        return Mathf.Repeat(Heading(offset) - Angle, 360f) / 360f;
+    }
+
+    /// <summary>Degrees clockwise from twelve o'clock, in scene space (+Y down).</summary>
+    internal static float Heading(Vector2 offset)
+    {
+        return Mathf.Atan2(offset.x, -offset.y) * Mathf.Rad2Deg;
     }
 
     internal Color Sample(float t)
@@ -202,6 +226,15 @@ internal readonly struct Paint
     /// <summary>Colour at a point in the shape's own coordinate space.</summary>
     internal Color32 At(Vector2 point)
     {
+        // A conic's angle has to be measured in the shape's own space: through a bounding box
+        // that is not square, fractions would bend every angle but the four axes.
+        if (Gradient is { Conic: true } && _useBounds)
+        {
+            var conic = Gradient.Sample(Gradient.ConicParameter(point - FromGradientSpace(Gradient.Start)));
+            conic.a *= Alpha;
+            return conic;
+        }
+
         var colour = Gradient?.At(ToGradientSpace(point)) ?? Colour;
         colour.a *= Alpha;
         return colour;

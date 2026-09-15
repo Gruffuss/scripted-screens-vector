@@ -52,6 +52,9 @@ internal sealed class TextLayer
     /// <see cref="TextShadow.ShouldCast"/>.
     /// </remarks>
     private readonly List<TextMeshProUGUI?> _casters = new();
+
+    /// <summary>Per placement: the enclosing groups' filters and mask, applied per glyph vertex.</summary>
+    private readonly List<VertexTint?> _tints = new();
     private readonly Transform _parent;
 
     internal TextLayer(Transform parent)
@@ -74,6 +77,10 @@ internal sealed class TextLayer
 
             if (i < _casters.Count && _casters[i] != null)
                 _casters[i]!.gameObject.SetActive(false);
+
+            HideCopies(i, 0);
+            if (i < _insets.Count && _insets[i] != null)
+                HideCaster(_insets[i]!.Mask);
 
             // A hidden label keeps its material, and the pool may hand it to a placement with
             // no shadow later. Forget it now so that placement clears it.
@@ -104,9 +111,32 @@ internal sealed class TextLayer
             new Vector2(placement.Rect.center.x - clip.center.x,
                         placement.Rect.center.y - clip.center.y);
 
+        // A rectangle is RectMask2D's job. Any other outline goes to the stencil: a ClipShape
+        // drawing it, under a Mask that hides the shape and keeps the cut. Added on first need,
+        // since most labels never have one.
+        var polygon = placement.ClipPolygon;
         var masking = mask.GetComponent<RectMask2D>();
         if (masking != null)
-            masking.enabled = placement.ClipRect.HasValue;
+            masking.enabled = placement.ClipRect.HasValue && polygon == null;
+
+        var shape = mask.GetComponent<ClipShape>();
+        if (polygon != null && shape == null)
+        {
+            shape = mask.gameObject.AddComponent<ClipShape>();
+            shape.raycastTarget = false;
+            mask.gameObject.AddComponent<UnityEngine.UI.Mask>().showMaskGraphic = false;
+        }
+
+        if (shape != null)
+        {
+            if (polygon != null)
+                shape.SetOutline(polygon, clip.center);
+
+            shape.enabled = polygon != null;
+            var stencil = mask.GetComponent<UnityEngine.UI.Mask>();
+            if (stencil != null)
+                stencil.enabled = polygon != null;
+        }
 
         label.gameObject.SetActive(true);
         label.text = placement.Text;
@@ -115,6 +145,11 @@ internal sealed class TextLayer
         label.characterSpacing = placement.CharSpacing;
         label.fontStyle = placement.Bold ? FontStyles.Bold : FontStyles.Normal;
         label.alignment = Alignment(placement);
+
+        // Justified lines take their extra width in the gaps between words, as CSS does. TMP's
+        // default (0.4) gives 40% of it to the letters, which spaced a short bold line out
+        // letter by letter. Only a line with no gap at all still spreads its letters.
+        label.wordWrappingRatios = 0f;
 
         // Single line unless the node asked otherwise. TMP wraps by default, and a label
         // that silently becomes two lines moves its own text off the baseline the scene
@@ -194,7 +229,144 @@ internal sealed class TextLayer
             renderer.SetMaterial(label.materialForRendering, 0);
         }
 
+        // Filters and masks reach glyphs through TMP's own vertex colours, rewritten in its
+        // pre-render hook each time it builds the mesh. A tint that changed with unchanged text
+        // does not make TMP rebuild by itself, so it is asked to.
+        while (_tints.Count <= index)
+            _tints.Add(null);
+
+        while (_gradients.Count <= index)
+            _gradients.Add(null);
+
+        var hadTint = _tints[index] != null || _gradients[index] != null;
+        _tints[index] = placement.Tint;
+        _gradients[index] = placement.Gradient;
+        ApplyFirstLine(label, index, placement);
+
+        // The recolour happens in TMP's pre-render hook, so the mesh has to be regenerated for
+        // it to run. Asking TMP to (havePropertiesChanged) relies on its deferred rebuild, which a
+        // capture's rebuild loop swallows -- the colours were lost for good. Rebuilt here instead.
+        if (placement.Tint != null || placement.Gradient != null || hadTint)
+            label.ForceMeshUpdate();
+
         ApplyShadow(label, index, placement);
+    }
+
+    /// <summary>Per placement: a gradient fill, looked up per glyph vertex.</summary>
+    private readonly List<TextGradient?> _gradients = new();
+
+    /// <summary>Per placement: the text and style the first-line wrap was built for, and its result.</summary>
+    private readonly List<(string Key, string Text)?> _firstLines = new();
+
+    /// <summary>
+    /// `::first-line`: rich tags around what TMP laid out as the first line.
+    /// </summary>
+    /// <remarks>
+    /// Only the text engine knows where a line breaks, so the label is laid out once as written,
+    /// the break read from `lineInfo[0]`, and the text set again with tags around that span.
+    /// The tags can move the break themselves (a larger size wraps sooner), so the break is
+    /// read once more and the wrap redone if it moved. Cached on the inputs that decide the
+    /// layout, so an unchanged label costs nothing per rebuild.
+    /// </remarks>
+    private void ApplyFirstLine(TextMeshProUGUI label, int index, TextPlacement placement)
+    {
+        while (_firstLines.Count <= index)
+            _firstLines.Add(null);
+
+        var style = placement.FirstLine;
+        if (style == null || string.IsNullOrEmpty(placement.Text))
+        {
+            _firstLines[index] = null;
+            return;
+        }
+
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        var key = string.Join("|", placement.Text, style.Colour?.ToString() ?? "", style.Size?.ToString(invariant) ?? "",
+            style.Bold?.ToString() ?? "", style.Font ?? "", placement.Rect.width.ToString(invariant), placement.Size.ToString(invariant),
+            placement.Wrap.ToString(), label.font != null ? label.font.name : "", placement.Bold.ToString(), placement.CharSpacing.ToString(invariant));
+
+        if (_firstLines[index] is { } cached && cached.Key == key)
+        {
+            label.text = cached.Text;
+            return;
+        }
+
+        var cut = FirstLineEnd(label, 0);
+        var wrapped = style.Wrap(placement.Text, cut, out var prefix);
+        label.text = wrapped;
+
+        var moved = FirstLineEnd(label, prefix);
+        if (moved >= 0 && moved != cut)
+        {
+            wrapped = style.Wrap(placement.Text, moved, out _);
+            label.text = wrapped;
+        }
+
+        _firstLines[index] = (key, wrapped);
+    }
+
+    /// <summary>Lays the label out and returns where its first line ends in the unwrapped text.</summary>
+    private static int FirstLineEnd(TextMeshProUGUI label, int prefix)
+    {
+        label.ForceMeshUpdate();
+        var info = label.textInfo;
+        if (info == null || info.lineCount == 0 || info.characterCount == 0)
+            return -1;
+
+        var last = Mathf.Clamp(info.lineInfo[0].lastCharacterIndex, 0, info.characterCount - 1);
+        var character = info.characterInfo[last];
+        return character.index + character.stringLength - prefix;
+    }
+
+    /// <summary>TMP's pre-render hook: tints this label's glyph vertices before upload.</summary>
+    /// <remarks>
+    /// Shadow copies pass <paramref name="fill"/> false: a gradient fill is the face's colour
+    /// and has no business in a shadow, which filters and masks do reach.
+    /// </remarks>
+    private void TintGlyphs(int slot, TextMeshProUGUI label, TMP_TextInfo info, bool fill = true)
+    {
+        var tint = slot < _tints.Count ? _tints[slot] : null;
+        var gradient = fill && slot < _gradients.Count ? _gradients[slot] : null;
+        if ((tint == null && gradient == null) || info == null)
+            return;
+
+        var positioned = gradient != null || tint!.NeedsPosition;
+
+        for (var m = 0; m < info.materialCount && m < info.meshInfo.Length; m++)
+        {
+            var mesh = info.meshInfo[m];
+            if (mesh.colors32 == null || mesh.vertices == null)
+                continue;
+
+            var count = Mathf.Min(mesh.vertexCount, mesh.colors32.Length);
+            for (var i = 0; i < count; i++)
+            {
+                // Glyph vertices are in the label's space; a mask is written in the surface's.
+                var at = positioned
+                    ? _parent.InverseTransformPoint(label.transform.TransformPoint(mesh.vertices[i]))
+                    : Vector3.zero;
+
+                Color colour = mesh.colors32[i];
+                if (gradient != null)
+                    colour *= gradient.At(at);
+
+                mesh.colors32[i] = tint != null ? tint.Apply(colour, at) : colour;
+            }
+
+            // Kept on the label, so the copy a screen capture takes shows these colours too.
+            if (m == 0)
+            {
+                var keeper = label.GetComponent<GlyphColours>();
+                if (keeper == null)
+                {
+                    GlyphColours.Creating = true;
+                    keeper = label.gameObject.AddComponent<GlyphColours>();
+                    GlyphColours.Creating = false;
+                }
+
+                keeper.Store(mesh.colors32, count);
+            }
+        }
     }
 
     /// <summary>Drives the text engine's underlay from a `sh` entry.</summary>
@@ -219,6 +391,13 @@ internal sealed class TextLayer
     /// reported, so the shape stays right and the cause is named.
     /// </remarks>
     private void ApplyShadow(TextMeshProUGUI label, int index, TextPlacement placement)
+    {
+        // First shadow before the rest, so the ordering below sees every copy that exists.
+        ApplyFirstShadow(label, index, placement);
+        ApplyExtraShadows(label, index, placement);
+    }
+
+    private void ApplyFirstShadow(TextMeshProUGUI label, int index, TextPlacement placement)
     {
         var caster = index < _casters.Count ? _casters[index] : null;
 
@@ -284,6 +463,216 @@ internal sealed class TextLayer
         HideCaster(caster);
         WriteUnderlay(label, fit, shadow.Colour, hideFace: false);
         _shadowed.Add(index);
+    }
+
+    /// <summary>Copies of each label drawing its second and later outset shadows, by index.</summary>
+    private readonly List<List<TextMeshProUGUI>?> _copies = new();
+
+    /// <summary>
+    /// Second and later outset shadows, each on a copy of the label; then the inset one.
+    /// </summary>
+    /// <remarks>
+    /// The label's own underlay is one layer and already serves the first shadow, so every
+    /// further one needs another TMP object. Outset copies go under the label, the last written
+    /// lowest as CSS stacks them. The inset shadow goes over the label; see <see cref="ApplyInset"/>.
+    /// </remarks>
+    private void ApplyExtraShadows(TextMeshProUGUI label, int index, TextPlacement placement)
+    {
+        var extras = placement.ExtraShadows;
+        var used = 0;
+
+        if (extras != null && ShadowMetrics(label, out var gradient, out var sampling))
+        {
+            while (_copies.Count <= index)
+                _copies.Add(null);
+
+            var list = _copies[index] ??= new List<TextMeshProUGUI>();
+
+            foreach (var shadow in extras)
+            {
+                var fit = TextShadow.Fit(new VecShadow(0f, 0f, shadow.Blur, shadow.Spread, shadow.Colour), gradient, sampling, Mathf.Max(1f, placement.Size));
+                ReportShrink(fit);
+
+                if (list.Count <= used)
+                    list.Add(NewCopy(index, "VecTextShadowExtra"));
+
+                var copy = list[used++];
+                copy.gameObject.SetActive(true);
+                Mirror(copy, label, shadow);
+                WriteUnderlay(copy, fit, shadow.Colour, hideFace: true);
+            }
+
+            // CSS paints the first shadow on top: the last copy goes lowest.
+            for (var k = 0; k < used; k++)
+                list[k].rectTransform.SetSiblingIndex(0);
+        }
+
+        HideCopies(index, used);
+
+        ApplyInset(label, index, placement);
+    }
+
+    /// <summary>The three objects drawing one label's inset shadow.</summary>
+    private sealed class InsetParts
+    {
+        /// <summary>A copy of the label that is a stencil Mask: its glyphs are the only place the other two draw.</summary>
+        internal TextMeshProUGUI Mask = null!;
+
+        /// <summary>The glyphs again, in the shadow colour.</summary>
+        internal TextMeshProUGUI Shade = null!;
+
+        /// <summary>The face moved by the offset, softened and shrunk by blur and spread, over the shade.</summary>
+        internal TextMeshProUGUI Face = null!;
+    }
+
+    /// <summary>Per placement: its inset shadow's objects, created on first need.</summary>
+    private readonly List<InsetParts?> _insets = new();
+
+    /// <summary>
+    /// An inset text shadow, from stencil and copies.
+    /// </summary>
+    /// <remarks>
+    /// TMP's own inner underlay (`UNDERLAY_INNER`) is declared by the game's text shaders but does
+    /// not draw: four arrangements of it were put on a console on 2026-09-15 -- a copy with its face
+    /// hidden and visible, the label itself, and the desktop shader -- and none showed anything,
+    /// with the keyword confirmed on in every one. The variant is not in the build.
+    ///
+    /// So it is composed from things that do draw. Inside the label's glyphs (a copy used as a
+    /// stencil Mask, the same mechanism as a rounded clip), the glyphs are painted in the shadow
+    /// colour, and the face is painted back over them moved by the offset. Where the moved face
+    /// does not reach -- a band along the edges facing away from the offset -- the shadow shows.
+    /// Blur softens the moved face's edge and spread shrinks it, both in the font's own terms, so
+    /// they are capped by its padding like every text shadow; the offset is a position and is not.
+    /// </remarks>
+    private void ApplyInset(TextMeshProUGUI label, int index, TextPlacement placement)
+    {
+        while (_insets.Count <= index)
+            _insets.Add(null);
+
+        var parts = _insets[index];
+
+        if (placement.InsetShadow is not { } inset || !ShadowMetrics(label, out var gradient, out var sampling))
+        {
+            if (parts != null)
+                HideCaster(parts.Mask);
+
+            return;
+        }
+
+        var fit = TextShadow.Fit(new VecShadow(0f, 0f, inset.Blur, inset.Spread, inset.Colour), gradient, sampling, Mathf.Max(1f, placement.Size));
+        ReportShrink(fit);
+
+        parts ??= _insets[index] = NewInset(index);
+
+        var mask = parts.Mask;
+        mask.gameObject.SetActive(true);
+        Mirror(mask, label, new VecShadow(0f, 0f, 0f, 0f, Color.clear));
+        mask.color = Color.white;
+        mask.rectTransform.SetAsLastSibling();
+
+        Inside(parts.Shade, label, 0f, 0f);
+        var shade = inset.Colour;
+        shade.a *= label.color.a;
+        parts.Shade.color = shade;
+
+        Inside(parts.Face, label, inset.Dx, inset.Dy);
+        parts.Face.color = label.color;
+
+        var material = parts.Face.fontMaterial;
+        if (material != null)
+        {
+            if (material.HasProperty(ShaderUtilities.ID_FaceDilate))
+                material.SetFloat(ShaderUtilities.ID_FaceDilate, Mathf.Clamp(-fit.Dilate, -1f, 1f));
+
+            if (material.HasProperty(ShaderUtilities.ID_OutlineSoftness))
+                material.SetFloat(ShaderUtilities.ID_OutlineSoftness, Mathf.Clamp01(fit.Softness));
+
+            ShaderUtilities.UpdateShaderRatios(material);
+            parts.Face.UpdateMeshPadding();
+        }
+    }
+
+    /// <summary>A copy of the label inside the inset mask, moved by an offset in canvas units.</summary>
+    private static void Inside(TextMeshProUGUI copy, TextMeshProUGUI label, float dx, float dy)
+    {
+        copy.gameObject.SetActive(true);
+        Mirror(copy, label, new VecShadow(0f, 0f, 0f, 0f, Color.clear));
+
+        // A child of the mask, which already sits where the label does and turns with it.
+        copy.rectTransform.localRotation = Quaternion.identity;
+        copy.rectTransform.localScale = Vector3.one;
+        copy.rectTransform.anchoredPosition = new Vector2(dx, -dy);
+    }
+
+    private InsetParts NewInset(int index)
+    {
+        var mask = NewCopy(index, "VecTextInsetMask");
+        mask.gameObject.AddComponent<UnityEngine.UI.Mask>().showMaskGraphic = false;
+
+        var shade = NewCopy(index, "VecTextInsetShade");
+        shade.rectTransform.SetParent(mask.rectTransform, worldPositionStays: false);
+
+        var face = NewCopy(index, "VecTextInsetFace", fill: true);
+        face.rectTransform.SetParent(mask.rectTransform, worldPositionStays: false);
+
+        return new InsetParts { Mask = mask, Shade = shade, Face = face };
+    }
+
+    private void HideCopies(int index, int from)
+    {
+        if (index >= _copies.Count || _copies[index] == null)
+            return;
+
+        var list = _copies[index]!;
+        for (var k = from; k < list.Count; k++)
+            HideCaster(list[k]);
+    }
+
+    private TextMeshProUGUI NewCopy(int index, string name, bool fill = false)
+    {
+        var host = new GameObject(name, typeof(RectTransform), typeof(TextMeshProUGUI));
+        var copy = host.GetComponent<TextMeshProUGUI>();
+        copy.rectTransform.SetParent(_masks[index], worldPositionStays: false);
+        copy.raycastTarget = false;
+        copy.richText = true;
+
+        // Group filters and masks reach the shadow the way they reach the label.
+        copy.OnPreRenderText += info => TintGlyphs(index, copy, info, fill);
+        return copy;
+    }
+
+    /// <summary>The font's SDF scale and sampling size, or false (and a warning) when it has none.</summary>
+    private bool ShadowMetrics(TextMeshProUGUI label, out float gradient, out float sampling)
+    {
+        ShaderUtilities.GetShaderPropertyIDs();
+        gradient = 0f;
+        sampling = 0f;
+
+        var shared = label.fontSharedMaterial;
+        var font = label.font;
+        if (shared == null || font == null || !shared.HasProperty(ShaderUtilities.ID_UnderlayOffsetX))
+        {
+            Warn($"font \"{font?.name}\" has no underlay in its shader; text shadow not drawn");
+            return false;
+        }
+
+        gradient = shared.HasProperty(ShaderUtilities.ID_GradientScale) ? shared.GetFloat(ShaderUtilities.ID_GradientScale) : 0f;
+        sampling = font.faceInfo.pointSize;
+
+        if (gradient > 0.001f && sampling > 0f)
+            return true;
+
+        Warn($"font \"{font.name}\" reports no usable SDF scale; text shadow not drawn");
+        return false;
+    }
+
+    private void ReportShrink(TextShadowFit fit)
+    {
+        if (fit.Scale < 0.999f)
+        {
+            Warn($"text shadow is larger than the font's SDF padding allows; reduced to {fit.Scale * 100f:F0}% "
+                 + "(use a smaller blur, or a font atlas with more padding)");
+        }
     }
 
     /// <summary>Turns a label's underlay off, if this layer is the one that turned it on.</summary>
@@ -352,6 +741,8 @@ internal sealed class TextLayer
         caster.rectTransform.SetSiblingIndex(0);
         caster.raycastTarget = false;
         caster.richText = true;
+        var slot = index;
+        caster.OnPreRenderText += info => TintGlyphs(slot, caster, info, fill: false);
 
         _casters[index] = caster;
         return caster;
@@ -376,13 +767,14 @@ internal sealed class TextLayer
         caster.characterSpacing = label.characterSpacing;
         caster.fontStyle = label.fontStyle;
         caster.alignment = label.alignment;
+        caster.wordWrappingRatios = label.wordWrappingRatios;
         caster.enableWordWrapping = label.enableWordWrapping;
         caster.lineSpacing = label.lineSpacing;
         caster.overflowMode = label.overflowMode;
         caster.enableAutoSizing = label.enableAutoSizing;
         caster.fontSizeMin = label.fontSizeMin;
         caster.fontSizeMax = label.fontSizeMax;
-        caster.color = Color.white;
+        caster.color = new Color(1f, 1f, 1f, label.color.a);
 
         var from = label.rectTransform;
         var to = caster.rectTransform;
@@ -459,6 +851,9 @@ internal sealed class TextLayer
             (1, 2) => TextAlignmentOptions.Right,
             (2, 0) => TextAlignmentOptions.BottomLeft,
             (2, 1) => TextAlignmentOptions.Bottom,
+            (0, 3) => TextAlignmentOptions.TopJustified,
+            (1, 3) => TextAlignmentOptions.Justified,
+            (2, 3) => TextAlignmentOptions.BottomJustified,
             _ => TextAlignmentOptions.BottomRight,
         };
     }
@@ -489,6 +884,9 @@ internal sealed class TextLayer
         label.raycastTarget = false;
         label.richText = true;
 
+        var slot = _pool.Count;
+        label.OnPreRenderText += info => TintGlyphs(slot, label, info);
+
         _defaultFont ??= label.font;
 
         _masks.Add(mask);
@@ -506,6 +904,10 @@ internal sealed class TextLayer
         _masks.Clear();
         _pool.Clear();
         _casters.Clear();
+        _copies.Clear();
+        _insets.Clear();
+        _gradients.Clear();
+        _firstLines.Clear();
         _shadowed.Clear();
     }
 }

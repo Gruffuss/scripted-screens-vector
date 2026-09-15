@@ -32,7 +32,7 @@ namespace ScriptedScreensVector;
 ///   box so a translucent shape does not darken over its own shadow. Doing that here needs
 ///   a polygon boolean, and every shadow this was built for sits under an opaque control.
 ///   A translucent shape over its own shadow will read darker than the mockup.
-/// - `inset` is not implemented.
+/// - `inset` is drawn by <see cref="EmitInset"/>, for convex outlines.
 ///
 /// Blending is straight source-over on sRGB bytes, which is the space the colours are
 /// written in, so shadows composite at the value the artboard specifies.
@@ -130,11 +130,19 @@ internal static class Shadow
             ? 1
             : Mathf.Clamp(Mathf.CeilToInt(reach * Mathf.Max(0.0001f, screenScale) / 4f), MinRings, MaxRings);
 
-        // Innermost contour: fully covered, so it is filled solid rather than ramped.
-        Offset(outline, inner, shift, shadow.Spread - reach, winding);
+        // Rings inside the outline stop where shrinking it further would turn a corner inside
+        // out. Offsetting a rounded corner inward by more than its radius folds its points over
+        // each other, and the fan over that fold covered parts of the core twice: visible as
+        // light wedges under a translucent card (`G o=0.5` over a blur 12 glow, 2026-09-15). Past
+        // the limit the core simply stays at the deepest valid contour, at the coverage there.
+        var start = Mathf.Min(reach, shadow.Spread + InwardLimit(outline, winding, miter: false));
+        start = Mathf.Max(start, -reach);
+
+        // Innermost contour: covered to `start`, so it is filled solid rather than ramped.
+        Offset(outline, inner, shift, shadow.Spread - start, winding);
 
         var core = shadow.Colour;
-        core.a *= Coverage(reach, sigma);
+        core.a *= Coverage(start, sigma);
 
         var paint = new Paint(core, null, 1f);
         FillConvexOrEar(vh, inner, paint, matrix, clip);
@@ -148,8 +156,8 @@ internal static class Shadow
 
         for (var r = 0; r < rings; r++)
         {
-            var dInner = reach - r * (2f * reach / rings);
-            var dOuter = reach - (r + 1) * (2f * reach / rings);
+            var dInner = start - r * ((start + reach) / rings);
+            var dOuter = start - (r + 1) * ((start + reach) / rings);
 
             Offset(outline, outer, shift, shadow.Spread - dOuter, winding);
 
@@ -239,6 +247,302 @@ internal static class Shadow
 
         // Where this ring's OUTER vertices start, so the next can index them as its inner.
         return outerBase;
+    }
+
+    /// <summary>
+    /// Emits one inset shadow inside a convex outline. Call after the fill, before the stroke.
+    /// </summary>
+    /// <remarks>
+    /// CSS draws an inset shadow as the blurred inverse of the shape moved by the offset and
+    /// shrunk by the spread, clipped to the shape. Here: at a point whose inward distance into
+    /// the moved outline is <c>u</c>, alpha is <c>1 - Coverage(u - spread)</c>. Exact for a
+    /// straight edge, the same corner approximation as the outset shadow.
+    ///
+    /// Geometry is rings along the moved outline, offset from `spread - 3 sigma` to
+    /// `spread + 3 sigma`, plus a solid band out to past the shape and the core inside. Each
+    /// ring triangle is cut to the shape with the convex clipper and every vertex gets its
+    /// alpha from the distance, so a vertex a clip created is coloured correctly rather than
+    /// interpolated from ring corners it no longer has. A ring deeper than the shape is thick
+    /// would turn inside out, so rings stop at the outline's inradius and the core takes the
+    /// rest.
+    ///
+    /// ponytail: one unshared vertex set per clipped triangle, roughly 3x an outset shadow's
+    /// vertices; share vertices across unclipped triangles if inset shadows get common.
+    /// </remarks>
+    internal static void EmitInset(MeshBuilder vh, List<Vector2> outline, VecShadow shadow, Matrix4x4 matrix, float screenScale, ClipRegion? clip)
+    {
+        var count = outline.Count;
+        if (count < 3 || shadow.Colour.a <= 0.002f)
+            return;
+
+        var shape = new List<Vector2>(clip != null ? clip.ClipPolygon(outline) : outline);
+        var region = shape.Count >= 3 ? ClipRegion.FromPolygon(shape) : null;
+        if (region == null)
+            return;
+
+        var winding = Mathf.Sign(Triangulator.SignedArea(outline));
+        var shift = new Vector2(shadow.Dx, shadow.Dy);
+
+        // A blur of 0 is floored to a fraction of a unit. The alpha is evaluated at vertices,
+        // and a true step there flips on rounding: a ring laid exactly on the edge read as
+        // inside or outside at random, and the whole shape went dark.
+        var sigma = Mathf.Max(0.05f, Mathf.Max(0f, shadow.Blur) * 0.5f);
+        var reach = sigma * Support;
+        var spread = shadow.Spread;
+
+        var moved = new List<Vector2>(count);
+        foreach (var point in outline)
+            moved.Add(point + shift);
+
+        var inradius = Inradius(moved);
+        var uLo = spread - reach;
+
+        // The same fold as the outset shadow's, for miter offsets: a rounded corner cannot be
+        // shrunk past its radius without folding, whatever the shape's inradius allows.
+        var uHi = Mathf.Min(spread + reach, Mathf.Min(inradius * 0.999f, InwardLimit(outline, winding, miter: true)));
+        var uFar = Mathf.Min(uLo, -shift.magnitude) - 1f;
+
+        var field = new InsetField(moved, winding, spread, sigma, shadow.Colour);
+
+        // Levels from outside the shape inward. Consecutive levels bound one ring.
+        var levels = new List<float> { uFar };
+        if (uHi > uLo)
+        {
+            var rings = Mathf.Clamp(Mathf.CeilToInt((uHi - uLo) * Mathf.Max(0.0001f, screenScale) / 4f), MinRings, MaxRings);
+
+            for (var r = 0; r <= rings; r++)
+                levels.Add(Mathf.Lerp(uLo, uHi, r / (float)rings));
+        }
+        else
+        {
+            levels.Add(uHi);
+        }
+
+        var outer = new List<Vector2>(count);
+        var inner = new List<Vector2>(count);
+        var triangle = new List<Vector2>(3);
+        var piece = new List<Vector2>(8);
+
+        MiterOffset(outline, outer, shift, -levels[0], winding);
+
+        for (var l = 1; l < levels.Count; l++)
+        {
+            MiterOffset(outline, inner, shift, -levels[l], winding);
+
+            for (var i = 0; i < count; i++)
+            {
+                var next = (i + 1) % count;
+                EmitPiece(vh, region, field, matrix, triangle, piece, outer[i], outer[next], inner[next]);
+                EmitPiece(vh, region, field, matrix, triangle, piece, outer[i], inner[next], inner[i]);
+            }
+
+            (outer, inner) = (inner, outer);
+        }
+
+        // The core, inside the deepest ring. Skipped when it is fully clear of shadow.
+        if (field.Alpha(Centroid(outer)) <= 0.002f && field.Alpha(outer[0]) <= 0.002f)
+            return;
+
+        var core = region.ClipPolygon(outer, piece);
+        if (core.Count < 3 || Tessellator.Starved(vh, core.Count, "an inset shadow"))
+            return;
+
+        var origin = vh.currentVertCount;
+        foreach (var point in core)
+            vh.AddVert(matrix.MultiplyPoint3x4(point), field.Colour(point), Vector2.zero);
+
+        for (var i = 1; i < core.Count - 1; i++)
+            vh.AddTriangle(origin, origin + i, origin + i + 1);
+    }
+
+    /// <summary>
+    /// Offsets a closed contour so that every EDGE moves by <paramref name="amount"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Offset"/> moves each vertex that far along its normal, which moves a square's
+    /// edges only 0.71 of it. The outset shadow lives with that; the inset one cannot, since its
+    /// alpha comes from true distance and a ring laid at 0.71 of its depth takes the wrong one:
+    /// a hard inset on a square went black to the middle.
+    /// </remarks>
+    private static void MiterOffset(List<Vector2> source, List<Vector2> into, Vector2 shift, float amount, float winding)
+    {
+        into.Clear();
+        var count = source.Count;
+
+        for (var i = 0; i < count; i++)
+        {
+            var incoming = (source[i] - source[(i - 1 + count) % count]).normalized;
+            var outgoing = (source[(i + 1) % count] - source[i]).normalized;
+
+            var a = new Vector2(incoming.y, -incoming.x) * winding;
+            var b = new Vector2(outgoing.y, -outgoing.x) * winding;
+
+            // Scaled so both adjacent edges move the full amount; capped for needle corners.
+            var miter = (a + b) / Mathf.Max(0.25f, 1f + Vector2.Dot(a, b));
+            into.Add(source[i] + shift + miter * amount);
+        }
+    }
+
+    /// <summary>
+    /// How far a closed contour can be offset inward before any of its edges reverses.
+    /// </summary>
+    /// <remarks>
+    /// Moving each point inward along its offset direction <c>v</c> changes an edge <c>e</c> to
+    /// <c>e - d (v_b - v_a)</c>, which reverses at <c>d = |e|^2 / (e . (v_b - v_a))</c>. On a
+    /// corner arc that is the arc's radius; on a sharp box it is its half-width. Nine tenths of
+    /// the smallest, so the deepest contour stays clear of the fold.
+    /// </remarks>
+    internal static float InwardLimit(List<Vector2> source, float winding, bool miter)
+    {
+        var count = source.Count;
+        if (count < 3)
+            return 0f;
+
+        var directions = new Vector2[count];
+        for (var i = 0; i < count; i++)
+        {
+            var incoming = (source[i] - source[(i - 1 + count) % count]).normalized;
+            var outgoing = (source[(i + 1) % count] - source[i]).normalized;
+
+            if (miter)
+            {
+                var a = new Vector2(incoming.y, -incoming.x) * winding;
+                var b = new Vector2(outgoing.y, -outgoing.x) * winding;
+                directions[i] = (a + b) / Mathf.Max(0.25f, 1f + Vector2.Dot(a, b));
+            }
+            else
+            {
+                var normal = new Vector2(incoming.y + outgoing.y, -(incoming.x + outgoing.x)).normalized * winding;
+                directions[i] = normal.sqrMagnitude < 0.0001f ? Vector2.up : normal;
+            }
+        }
+
+        var limit = float.MaxValue;
+        for (var i = 0; i < count; i++)
+        {
+            var next = (i + 1) % count;
+            var edge = source[next] - source[i];
+            var closing = Vector2.Dot(edge, directions[next] - directions[i]);
+            if (closing > 1e-8f)
+                limit = Mathf.Min(limit, edge.sqrMagnitude / closing);
+        }
+
+        return limit == float.MaxValue ? float.MaxValue : limit * 0.9f;
+    }
+
+    private static void EmitPiece(MeshBuilder vh, ClipRegion region, InsetField field, Matrix4x4 matrix,
+        List<Vector2> triangle, List<Vector2> piece, Vector2 a, Vector2 b, Vector2 c)
+    {
+        if (field.Alpha(a) <= 0.002f && field.Alpha(b) <= 0.002f && field.Alpha(c) <= 0.002f
+            && field.Alpha((a + b + c) / 3f) <= 0.002f)
+        {
+            return;
+        }
+
+        triangle.Clear();
+        triangle.Add(a);
+        triangle.Add(b);
+        triangle.Add(c);
+
+        var cut = region.ClipPolygon(triangle, piece);
+        if (cut.Count < 3 || Tessellator.Starved(vh, cut.Count, "an inset shadow"))
+            return;
+
+        var origin = vh.currentVertCount;
+        foreach (var point in cut)
+            vh.AddVert(matrix.MultiplyPoint3x4(point), field.Colour(point), Vector2.zero);
+
+        for (var i = 1; i < cut.Count - 1; i++)
+            vh.AddTriangle(origin, origin + i, origin + i + 1);
+    }
+
+    private static Vector2 Centroid(List<Vector2> points)
+    {
+        var sum = Vector2.zero;
+        foreach (var point in points)
+            sum += point;
+
+        return sum / Mathf.Max(1, points.Count);
+    }
+
+    /// <summary>Distance from the centroid to the nearest edge line: a safe inradius for a convex outline.</summary>
+    internal static float Inradius(List<Vector2> polygon)
+    {
+        var centre = Centroid(polygon);
+        var nearest = float.MaxValue;
+
+        for (var i = 0; i < polygon.Count; i++)
+        {
+            var a = polygon[i];
+            var edge = polygon[(i + 1) % polygon.Count] - a;
+            if (edge.sqrMagnitude < 1e-10f)
+                continue;
+
+            nearest = Mathf.Min(nearest, Mathf.Abs(edge.x * (centre.y - a.y) - edge.y * (centre.x - a.x)) / edge.magnitude);
+        }
+
+        return nearest == float.MaxValue ? 0f : nearest;
+    }
+
+    /// <summary>An inset shadow's alpha as a function of position.</summary>
+    internal readonly struct InsetField
+    {
+        private readonly List<Vector2> _moved;
+        private readonly float _winding;
+        private readonly float _spread;
+        private readonly float _sigma;
+        private readonly Color _colour;
+
+        internal InsetField(List<Vector2> moved, float winding, float spread, float sigma, Color colour)
+        {
+            _moved = moved;
+            _winding = winding;
+            _spread = spread;
+            _sigma = sigma;
+            _colour = colour;
+        }
+
+        /// <summary>Signed distance into the moved outline: positive inside.</summary>
+        internal float Depth(Vector2 p)
+        {
+            var inside = true;
+            var edgeDistance = float.MaxValue;
+            var segmentDistance = float.MaxValue;
+
+            for (var i = 0; i < _moved.Count; i++)
+            {
+                var a = _moved[i];
+                var b = _moved[(i + 1) % _moved.Count];
+                var edge = b - a;
+                var length = edge.magnitude;
+                if (length < 1e-6f)
+                    continue;
+
+                // Signed so that inside is positive whichever way the outline winds.
+                var side = (edge.x * (p.y - a.y) - edge.y * (p.x - a.x)) / length * _winding;
+                if (side < 0f)
+                    inside = false;
+
+                edgeDistance = Mathf.Min(edgeDistance, Mathf.Abs(side));
+
+                var t = Mathf.Clamp01(Vector2.Dot(p - a, edge) / (length * length));
+                segmentDistance = Mathf.Min(segmentDistance, (a + edge * t - p).magnitude);
+            }
+
+            return inside ? edgeDistance : -segmentDistance;
+        }
+
+        internal float Alpha(Vector2 p)
+        {
+            return _colour.a * (1f - Coverage(Depth(p) - _spread, _sigma));
+        }
+
+        internal Color32 Colour(Vector2 p)
+        {
+            var c = _colour;
+            c.a = Alpha(p);
+            return c;
+        }
     }
 
     /// <summary>Fills the solid core. Convex is the common case and fans directly.</summary>

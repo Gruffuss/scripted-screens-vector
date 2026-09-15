@@ -42,6 +42,9 @@ internal sealed class TessellationStats
     /// </remarks>
     internal string? Starved;
 
+    /// <summary>`IMG` nodes: drawn ones with their shape index, and sources still to load (index -1).</summary>
+    internal readonly System.Collections.Generic.List<ImagePlacement> Images = new();
+
     /// <summary>Data names the scene asked for and did not get, this rebuild.</summary>
     internal readonly System.Collections.Generic.List<string> Missing = new();
 }

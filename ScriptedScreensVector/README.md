@@ -253,9 +253,11 @@ both sides of it, which is why a feathered knob reads as a ring rather than a sh
 evaluates the real Gaussian and stacks contours across it.
 
 Two limits: the shadow is not knocked out under the shape, so a **translucent** shape sits
-over its own shadow and reads darker than a CSS mockup; and `inset` is not implemented.
+over its own shadow and reads darker than a CSS mockup. Add `"inset"` as a sixth field for an
+inner shadow, drawn over the fill and cut to the shape — convex shapes only.
 
-**On text, `sh` works like CSS `text-shadow`** and takes one entry. Offset is free — a shadow
+**On text, `sh` works like CSS `text-shadow`**, several entries included (each extra one is a
+copy of the label). Offset is free — a shadow
 that would not fit is drawn by an offset copy of the label — but **blur is capped by the font**:
 the glow is baked into the font's distance field, which only reaches so far past each letter.
 On the game's LiberationSans that is about `fontSize / 8.65` canvas units of blur-plus-spread,
@@ -400,8 +402,8 @@ every tick or it disappears.
 Three things it cannot do, because TMP builds its own geometry on its own object:
 
 - It updates at the **rebuild rate**, not instantly. In practice that is 30 Hz.
-- It clips to an **axis-aligned rectangle** only. A rounded or rotated clip cuts the geometry
-  around it but not the text.
+- A clip that is not an axis-aligned rectangle — rounded, elliptical, concave — masks the text
+  through the stencil, which is one more draw call per label it touches.
 - It cannot be part of a gradient fill — `f` is a flat colour sampled at the node's origin.
 
 `font` takes any family TMP knows, which is what the companion fonts mod registers. `fit` is
@@ -633,7 +635,8 @@ softens a *silhouette*; an edge with a neighbour flush against it has none, and 
 composites on top of what is already drawn there. Two shapes at 0.62 meeting under a feather
 read as 0.86: a bright rule where the join should be invisible.
 
-**Clip shapes must be convex** — rectangle, rounded rectangle, ellipse, convex polygon. A
+**A concave clip multiplies what it clips.** It is split into convex pieces and everything
+under it is drawn once per piece, so an L-shape doubles the geometry of its contents. A
 clipped fill cannot carry holes. Clip outlines are static: `t` inside one is silently
 constant. They are in scene coordinates and stay put when the group using them is transformed.
 
@@ -679,7 +682,8 @@ The surface tells you first. A magenta hatched border means the scene has faults
 | magenta border | unknown op or attribute, bad expression, missing clip or gradient id |
 | magenta fill | `f = "$name"` and no `name` in the data payload |
 | a flat end-stop colour | gradient coordinates in a different place from the shape |
-| one shape missing | a non-convex clip, or a self-intersecting `Y` |
+| one shape missing | a self-intersecting `Y` |
+| an `IMG` never appears | the URL failed to load — `vector_stats` names the error |
 | a value stuck at zero | array index off by one — expressions are 0-based |
 | nothing at all | the two elements' `scene` ids do not match |
 

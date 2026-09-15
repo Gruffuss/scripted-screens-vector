@@ -22,8 +22,8 @@
 --
 -- WHAT IT CANNOT DO, because TMP builds its own geometry on its own object:
 --   * it updates at the REBUILD rate, ~30 Hz, not the instant a value changes
---   * it clips to an AXIS-ALIGNED RECTANGLE only -- a rounded clip cuts the shapes around
---     the text but not the text
+--   * a clip that is not an axis-aligned rectangle masks it through the stencil -- one more
+--     draw call per label it touches
 --   * `f` is a flat colour, sampled at the node's origin. No gradient fills on type.
 --   * a group's opacity reaches it as the LABEL's alpha, not by fading it with the mesh --
 --     which is the right answer, but it means `o` cannot tint type the way it tints a fill
@@ -128,7 +128,8 @@ ui:element({
               text = "code face: <b>0123</b> 456", size = 7, font = "code",
               align = "center", f = "#3A5570" },
 
-            -- 6. TEXT SHADOWS. `sh` takes CSS text-shadow values, one entry on text. The two
+            -- 6. TEXT SHADOWS. `sh` takes CSS text-shadow values; several entries each cost a
+            --    copy of the label, and a sixth field "inset" draws inside the glyphs. The two
             --    halves of it behave differently, and both are shown here:
             --
             --    OFFSET IS FREE. A drop shadow whose offset would not fit is drawn by an

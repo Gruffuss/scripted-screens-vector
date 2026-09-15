@@ -163,6 +163,9 @@ internal sealed class ClipRegion
         return new ClipRegion(new List<Vector2>(polygon), Mathf.Sign(area));
     }
 
+    /// <summary>The region's outline, in its own coordinates. Read only.</summary>
+    internal List<Vector2> Boundary => _boundary;
+
     /// <summary>Re-expresses this region in another coordinate space.</summary>
     internal ClipRegion Transform(Matrix4x4 matrix)
     {

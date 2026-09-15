@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace ScriptedScreensVector;
@@ -30,7 +31,29 @@ internal struct TextPlacement
     internal Rect? ClipRect;     // canvas-space bounds of the enclosing clip, if any
     internal bool Wrap;          // may run to more than one line
     internal float LineHeight;   // multiple of the font size; 0 means the font's own
-    internal VecShadow? Shadow;  // first `sh` entry, in canvas units; see TextLayer
+    internal VecShadow? Shadow;  // first outset `sh` entry, in canvas units; see TextLayer
+
+    /// <summary>Outset shadows after the first, each drawn by a copy of the label.</summary>
+    internal VecShadow[]? ExtraShadows;
+
+    /// <summary>An inset shadow, drawn inside the glyphs by a copy over the label.</summary>
+    internal VecShadow? InsetShadow;
+
+    /// <summary>
+    /// The clip's true outline in canvas space when it is not an axis-aligned rectangle: a
+    /// rounded or rotated box, an ellipse, a concave polygon. Null when <see cref="ClipRect"/>
+    /// says everything. TextLayer masks with a stencil for these.
+    /// </summary>
+    internal List<Vector2>? ClipPolygon;
+
+    /// <summary>Filters and mask of the enclosing groups, applied per glyph vertex.</summary>
+    internal VertexTint? Tint;
+
+    /// <summary>`f=@gradient`: sampled at every glyph vertex. Null for a flat colour.</summary>
+    internal TextGradient? Gradient;
+
+    /// <summary>`fl`: first-line overrides, with size already in canvas units.</summary>
+    internal FirstLineStyle? FirstLine;
 
     /// <summary>How many shapes had been emitted when this label was collected.</summary>
     /// <remarks>Where the label sits in draw order; see <see cref="TextOrder"/>.</remarks>
@@ -69,6 +92,7 @@ internal static class TextAlign
         {
             "CENTER" or "CENTRE" => 1,
             "RIGHT" => 2,
+            "JUSTIFIED" or "JUSTIFY" => 3,
             _ => 0,
         };
     }
@@ -92,6 +116,13 @@ internal static class TextAlign
 /// test that is only ever run on a click — and a row, a button and a tile, which is what
 /// carries `click`, are rectangles whose bounds are their shape.
 /// </remarks>
+/// <summary>An `IMG` the walk met: drawn as shape <see cref="ShapeIndex"/>, or -1 when its texture is not here yet.</summary>
+internal struct ImagePlacement
+{
+    internal string Src;
+    internal int ShapeIndex;
+}
+
 internal struct HitRegion
 {
     internal string Id;
@@ -216,13 +247,17 @@ internal readonly struct VecShadow
     internal readonly float Spread;
     internal readonly Color Colour;
 
-    internal VecShadow(float dx, float dy, float blur, float spread, Color colour)
+    /// <summary>CSS `inset`: drawn inside the shape, over its fill.</summary>
+    internal readonly bool Inset;
+
+    internal VecShadow(float dx, float dy, float blur, float spread, Color colour, bool inset = false)
     {
         Dx = dx;
         Dy = dy;
         Blur = blur;
         Spread = spread;
         Colour = colour;
+        Inset = inset;
     }
 }
 
@@ -323,5 +358,161 @@ internal static class TextShadow
 
         fit = split;
         return true;
+    }
+}
+
+/// <summary>A scroll offset set by a script, applied once per new version.</summary>
+internal static class ForcedScroll
+{
+    /// <summary>Applies <paramref name="offset"/> when <paramref name="version"/> is new for this id.</summary>
+    internal static bool Apply(Dictionary<string, float> offsets, Dictionary<string, float> applied, string id, float version, float offset)
+    {
+        if (applied.TryGetValue(id, out var last) && Mathf.Approximately(last, version))
+            return false;
+
+        applied[id] = version;
+        offsets[id] = offset;
+        return true;
+    }
+}
+
+/// <summary>A gradient fill on text, looked up per glyph vertex in the text layer.</summary>
+internal sealed class TextGradient
+{
+    /// <summary>The gradient at full alpha; `units=bbox` is bound to the label's box.</summary>
+    internal Paint Paint;
+
+    /// <summary>Canvas space to the text node's own coordinates.</summary>
+    internal Matrix4x4 CanvasToLocal;
+
+    internal Color At(Vector3 canvas)
+    {
+        return Paint.At(CanvasToLocal.MultiplyPoint3x4(canvas));
+    }
+}
+
+/// <summary>`fl="f=#fff size=12 weight=bold font=Name"`: what `::first-line` changes.</summary>
+internal sealed class FirstLineStyle
+{
+    internal Color? Colour;
+    internal float? Size;
+    internal bool? Bold;
+    internal string? Font;
+
+    internal FirstLineStyle Scaled(float scale)
+    {
+        return new FirstLineStyle { Colour = Colour, Size = Size * scale, Bold = Bold, Font = Font };
+    }
+
+    /// <summary>Space-separated key=value pairs; a value may be quoted with ' or ".</summary>
+    internal static FirstLineStyle Parse(string text, VecScene scene)
+    {
+        var style = new FirstLineStyle();
+        var i = 0;
+
+        while (i < text.Length)
+        {
+            while (i < text.Length && char.IsWhiteSpace(text[i]))
+                i++;
+
+            var keyStart = i;
+            while (i < text.Length && text[i] != '=' && !char.IsWhiteSpace(text[i]))
+                i++;
+
+            var key = text.Substring(keyStart, i - keyStart);
+            if (key.Length == 0)
+                break;
+
+            var value = string.Empty;
+            if (i < text.Length && text[i] == '=')
+            {
+                i++;
+                if (i < text.Length && (text[i] == '\'' || text[i] == '"'))
+                {
+                    var quote = text[i++];
+                    var close = text.IndexOf(quote, i);
+                    if (close < 0)
+                        close = text.Length;
+
+                    value = text.Substring(i, close - i);
+                    i = Mathf.Min(text.Length, close + 1);
+                }
+                else
+                {
+                    var valueStart = i;
+                    while (i < text.Length && !char.IsWhiteSpace(text[i]))
+                        i++;
+
+                    value = text.Substring(valueStart, i - valueStart);
+                }
+            }
+
+            switch (key)
+            {
+                case "f":
+                    if (ColorUtility.TryParseHtmlString(value, out var colour))
+                        style.Colour = colour;
+                    else
+                        scene.Problem($"T fl: \"{value}\" is not a colour");
+                    break;
+
+                case "size":
+                    if (float.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var size))
+                        style.Size = size;
+                    else
+                        scene.Problem($"T fl: size \"{value}\" is not a number");
+                    break;
+
+                case "weight":
+                    style.Bold = value.Equals("bold", System.StringComparison.OrdinalIgnoreCase)
+                                 || (float.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var weight) && weight >= 600f);
+                    break;
+
+                case "font":
+                    style.Font = value;
+                    break;
+
+                default:
+                    scene.Problem($"T fl: \"{key}\" is not a first-line attribute (f, size, weight, font)");
+                    break;
+            }
+        }
+
+        return style;
+    }
+
+    /// <summary>The text with rich tags around its first <paramref name="cut"/> characters.</summary>
+    internal string Wrap(string text, int cut, out int prefixLength)
+    {
+        var open = new System.Text.StringBuilder();
+        var close = new System.Text.StringBuilder();
+
+        if (Font != null)
+        {
+            open.Append("<font=\"").Append(Font).Append("\">");
+            close.Insert(0, "</font>");
+        }
+
+        if (Size.HasValue)
+        {
+            open.Append("<size=").Append(Size.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append('>');
+            close.Insert(0, "</size>");
+        }
+
+        if (Bold == true)
+        {
+            open.Append("<b>");
+            close.Insert(0, "</b>");
+        }
+
+        if (Colour.HasValue)
+        {
+            open.Append("<color=#").Append(ColorUtility.ToHtmlStringRGBA(Colour.Value)).Append('>');
+            close.Insert(0, "</color>");
+        }
+
+        prefixLength = open.Length;
+        cut = Mathf.Clamp(cut, 0, text.Length);
+        return open + text.Substring(0, cut) + close + text.Substring(cut);
     }
 }

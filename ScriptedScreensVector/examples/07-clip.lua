@@ -4,13 +4,12 @@
 -- its tank, how a progress bar keeps rounded ends while its fill is square, and how a
 -- scrolling chart stops at its window edge instead of running across the console.
 --
--- THE ONE RESTRICTION: clip shapes must be CONVEX.
---   Allowed  : rectangle, rounded rectangle, ellipse, convex polygon.
---   Not      : an L-shape, a star, a crescent, anything with a dent in it.
+-- ANY OUTLINE WORKS: rectangle, rounded rectangle, ellipse, polygon, path.
 --
---   That covers essentially every real console layout, and it is what makes clipping free
---   at draw time -- a convex region is an intersection of half-planes, so shapes are cut
---   geometrically while the mesh is built. There is no stencil buffer and no per-frame cost.
+--   A CONVEX clip is free at draw time -- a convex region is an intersection of half-planes,
+--   so shapes are cut geometrically while the mesh is built. A CONCAVE one (an L-shape, a
+--   star) is split into convex pieces and everything under it is drawn once per piece, so it
+--   costs what it clips times the number of pieces. Prefer convex where the design allows.
 --
 -- Clip outlines are in SCENE COORDINATES, where you declare them, and they stay put when
 -- the group using them is transformed. Declare the window once, in the same coordinates as
@@ -139,6 +138,6 @@ end
 --   * Clip outlines are STATIC. An expression using `t` inside a CP is silently constant.
 --     Clips are layout, not animation -- animate the contents instead, as item 3 does.
 --
---   * If a clip is rejected (not convex, or a name that does not exist) the console draws a
+--   * If a clip is rejected (degenerate, or a name that does not exist) the console draws a
 --     magenta hatched border rather than silently showing you the wrong picture. The reason
 --     is in BepInEx/LogOutput.log.

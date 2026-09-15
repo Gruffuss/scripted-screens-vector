@@ -5,7 +5,7 @@
         <RootNamespace>$(ModName)</RootNamespace>
         <TargetFramework>netstandard2.1</TargetFramework>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-        <Version>0.11.20.0</Version>
+        <Version>0.11.21.0</Version>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     </PropertyGroup>
     <!-- Build paths and the Documents-directory override live in exactly one
@@ -35,6 +35,11 @@
         <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.3" PrivateAssets="all" />
         <Reference Include="ScriptedScreens" Publicize="true">
             <HintPath>$(ScriptedScreensDirectory)\ScriptedScreens.dll</HintPath>
+            <Private>False</Private>
+        </Reference>
+        <!-- IMG downloads its textures; the texture handler lives in its own module. -->
+        <Reference Include="UnityEngine.UnityWebRequestTextureModule">
+            <HintPath>$(StationeersManagedDirectory)\UnityEngine.UnityWebRequestTextureModule.dll</HintPath>
             <Private>False</Private>
         </Reference>
         <Reference Include="StationeersMods.Interface">

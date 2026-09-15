@@ -41,6 +41,10 @@
         <Compile Include="..\ScriptedScreensVector\Shadow.cs" />
         <Compile Include="..\ScriptedScreensVector\Tessellator.cs" />
         <Compile Include="..\ScriptedScreensVector\TessellationStats.cs" />
+        <Compile Include="..\ScriptedScreensVector\ColourFilter.cs" />
+        <Compile Include="..\ScriptedScreensVector\ConvexPartition.cs" />
+        <Compile Include="ImageCacheStub.cs" />
+        <Compile Include="RequirementTests.cs" />
         <Compile Include="ScriptedScreensStubs.cs" />
         <Compile Include="Stubs.cs" />
         <Compile Include="ConfigStub.cs" />

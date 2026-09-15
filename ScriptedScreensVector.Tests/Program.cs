@@ -156,6 +156,15 @@ internal static class Program
         GradientTests.AlphaInterpolation(run);
         GradientTests.BoundingBoxGradientTracksShape(run);
 
+        Console.WriteLine();
+        RequirementTests.ConicAngles(run);
+        RequirementTests.Filters(run);
+        RequirementTests.GroupMatrix(run);
+        RequirementTests.Partition(run);
+        RequirementTests.ImageFit(run);
+        RequirementTests.ForcedScrollOnce(run);
+        RequirementTests.InsetField(run);
+
         var exit = run.Report();
 
         // Only when asked: the benchmark takes a few seconds and is not a pass/fail check.

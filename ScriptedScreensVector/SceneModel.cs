@@ -18,6 +18,7 @@ internal enum VecOp
     Path,
     Text,
     Scroll,
+    Image,
 }
 
 internal enum FitMode
@@ -69,6 +70,29 @@ internal sealed class VecNode
 
     /// <summary>CSS-style drop shadows, drawn beneath the shape in declaration order.</summary>
     internal VecShadow[]? Shadows;
+
+    /// <summary>`m=[a,b,c,d,e,f]` on a group: CSS matrix(), composed after t r s.</summary>
+    internal float[]? GroupMatrix;
+
+    /// <summary>`bri con sat hue gray sep inv` on a group, in the order written.</summary>
+    internal List<(int Op, Expression Amount)>? Filters;
+
+    /// <summary>`mask=@gradient` on a group: every colour under it takes the gradient's alpha.</summary>
+    internal string? MaskGradient;
+
+    /// <summary>`so` / `sov` on SC: a forced scroll offset, applied once per new version.</summary>
+    internal Expression? ScrollSet;
+    internal Expression? ScrollSetVersion;
+
+    /// <summary>`IMG`: source URL and object-fit (0 fill, 1 contain, 2 cover).</summary>
+    internal string? ImageSource;
+    internal int ImageFit;
+
+    /// <summary>`uv=[u0,v0,u1,v1]` on IMG: the part of the texture shown, v from the top.</summary>
+    internal Rect ImageCrop = new(0f, 0f, 1f, 1f);
+
+    /// <summary>`fl="..."` on T: first-line overrides.</summary>
+    internal FirstLineStyle? FirstLine;
 
     /// <summary>
     /// Fill opacity at a band's <c>y2</c> edge, ramping from <c>fo</c> at the <c>y</c> edge.
@@ -746,6 +770,7 @@ internal static class SceneParser
         "grad", "at", "units", "stops", "fx", "fy",
         "text", "size", "align", "valign", "font", "weight", "cspace", "fit", "min_size",
         "fmt", "unit", "missing", "wrap", "lh",
+        "fat", "sat", "m", "bri", "con", "hue", "gray", "sep", "inv", "mask", "sov", "src", "fl", "uv",
     };
 
     private static void Validate(SS.UiProp[] map, VecScene scene, string? op, string? id)
@@ -821,6 +846,31 @@ internal static class SceneParser
                 node.Rotate = Attr(map, "r", 0f);
                 node.Opacity = Attr(map, "o", 1f);
                 node.ClipRef = PropString(map, "clip");
+
+                // CSS matrix(a,b,c,d,e,f), composed after t r s the way a transform list is.
+                if (HasKey(map, "m"))
+                {
+                    var m = Numbers(map, "m");
+                    if (m.Length == 6)
+                        node.GroupMatrix = m;
+                    else
+                        scene.Problem($"G: m takes six numbers, {m.Length} given");
+                }
+
+                // Filters in the order written, since CSS applies a filter list in order.
+                foreach (var prop in map)
+                {
+                    var filterOp = string.IsNullOrEmpty(prop.Key) ? -1 : ColourFilter.OpFor(prop.Key);
+                    if (filterOp < 0)
+                        continue;
+
+                    node.Filters ??= new List<(int, Expression)>();
+                    node.Filters.Add((filterOp, Attr(map, prop.Key, 1f)));
+                }
+
+                var mask = PropString(map, "mask");
+                if (!string.IsNullOrEmpty(mask) && mask![0] == '@')
+                    node.MaskGradient = mask[1..];
                 break;
 
             case "RP":
@@ -852,6 +902,14 @@ internal static class SceneParser
                 node.Rx = node.CornerRadii != null ? node.CornerRadii[0] : Attr(map, "rx", 0f);
                 node.Ry = HasKey(map, "ry") ? Attr(map, "ry", 0f) : node.Rx;
                 node.Opacity = Attr(map, "o", 1f);
+
+                // A script set scrollTop: `sov` changes, `so` is applied once, and wheel and
+                // drag own the offset again afterwards.
+                if (HasKey(map, "so") && HasKey(map, "sov"))
+                {
+                    node.ScrollSet = Attr(map, "so", 0f);
+                    node.ScrollSetVersion = Attr(map, "sov", 0f);
+                }
                 break;
 
             case "R":
@@ -953,9 +1011,44 @@ internal static class SceneParser
                             && (weight.Equals("bold", StringComparison.OrdinalIgnoreCase)
                                 || (float.TryParse(weight, out var numeric) && numeric >= 600f));
 
+                var firstLine = PropString(map, "fl");
+                if (!string.IsNullOrEmpty(firstLine))
+                    node.FirstLine = FirstLineStyle.Parse(firstLine!, scene);
+
                 // Text colour comes from `f`, like every other shape.
                 break;
             }
+
+            case "IMG":
+                // A textured quad, drawn in scene order in a mesh of its own.
+                node.Op = VecOp.Image;
+                node.X = Attr(map, "x", 0f);
+                node.Y = Attr(map, "y", 0f);
+                node.W = Attr(map, "w", 0f);
+                node.H = Attr(map, "h", 0f);
+                node.Rx = Attr(map, "rx", 0f);
+                node.Ry = HasKey(map, "ry") ? Attr(map, "ry", 0f) : node.Rx;
+                node.Opacity = Attr(map, "o", 1f);
+                node.ImageSource = PropString(map, "src");
+                node.ImageFit = (PropString(map, "fit") ?? "fill").ToUpperInvariant() switch
+                {
+                    "CONTAIN" => 1,
+                    "COVER" => 2,
+                    _ => 0,
+                };
+
+                if (string.IsNullOrEmpty(node.ImageSource))
+                    scene.Problem("IMG has no src");
+
+                if (HasKey(map, "uv"))
+                {
+                    var uv = Numbers(map, "uv");
+                    if (uv.Length == 4 && uv[2] > uv[0] && uv[3] > uv[1])
+                        node.ImageCrop = Rect.MinMaxRect(Mathf.Clamp01(uv[0]), Mathf.Clamp01(uv[1]), Mathf.Clamp01(uv[2]), Mathf.Clamp01(uv[3]));
+                    else
+                        scene.Problem("IMG: uv takes [u0,v0,u1,v1] with u1 > u0 and v1 > v0");
+                }
+                break;
 
             case "YS":
                 // Sampled band: n samples of x/y/y2, joined as a triangle strip. This is
@@ -1022,7 +1115,8 @@ internal static class SceneParser
                || node.Opacity.UsesTime || node.FillOpacity.UsesTime || node.Feather.UsesTime
                || node.EdgeFeather is { UsesTime: true }
                || node.StrokeWidth.UsesTime || node.StrokeOpacity.UsesTime || node.DashOffset.UsesTime
-               || node.FillGradientAt is { UsesTime: true } || node.StrokeGradientAt is { UsesTime: true };
+               || node.FillGradientAt is { UsesTime: true } || node.StrokeGradientAt is { UsesTime: true }
+               || (node.Filters != null && node.Filters.Exists(f => f.Amount.UsesTime));
     }
 
     private static bool NodeUsesScroll(VecNode node)
@@ -1073,6 +1167,10 @@ internal static class SceneParser
         {
             node.HasFill = true;
             node.FillGradient = fill[1..];
+
+            // `fat` is the text form of { grad, at }: sample the ramp at an expression.
+            if (HasKey(map, "fat"))
+                node.FillGradientAt = Attr(map, "fat", 0f);
             node.FillOpacity = Attr(map, "fo", 1f);
             node.Feather = Attr(map, "fea", -1f);
 
@@ -1147,6 +1245,24 @@ internal static class SceneParser
 
             switch (op)
             {
+                case "GC":
+                {
+                    // Conic: the parameter is the angle around (cx, cy), from `a` degrees
+                    // measured clockwise from twelve o'clock, as CSS conic-gradient.
+                    var bboxConic = string.Equals(PropString(map, "units"), "bbox", StringComparison.OrdinalIgnoreCase);
+                    var conic = new Gradient
+                    {
+                        Conic = true,
+                        BoundingBox = bboxConic,
+                        Start = new Vector2(PropNumber(map, "cx", 0f), PropNumber(map, "cy", 0f)),
+                        Angle = PropNumber(map, "a", 0f),
+                    };
+
+                    ReadStops(map, conic);
+                    scene.Gradients[id!] = conic;
+                    break;
+                }
+
                 case "GL":
                 case "GR":
                 {
@@ -1181,7 +1297,7 @@ internal static class SceneParser
                     if (outline is { Count: >= 3 })
                         scene.Clips[id!] = outline;
                     else
-                        scene.Problem($"clip \"{id}\" has no usable shape (must be a convex R, C or Y)");
+                        scene.Problem($"clip \"{id}\" has no usable shape (must be an R, C, Y or P)");
 
                     break;
                 }
@@ -1269,6 +1385,9 @@ internal static class SceneParser
         {
             node.HasStroke = true;
             node.StrokeGradient = stroke[1..];
+
+            if (HasKey(map, "sat"))
+                node.StrokeGradientAt = Attr(map, "sat", 0f);
         }
         else if (stroke[0] == '$')
         {
@@ -1422,7 +1541,13 @@ internal static class SceneParser
         if (string.IsNullOrEmpty(text) || !ColorUtility.TryParseHtmlString(text, out var colour))
             return null;
 
-        return new VecShadow(Num(parts[0]), Num(parts[1]), Num(parts[2]), Num(parts[3]), colour);
+        // Sixth field: `inset` (or 1), as CSS writes it.
+        var inset = parts.Length > 5
+                    && ((parts[5].Type == SS.UiValueType.String && string.Equals(parts[5].String, "inset", StringComparison.OrdinalIgnoreCase))
+                        || (parts[5].Type == SS.UiValueType.Number && parts[5].Number > 0.5f)
+                        || (parts[5].Type == SS.UiValueType.Bool && parts[5].Number > 0.5f));
+
+        return new VecShadow(Num(parts[0]), Num(parts[1]), Num(parts[2]), Num(parts[3]), colour, inset);
     }
 
     /// <summary>`rx = [tl, tr, br, bl]` in CSS order, or null when `rx` is a single value.</summary>
@@ -1453,7 +1578,7 @@ internal static class SceneParser
         {
             SS.UiValueType.Number => Expression.Constant(array[index].Number),
             SS.UiValueType.String when !string.IsNullOrEmpty(array[index].String) =>
-                Expression.Parse(array[index].String, fallback),
+                Expression.Parse(array[index].String!, fallback),
             _ => Expression.Constant(fallback),
         };
     }

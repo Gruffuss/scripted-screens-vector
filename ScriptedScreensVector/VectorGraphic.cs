@@ -217,6 +217,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>How far each `SC` is scrolled, in scene units. Survives rebuilds.</summary>
     private readonly Dictionary<string, float> _offsets = new(StringComparer.Ordinal);
 
+    /// <summary>SC nodes carrying `so`/`sov`, and the version last applied per id.</summary>
+    private readonly List<VecNode> _forcedScrollNodes = new();
+    private readonly Dictionary<string, float> _forcedApplied = new(StringComparer.Ordinal);
+
     private Vector2 _dragLast;
     private SS.UiPointerDownForwarder? _forwarder;
     private string _elementId = string.Empty;
@@ -355,6 +359,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
     private void ApplyScene(VecScene scene)
     {
+        _forcedScrollNodes.Clear();
+        CollectForcedScrolls(scene.Root, _forcedScrollNodes);
+
         _scene = scene;
         _needsRebuild = true;
         _sceneId = string.IsNullOrEmpty(scene.Id) ? "?" : scene.Id;
@@ -563,6 +570,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         SampleScroll(rect);
 
+        ApplyForcedScrolls();
+
         _context.ScrollOffsets.Clear();
         foreach (var pair in _offsets)
             _context.ScrollOffsets[pair.Key] = pair.Value;
@@ -593,6 +602,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         ScriptedScreensVectorPlugin.Log?.LogInfo(
             $"vector capture: \"{_sceneId}\" built inline, {_builder.currentVertCount} verts across {_sliceCount} mesh(es)");
 
+        // A capture builds from inside UGUI's rebuild loop, where labels and masks cannot ask for
+        // a rebuild of their own. Observed: after one capture a gradient label lost its colours
+        // and masked labels went blank until something else happened to rebuild them. The next
+        // normal rebuild redoes all of it outside the loop.
+        _needsRebuild = true;
+
         // SLICES BEFORE TEXT, matching the normal path exactly. Sibling order is draw order
         // and both are children of this graphic, so creation order decides who draws over
         // whom. Under `ztext` (the default) OrderTextWithSlices rearranges them afterwards and
@@ -601,6 +616,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // The two paths differing here is a bug by construction either way: a capture must
         // leave the surface in the state a normal rebuild would.
         ApplySlices();
+        ApplyImages();
 
         if (_stats.Text.Count > 0 || _text != null)
         {
@@ -613,6 +629,57 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     }
 
     /// <summary>Hands slices 1..n to child graphics, creating and retiring them as needed.</summary>
+    /// <summary>The image cache version this surface last rebuilt against, while it waits on one.</summary>
+    private int _imagesWaitingOn = -1;
+
+    /// <summary>The texture slice 0 carries when an `IMG` is the first thing drawn.</summary>
+    [SerializeField] private Texture? _texture;
+
+    public override Texture mainTexture => _texture != null ? _texture : base.mainTexture;
+
+    /// <summary>
+    /// Hands each drawn image's texture to the mesh carrying it, and starts loading the rest.
+    /// </summary>
+    private void ApplyImages()
+    {
+        Texture? first = null;
+        var sliceTextures = _slices.Count > 0 ? new Texture?[_slices.Count] : null;
+        var waiting = false;
+
+        foreach (var image in _stats.Images)
+        {
+            if (image.ShapeIndex < 0)
+            {
+                ImageCache.Request(image.Src);
+                waiting = true;
+                continue;
+            }
+
+            var slice = _builder.SlicesBefore(_builder.ShapeStart(image.ShapeIndex));
+            var texture = ImageCache.Texture(image.Src);
+
+            if (slice == 0)
+                first = texture;
+            else if (sliceTextures != null && slice - 1 < sliceTextures.Length)
+                sliceTextures[slice - 1] = texture;
+        }
+
+        if (_texture != first)
+        {
+            _texture = first;
+            SetMaterialDirty();
+        }
+
+        for (var i = 0; i < _slices.Count; i++)
+        {
+            if (_slices[i] != null)
+                _slices[i].SetTexture(sliceTextures?[i]);
+        }
+
+        // Rebuilt when any request finishes. A static scene has nothing else to wake it.
+        _imagesWaitingOn = waiting ? ImageCache.Version : -1;
+    }
+
     private void ApplySlices()
     {
         var extra = Mathf.Max(0, _sliceCount - 1);
@@ -1052,6 +1119,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         if (VectorConfig.RendererEnabled && _scene != null && !animated && ScaleChanged())
             _needsRebuild = true;
 
+        if (_imagesWaitingOn >= 0 && ImageCache.Version != _imagesWaitingOn)
+        {
+            _imagesWaitingOn = -1;
+            _needsRebuild = true;
+        }
+
         if (VectorConfig.RendererEnabled && _scene != null && _job == null
             && (_needsRebuild || (animated && DueForRebuild())))
         {
@@ -1262,6 +1335,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // Handed over at dispatch like everything else Unity-sourced: the worker reads this
         // and the main thread writes it, never at the same time, because only one job for a
         // surface is ever in flight.
+        ApplyForcedScrolls();
+
         _context.ScrollOffsets.Clear();
         foreach (var pair in _offsets)
             _context.ScrollOffsets[pair.Key] = pair.Value;
@@ -1296,6 +1371,27 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
             return (wall, cpuBefore < 0d || cpuAfter < 0d ? -1d : cpuAfter - cpuBefore);
         });
+    }
+
+    private static void CollectForcedScrolls(List<VecNode> nodes, List<VecNode> into)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.Op == VecOp.Scroll && node.ScrollSetVersion != null && !string.IsNullOrEmpty(node.Id))
+                into.Add(node);
+
+            CollectForcedScrolls(node.Children, into);
+        }
+    }
+
+    /// <summary>Applies a script-set scroll offset once per new `sov`; wheel and drag own it after.</summary>
+    private void ApplyForcedScrolls()
+    {
+        foreach (var node in _forcedScrollNodes)
+        {
+            ForcedScroll.Apply(_offsets, _forcedApplied, node.Id!,
+                node.ScrollSetVersion!.Evaluate(_context), node.ScrollSet!.Evaluate(_context));
+        }
     }
 
     /// <summary>True when the enclosing ScrollRect has moved since the last rebuild.</summary>
@@ -1403,6 +1499,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // Everything past the first mesh goes to a child. A scene that fits one mesh -- which
         // is nearly all of them -- never creates any and never pays for this.
         ApplySlices();
+
+        ApplyImages();
 
         _stopwatch.Stop();
 

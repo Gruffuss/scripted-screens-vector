@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.11.20.0</Version>
+	<Version>0.11.21.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -21,10 +21,12 @@ Tessellation runs on a worker thread. A console with 800 shapes animating at 30 
 [*] Rectangles with real rounded corners, ellipses, polygons, SVG paths with holes
 [*] Smooth liquid surfaces, waveforms and area charts that read as continuous edges
 [*] Catmull-Rom splines, strokes with caps, joins and dashes
-[*] Linear and radial gradients, including ones that follow the shape they fill
+[*] Linear, radial and conic gradients, including ones that follow the shape they fill
 [*] Real alpha — no more pre-composited opaque palettes
 [*] Antialiased edges, sized in screen pixels so they look right at any distance
-[*] Convex clipping, so a liquid stays in its tank
+[*] Clipping to any outline, so a liquid stays in its tank
+[*] Pictures from a URL, drawn in scene order
+[*] CSS colour filters, gradient masks and matrix transforms on groups
 [*] Opacity ramps along a surface, for gas fades that follow a moving edge
 [*] Soft drop shadows and inner shadows, evaluated analytically -- no offscreen pass
 [*] Text that moves, scales, rotates and scrolls with the artwork, in any font the game has
@@ -58,7 +60,7 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 
 [h2]Notes[/h2]
 [list]
-[*] Clip shapes must be convex, and text clips to a rectangle rather than to rounded corners
+[*] A concave clip draws what it clips once per convex piece, so prefer convex outlines where the design allows
 [*] Text updates at the redraw rate rather than instantly, so a label element is still the better choice for something that must change the moment a value does
 [*] A broken scene says so: it draws a magenta border and names the fault, rather than looking switched off
 [*] Level of detail is automatic -- update rate and curve smoothness both follow on-screen size; consoles off screen or in a paused game cost nothing
@@ -66,6 +68,18 @@ The mod folder contains a numbered set of examples that each run on paste, from 
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.11.21[/b]
+[list]
+[*] [b]Inset shadows[/b] on shapes (sixth sh field "inset", convex shapes) and on text. Text takes several shadows.
+[*] [b]Conic gradients[/b] (GC), clockwise from a start angle, with a hard edge at the seam.
+[*] [b]Concave clips.[/b] Any polygon or path can clip; text is masked to rounded and concave outlines with a stencil.
+[*] [b]IMG[/b]: a picture from a URL, with object-fit, corner radii and opacity, drawn in scene order.
+[*] Groups take CSS [b]filters[/b] (bri con sat hue gray sep inv), a gradient [b]mask[/b], and a CSS [b]matrix[/b] m.
+[*] Fixed: text applied fo and group opacity twice, so a label at 50% drew at 25%.
+[*] Fixed: shadows ignored group opacity and fo, so a faded shape kept a full-strength shadow.
+[*] Text takes a gradient fill (f=@name) and first-line styling (fl). IMG takes uv, a crop of the picture.
+[*] T align=justified. fat and sat sample a gradient in the text scene format. SC so and sov set the scroll offset once per version.
+[/list]
 [b]0.10.5[/b]
 [list]
 [*] Fixed: a console that ran out of room once kept its magenta border for ever, because running out was filed with the scene's parse-time faults, which are never cleared. It is a fault of the size you are standing at, so it now clears when it stops being true.

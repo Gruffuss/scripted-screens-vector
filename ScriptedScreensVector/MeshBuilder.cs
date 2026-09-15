@@ -263,8 +263,15 @@ internal sealed class MeshBuilder
         return _slices.Count - 1;
     }
 
+    /// <summary>Filters and mask of the groups currently being emitted, or null.</summary>
+    internal VertexTint? Tint;
+
     internal void AddVert(Vector3 position, Color32 colour, Vector2 uv)
     {
+        // Filters only: a group's mask is multiplied in once its content is known, MaskRange.
+        if (Tint != null)
+            colour = Tint.ApplyFilters(colour);
+
         _positions.Add(position);
         _colours.Add(colour);
         _uv0.Add(uv);
@@ -280,6 +287,151 @@ internal sealed class MeshBuilder
         if (position.x > _maxX) _maxX = position.x;
         if (position.y < _minY) _minY = position.y;
         if (position.y > _maxY) _maxY = position.y;
+    }
+
+    /// <summary>
+    /// Multiplies a group mask's alpha into every vertex from <paramref name="from"/> on,
+    /// subdividing triangles first where the mask is not affine across them.
+    /// </summary>
+    /// <remarks>
+    /// Subdivision rebuilds the range shape by shape: each shape's own vertices go back in the
+    /// same order, new midpoints are appended after them, and its cut moves to the new end.
+    /// A shape never references vertices outside itself, so nothing else has to be renumbered.
+    /// The range can only be rebuilt from a shape boundary; a group always starts on one.
+    /// </remarks>
+    internal void MaskRange(int from, MaskInfo mask, bool refine)
+    {
+        var to = _positions.Count;
+        if (to <= from)
+            return;
+
+        if (mask.Gradient.BoundingBox)
+        {
+            var min = new Vector2(float.MaxValue, float.MaxValue);
+            var max = new Vector2(float.MinValue, float.MinValue);
+            for (var v = from; v < to; v++)
+            {
+                if (_colours[v].a <= 2)
+                    continue;
+
+                var local = (Vector2)mask.CanvasToLocal.MultiplyPoint3x4(_positions[v]);
+                min = Vector2.Min(min, local);
+                max = Vector2.Max(max, local);
+            }
+
+            if (min.x <= max.x)
+            {
+                mask.Min = min;
+                mask.Size = max - min;
+            }
+        }
+
+        var firstCut = 0;
+        while (firstCut < _cuts.Count && _cuts[firstCut] <= from)
+            firstCut++;
+
+        var aligned = from == 0 || (firstCut > 0 && _cuts[firstCut - 1] == from);
+        if (refine && aligned && firstCut < _cuts.Count && _cuts[^1] == to)
+            Refine(from, firstCut, mask);
+
+        for (var v = from; v < _positions.Count; v++)
+        {
+            var c = _colours[v];
+            c.a = (byte)Mathf.RoundToInt(c.a * Mathf.Clamp01(mask.AlphaAt(_positions[v])));
+            _colours[v] = c;
+        }
+    }
+
+    private const float MaskTolerance = 0.06f;
+    private const int MaskDepth = 4;
+
+    private readonly List<Vector3> _oldP = new();
+    private readonly List<Color32> _oldC = new();
+    private readonly List<Vector2> _oldU = new();
+    private readonly List<int> _oldI = new();
+
+    private void Refine(int from, int firstCut, MaskInfo mask)
+    {
+        var indexFrom = firstCut == 0 ? 0 : _cutIndices[firstCut - 1];
+
+        _oldP.Clear(); _oldC.Clear(); _oldU.Clear(); _oldI.Clear();
+        for (var v = from; v < _positions.Count; v++)
+        {
+            _oldP.Add(_positions[v]);
+            _oldC.Add(_colours[v]);
+            _oldU.Add(_uv0[v]);
+        }
+
+        for (var t = indexFrom; t < _indices.Count; t++)
+            _oldI.Add(_indices[t]);
+
+        _positions.RemoveRange(from, _positions.Count - from);
+        _colours.RemoveRange(from, _colours.Count - from);
+        _uv0.RemoveRange(from, _uv0.Count - from);
+        _indices.RemoveRange(indexFrom, _indices.Count - indexFrom);
+
+        var oldShapeStart = from;
+        var oldIndexStart = indexFrom;
+
+        for (var k = firstCut; k < _cuts.Count; k++)
+        {
+            var oldShapeEnd = _cuts[k];
+            var oldIndexEnd = _cutIndices[k];
+            var newShapeStart = _positions.Count;
+
+            for (var v = oldShapeStart; v < oldShapeEnd; v++)
+            {
+                _positions.Add(_oldP[v - from]);
+                _colours.Add(_oldC[v - from]);
+                _uv0.Add(_oldU[v - from]);
+            }
+
+            for (var t = oldIndexStart; t + 2 < oldIndexEnd; t += 3)
+            {
+                Split(
+                    _oldI[t - indexFrom] - oldShapeStart + newShapeStart,
+                    _oldI[t + 1 - indexFrom] - oldShapeStart + newShapeStart,
+                    _oldI[t + 2 - indexFrom] - oldShapeStart + newShapeStart,
+                    mask, 0, newShapeStart);
+            }
+
+            _cuts[k] = _positions.Count;
+            _cutIndices[k] = _indices.Count;
+            oldShapeStart = oldShapeEnd;
+            oldIndexStart = oldIndexEnd;
+        }
+
+        _shapeStart = _positions.Count;
+    }
+
+    private void Split(int a, int b, int c, MaskInfo mask, int depth, int shapeStart)
+    {
+        // A shape may not outgrow a mesh: it could not be uploaded at all.
+        if (depth >= MaskDepth || _positions.Count - shapeStart + 3 > PerMesh
+            || mask.SpreadOver(_positions[a], _positions[b], _positions[c]) <= MaskTolerance)
+        {
+            _indices.Add(a);
+            _indices.Add(b);
+            _indices.Add(c);
+            return;
+        }
+
+        var ab = Midpoint(a, b);
+        var bc = Midpoint(b, c);
+        var ca = Midpoint(c, a);
+
+        Split(a, ab, ca, mask, depth + 1, shapeStart);
+        Split(ab, b, bc, mask, depth + 1, shapeStart);
+        Split(ca, bc, c, mask, depth + 1, shapeStart);
+        Split(ab, bc, ca, mask, depth + 1, shapeStart);
+    }
+
+    private int Midpoint(int a, int b)
+    {
+        _positions.Add((_positions[a] + _positions[b]) * 0.5f);
+        _colours.Add(Color32.Lerp(_colours[a], _colours[b], 0.5f));
+        _uv0.Add((_uv0[a] + _uv0[b]) * 0.5f);
+        return _positions.Count - 1;
     }
 
     internal void AddTriangle(int a, int b, int c)
