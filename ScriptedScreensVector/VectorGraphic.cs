@@ -221,6 +221,72 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     private readonly List<VecNode> _forcedScrollNodes = new();
     private readonly Dictionary<string, float> _forcedApplied = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Raised when an `SC` container's offset, scroll range or viewport changed, once the
+    /// rebuild that shows it has landed.
+    /// </summary>
+    /// <remarks>
+    /// Client-side and main-thread; nothing crosses the network. For other mods on the same
+    /// client (a page script wants `scroll` events and a real `scrollTop`); a chip cannot see
+    /// it. Arguments: the `vector` element's host object, the `SC` id, then offset, maximum
+    /// offset and viewport height, all in scene units. At most once per container per rebuild,
+    /// so it runs at the rebuild rate (30 Hz at most), not per wheel event.
+    /// </remarks>
+    public static event Action<GameObject, string, float, float, float>? ScrollChanged;
+
+    private readonly Dictionary<string, Vector3> _reportedScrolls = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The current state of one `SC` under a `vector` element's host: offset, maximum offset
+    /// and viewport height in scene units. False when the host has no such container yet.
+    /// </summary>
+    public static bool TryGetScroll(GameObject host, string scrollId, out float offset, out float max, out float view)
+    {
+        offset = max = view = 0f;
+        var graphic = host != null ? host.GetComponentInChildren<VectorGraphic>() : null;
+        if (graphic == null)
+            return false;
+
+        foreach (var region in graphic._scrolls)
+        {
+            if (region.Id != scrollId)
+                continue;
+
+            graphic._offsets.TryGetValue(region.Id, out var at);
+            offset = region.Clamp(at);
+            max = region.Max;
+            view = region.View;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ReportScrolls()
+    {
+        if (ScrollChanged == null)
+            return;
+
+        var host = transform.parent != null ? transform.parent.gameObject : gameObject;
+        foreach (var region in _scrolls)
+        {
+            _offsets.TryGetValue(region.Id, out var at);
+            var now = new Vector3(region.Clamp(at), region.Max, region.View);
+            if (_reportedScrolls.TryGetValue(region.Id, out var last) && last == now)
+                continue;
+
+            _reportedScrolls[region.Id] = now;
+            try
+            {
+                ScrollChanged(host, region.Id, now.x, now.y, now.z);
+            }
+            catch (Exception ex)
+            {
+                ScriptedScreensVectorPlugin.Log?.LogWarning($"a ScrollChanged handler failed: {ex}");
+            }
+        }
+    }
+
     private Vector2 _dragLast;
     private SS.UiPointerDownForwarder? _forwarder;
     private string _elementId = string.Empty;
@@ -1387,11 +1453,20 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>Applies a script-set scroll offset once per new `sov`; wheel and drag own it after.</summary>
     private void ApplyForcedScrolls()
     {
+        if (_forcedScrollNodes.Count == 0)
+            return;
+
+        // A jump is a command, not a value to ease: read mid-blend, a new `sov` passed through
+        // several fractional versions and `so` landed short of its target (149.1 for 150).
+        var blend = _context.Blend;
+        _context.Blend = 1f;
         foreach (var node in _forcedScrollNodes)
         {
             ForcedScroll.Apply(_offsets, _forcedApplied, node.Id!,
                 node.ScrollSetVersion!.Evaluate(_context), node.ScrollSet!.Evaluate(_context));
         }
+
+        _context.Blend = blend;
     }
 
     /// <summary>True when the enclosing ScrollRect has moved since the last rebuild.</summary>
@@ -1533,6 +1608,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         _scrolls.Clear();
         _scrolls.AddRange(_stats.Scrolls);
+        ReportScrolls();
 
         // Only take pointer events when the scene has something that answers them, so a
         // plain decorative surface stays transparent to the pointer as it always was.

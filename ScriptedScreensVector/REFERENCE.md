@@ -479,6 +479,22 @@ and drag own the offset again straight after. Both may be data bindings:
   so = "=$jump_to", sov = "=$jump_version", c = { ... } }
 ```
 
+**Reading the offset from another mod.** The chip never learns the offset: wheel and drag stay
+on the client and nothing is sent. A mod running on the same client can follow it, and only
+an `SC` with an `id` is reported:
+
+```csharp
+// host: the vector element's GameObject ("Ui:<element id>"); all values in scene units
+VectorGraphic.ScrollChanged += (host, scId, offset, max, view) => { ... };
+VectorGraphic.TryGetScroll(host, "log", out var offset, out var max, out var view);
+```
+
+`ScrollChanged` is raised on the main thread after the rebuild that shows the change, once
+per container per rebuild (30 Hz at most), and once when a container first appears. `max` is
+`ch - h`. The type is internal to this mod, so reach it by reflection
+(`ScriptedScreensVector.VectorGraphic, ScriptedScreensVector`). With Diagnostics on, every
+report is logged as `scroll Ui:<element>/<id>: offset of max, view h`.
+
 **`sy` and `vh` report *this* container inside it.** `sy` is the scroll offset, **zero at
 rest**, and `vh` is the container's height -- so pinned artwork is written at the container's
 own `y` plus `sy`:

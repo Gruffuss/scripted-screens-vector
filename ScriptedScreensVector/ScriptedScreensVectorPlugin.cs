@@ -60,6 +60,13 @@ public sealed class ScriptedScreensVectorPlugin : ModBehaviour
             // first, but a failure here must not take the rest of the game down.
             FrameMonitor.Install();
 
+            // Diagnostics shows scroll reports, so the event can be checked without a subscriber mod.
+            VectorGraphic.ScrollChanged += (host, id, offset, max, view) =>
+            {
+                if (VectorConfig.Diagnostics)
+                    Log.LogInfo($"scroll {host.name}/{id}: {offset:F1} of {max:F1}, view {view:F1}");
+            };
+
             _harmony = new Harmony(PluginInfo.PLUGIN_GUID);
             // The ASSEMBLY, not one type. PatchAll(Type) registers exactly that class, so a
             // second patch -- the capture hook lives in a nested one -- compiles in and is

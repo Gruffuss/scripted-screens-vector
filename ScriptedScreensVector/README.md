@@ -45,17 +45,19 @@ Then read the examples in order — each one introduces exactly one idea and run
 | [`04-repeat.lua`](examples/04-repeat.lua) | `RP`, `i`, `hash`, arrays, LOD |
 | [`05-curves.lua`](examples/05-curves.lua) | `YS` vs `RP`, line charts, splines, paths |
 | [`06-paint.lua`](examples/06-paint.lua) | gradients, alpha, feathering, animated colour |
-| [`07-clip.lua`](examples/07-clip.lua) | clip paths and their one restriction |
+| [`07-clip.lua`](examples/07-clip.lua) | clip paths, and what a concave one costs |
 | [`08-console.lua`](examples/08-console.lua) | everything, assembled into a real console |
 | [`09-scroll.lua`](examples/09-scroll.lua) | `SC`, and a whole list as one repeat over `$rows[i]` |
 | [`10-text.lua`](examples/10-text.lua) | `T` nodes, fonts, fitting, and `fmt` so the chip ships numbers |
 | [`11-symbols.lua`](examples/11-symbols.lua) | `SYM` / `USE`, inherited `style`, per-corner radii |
 | [`12-click.lua`](examples/12-click.lua) | clickable rows in a repeat, the `id:i` index, node patching |
 | [`13-src.lua`](examples/13-src.lua) | the same scene as tables and as text, and group defaults |
+| [`14-ztext.lua`](examples/14-ztext.lua) | text in draw order: labels under and over shapes |
+| [`15-effects.lua`](examples/15-effects.lua) | inset shadows, conic gradients, filters, masks, matrices, concave clips |
 
 [`Patterns.lua`](Patterns.lua) holds the same building blocks as copy-paste functions.
 
-[`REFERENCE.md`](REFERENCE.md) is the complete list of nodes, attributes and functions.
+[`REFERENCE.md`](REFERENCE.md) is the complete list of nodes, attributes and functions. [`CHANGELOG.md`](CHANGELOG.md) is the release history.
 
 ---
 

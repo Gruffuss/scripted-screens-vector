@@ -43,7 +43,8 @@ What that buys on top of the framerate:
 |---|---|
 | [`ScriptedScreensVector/README.md`](ScriptedScreensVector/README.md) | the authoring guide — start here |
 | [`ScriptedScreensVector/REFERENCE.md`](ScriptedScreensVector/REFERENCE.md) | every node, attribute and expression function |
-| [`ScriptedScreensVector/examples/`](ScriptedScreensVector/examples) | eight progressive examples, each runnable on paste |
+| [`ScriptedScreensVector/examples/`](ScriptedScreensVector/examples) | fifteen progressive examples, each runnable on paste |
+| [`ScriptedScreensVector/CHANGELOG.md`](ScriptedScreensVector/CHANGELOG.md) | release history |
 | [`vector-format-spec.md`](vector-format-spec.md) | the format specification and the reasoning behind it |
 
 Paste [`examples/01-hello.lua`](ScriptedScreensVector/examples/01-hello.lua) into a chip
