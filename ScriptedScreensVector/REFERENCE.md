@@ -4,7 +4,8 @@ Every node, attribute and function the renderer accepts. Checked against the par
 against the design document — where the two disagreed, the code won.
 
 For an introduction, read [README.md](README.md) first. For the reasoning behind the design,
-see `vector-format-spec.md` in the project root.
+see [`vector-format-spec.md`](https://github.com/Gruffuss/scripted-screens-vector/blob/main/vector-format-spec.md)
+in the source repository.
 
 ---
 
