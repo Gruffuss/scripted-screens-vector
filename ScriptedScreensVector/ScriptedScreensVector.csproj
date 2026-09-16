@@ -21,6 +21,12 @@
              CA1812: Unity instantiates MonoBehaviours and Harmony calls patch classes
              reflectively, neither of which the analyzer can see. -->
         <NoWarn>$(NoWarn);CA1031;CA1812</NoWarn>
+        <!-- Release embeds its PDB in the DLL, and a PDB records source paths: without this the
+             published DLL carries the builder's user folder. Line numbers are kept. -->
+        <PathMap>$(MSBuildProjectDirectory)=/src/ScriptedScreensVector,$(NuGetPackageRoot)=/nuget/</PathMap>
+        <!-- Source Link would add the local repository root and its remote URL to that PDB. -->
+        <EnableSourceLink>false</EnableSourceLink>
+        <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
         <ScriptedScreensDirectory>$(SteamLibraryDirectory)\..\workshop\content\$(StationeersSteamAppId)\3666779631</ScriptedScreensDirectory>
     </PropertyGroup>
     <Target Name="EnsureScriptedScreensDll" BeforeTargets="ResolveAssemblyReferences">

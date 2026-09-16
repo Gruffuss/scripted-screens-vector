@@ -6,6 +6,7 @@ ScriptedScreens Vector, newest first.
 
 - **MCP support for AI editors.** With StationeersLua's MCP server, the mod publishes a brief written for AI editors (stationeers://vector/index), the guide and reference split into searchable sections (scope **vector**), the changelog, Patterns.lua and all examples, next to the existing vector_stats tool.
 - QUICKSTART.md ships in the mod folder: the same one-page brief, with a working template and a checklist.
+- The published DLL no longer carries the build machine's folder paths in its debug information.
 
 ## 0.11.24
 

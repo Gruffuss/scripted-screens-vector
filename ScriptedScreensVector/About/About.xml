@@ -90,6 +90,7 @@ Nothing changes without StationeersLua; the mod works the same.
 [list]
 [*] [b]MCP support for AI editors.[/b] With StationeersLua's MCP server, the mod publishes a brief written for AI editors (stationeers://vector/index), the guide and reference split into searchable sections (scope [b]vector[/b]), the changelog, Patterns.lua and all examples, next to the existing vector_stats tool.
 [*] QUICKSTART.md ships in the mod folder: the same one-page brief, with a working template and a checklist.
+[*] The published DLL no longer carries the build machine's folder paths in its debug information.
 [/list]
 [b]0.11.24[/b]
 [list]
