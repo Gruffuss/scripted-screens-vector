@@ -57,7 +57,7 @@ Then read the examples in order — each one introduces exactly one idea and run
 
 [`Patterns.lua`](Patterns.lua) holds the same building blocks as copy-paste functions.
 
-[`REFERENCE.md`](REFERENCE.md) is the complete list of nodes, attributes and functions. [`CHANGELOG.md`](CHANGELOG.md) is the release history.
+[`REFERENCE.md`](REFERENCE.md) is the complete list of nodes, attributes and functions. [`CHANGELOG.md`](CHANGELOG.md) is the release history. [`QUICKSTART.md`](QUICKSTART.md) is a one-page brief, the page AI editors get first through the MCP server.
 
 ---
 

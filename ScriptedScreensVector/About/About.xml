@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.11.24.0</Version>
+	<Version>0.11.25.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -63,8 +63,18 @@ Everything is in the mod folder ([i]Documents/My Games/Stationeers/mods/Scripted
 [*] [b]REFERENCE.md[/b] -- every node, attribute and expression function
 [*] [b]Patterns.lua[/b] -- ready-made tanks, mote fields, dials, charts and alarm lamps
 [*] [b]CHANGELOG.md[/b] -- the full release history
+[*] [b]QUICKSTART.md[/b] -- a one-page brief with a working template and a checklist
 [/list]
 The same files are [url=https://github.com/Gruffuss/scripted-screens-vector/tree/main/ScriptedScreensVector]on GitHub[/url].
+
+[h2]AI editor support (MCP)[/h2]
+With [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3659911735]StationeersLua[/url] installed, an AI editor connected to its MCP server gets everything it needs to write vector scenes:
+[list]
+[*] [b]stationeers://vector/index[/b] -- a brief written for AI: when to use the element, a template that runs as written, a checklist of the mistakes that fail silently, and a map of every other page
+[*] the guide and reference, one searchable page per section (search scope [b]vector[/b]), the changelog, Patterns.lua and all fifteen examples
+[*] [b]vector_stats[/b] -- a tool reporting every live scene's build, cost and problems, so the editor can check its own work alongside ScriptedScreens' capture tool
+[/list]
+Nothing changes without StationeersLua; the mod works the same.
 
 [h2]Notes[/h2]
 [list]
@@ -76,6 +86,11 @@ The same files are [url=https://github.com/Gruffuss/scripted-screens-vector/tree
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.11.25[/b]
+[list]
+[*] [b]MCP support for AI editors.[/b] With StationeersLua's MCP server, the mod publishes a brief written for AI editors (stationeers://vector/index), the guide and reference split into searchable sections (scope [b]vector[/b]), the changelog, Patterns.lua and all examples, next to the existing vector_stats tool.
+[*] QUICKSTART.md ships in the mod folder: the same one-page brief, with a working template and a checklist.
+[/list]
 [b]0.11.24[/b]
 [list]
 [*] Other mods on the same client can follow a scroll container's offset (ScrollChanged, TryGetScroll); with Diagnostics on, each change is logged.
@@ -84,17 +99,6 @@ The same files are [url=https://github.com/Gruffuss/scripted-screens-vector/tree
 [b]0.11.23[/b]
 [list]
 [*] Fixed: a path with a hole inside a clipped group drew solid. Clipped fills keep their holes, including one the clip cuts through or one crossing a concave clip's pieces.
-[/list]
-[b]0.11.22[/b]
-[list]
-[*] Text follows a group's skew or uneven scale (m, s), as CSS transforms do; the viewbox fit still leaves letterforms alone.
-[*] Radial and conic masks follow their gradient smoothly on any shape, with no specks, and a conic mask keeps a hard edge at its start angle.
-[*] Fixed: a click landed anywhere in a node's bounding rectangle -- a circle's corners, a clipped shape's cut-away parts, list rows scrolled out of sight. Clicks now land only on what is drawn.
-[*] Fixed: a label covered by the scene's very first shape stayed on top of it.
-[*] Fixed: a gradient mask over a group holding only text hid the text entirely.
-[*] Fixed: screen captures logged an error per masked label and lost masked text afterwards, and showed images white, text without its gradient or filter colours, and inset text shadows missing.
-[*] Inset shadows, masks and colour filters cost less to rebuild.
-[*] Examples: 05's path hole and layout, 13 and 14 no longer stretched, 15's clipped label.
 [/list]
 Older releases: [b]CHANGELOG.md[/b] in the mod folder, or [url=https://github.com/Gruffuss/scripted-screens-vector/blob/main/ScriptedScreensVector/CHANGELOG.md]on GitHub[/url].
 

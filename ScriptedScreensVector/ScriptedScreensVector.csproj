@@ -5,7 +5,7 @@
         <RootNamespace>$(ModName)</RootNamespace>
         <TargetFramework>netstandard2.1</TargetFramework>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-        <Version>0.11.24.0</Version>
+        <Version>0.11.25.0</Version>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     </PropertyGroup>
     <!-- Build paths and the Documents-directory override live in exactly one
@@ -50,7 +50,7 @@
     <ItemGroup>
         <CopyItemsAbout Include="$(ProjectDir)\About\**\*.*" />
         <CopyItemsExamples Include="$(ProjectDir)\examples\**\*.lua" />
-        <CopyItemsDocs Include="$(ProjectDir)\README.md;$(ProjectDir)\REFERENCE.md;$(ProjectDir)\CHANGELOG.md;$(ProjectDir)\Patterns.lua" />
+        <CopyItemsDocs Include="$(ProjectDir)\README.md;$(ProjectDir)\REFERENCE.md;$(ProjectDir)\CHANGELOG.md;$(ProjectDir)\QUICKSTART.md;$(ProjectDir)\Patterns.lua" />
     </ItemGroup>
     <Target Name="CopyAssetsToMods" AfterTargets="PostBuild">
         <Copy SourceFiles="@(CopyItemsAbout)" DestinationFolder="$(StationeersDocumentsDirectory)\mods\$(ModName)\About\%(RecursiveDir)" ContinueOnError="true" />

@@ -156,8 +156,23 @@ vector_stats scene=gas  -- one
 The first line is the addon's version, so "is the build I just made the one that is running"
 is answerable from inside the editor.
 
+The same server also carries this documentation. Search it with scope `vector`, or start
+from `stationeers://vector/index`:
+
+| URI | content |
+|-----|---------|
+| `stationeers://vector/index` | QUICKSTART.md, a brief written for AI editors, then every URI below |
+| `stationeers://vector/guide/<section>` | README.md, one resource per `##` section |
+| `stationeers://vector/reference/<section>` | this file, one resource per `##` and `###` section |
+| `stationeers://vector/changelog` | CHANGELOG.md |
+| `stationeers://vector/patterns` | Patterns.lua |
+| `stationeers://vector/examples/index` | the examples, each at `stationeers://vector/examples/<file>` |
+
+Sections rather than whole files, because a search returns at most two hits per resource.
+Everything is read from the mod folder when requested, so it always matches the installed build.
+
 Bound by reflection, so the mod loads normally without StationeersLua and simply does not
-register the tool.
+register the tool or the documentation.
 
 ### Size limits
 
