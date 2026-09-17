@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
-	<Author>Gruffuss</Author>
-	<Version>0.11.30.0</Version>
-	<Description>
+  <Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
+  <ModID>gruffuss.stationeers.scriptedscreens.vector</ModID>
+  <Author>Gruffuss</Author>
+  <Version>0.11.30.0</Version>
+  <Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Crisp, animated vector graphics for ScriptedScreens consoles. Client-side only.[/i]
 
@@ -38,16 +39,14 @@ Full history: [url=https://github.com/Gruffuss/scripted-screens-vector/blob/main
 [/list]
 Source: [url=https://github.com/Gruffuss/scripted-screens-vector]github.com/Gruffuss/scripted-screens-vector[/url] (MIT).
 	</Description>
-	<WorkshopHandle>3787517570</WorkshopHandle>
-	<Tags>
-		<Tag>Mod</Tag>
-		<Tag>BepInEx</Tag>
-		<Tag>StationeersLaunchPad</Tag>
-	</Tags>
-	<ModID>gruffuss.stationeers.scriptedscreens.vector</ModID>
-	<Dependencies>
-		<Mod>
-			<Id>3666779631</Id>
-		</Mod>
-	</Dependencies>
+  <ChangeLog xsi:nil="true" />
+  <WorkshopHandle>3787517570</WorkshopHandle>
+  <IsBetaProgramMod>false</IsBetaProgramMod>
+  <Tags>
+    <Tag>Mod</Tag>
+    <Tag>BepInEx</Tag>
+    <Tag>StationeersLaunchPad</Tag>
+  </Tags>
+  <DependsOn WorkshopHandle="3666779631" />
+  <InGameDescription xsi:nil="true" />
 </ModMetadata>
