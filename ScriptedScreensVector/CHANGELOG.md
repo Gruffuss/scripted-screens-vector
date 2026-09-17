@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.30
+
+- Level of detail is off by default: Rate, Curve and Count LOD all ship switched off, so every visible console rebuilds at full rate and full detail. Each can be switched on in the settings to save CPU with many consoles; an existing settings file is switched to the new defaults once.
+
 ## 0.11.29
 
 - Fixed: a scene fed new data every frame rebuilt only on every second frame whenever a payload arrived while a rebuild was running (35 times a second at 71 FPS). It now keeps up with the frame rate.

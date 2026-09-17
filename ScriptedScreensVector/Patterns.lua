@@ -52,7 +52,8 @@ end
 --------------------------------------------------------------------------------
 -- Mote field: drifting specks, for gas or particulate.
 --
--- `lod = 1` lets the renderer thin the field when the console is drawn small. Opt in for
+-- `lod = 1` lets the renderer thin the field when the console is drawn small, if Count LOD
+-- is switched on in the mod settings (off by default). Opt in for
 -- decoration; never for anything load-bearing like tick marks.
 --------------------------------------------------------------------------------
 function P.motes(x, y, w, h, count, colour, driftKey)

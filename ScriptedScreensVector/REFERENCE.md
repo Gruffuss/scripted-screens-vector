@@ -371,7 +371,7 @@ across it rather than being split. An undeclared gradient is a problem.
 | Key | Type | Meaning |
 |-----|------|---------|
 | `n` | **literal number** | instance count — not an expression |
-| `lod` | number | `1` allows count reduction at distance; omitted means never |
+| `lod` | number | `1` allows count reduction at distance when Count LOD is switched on (off by default); omitted means never |
 | `c` | array | children, instantiated `n` times |
 
 Inside, `i` is the instance index `0..n-1` and `n` the count. Nested repeats shadow `i`; the
@@ -463,9 +463,9 @@ Around **20 segments per period** of the fastest term is where the facets stop s
 sampling theorem's 8 per period is enough to reconstruct a sine and not to draw one. Sample
 generously — a curve is one node whatever `n` is.
 
-**Curve LOD** then samples it more coarsely when it is drawn small, quantised so camera drift
-does not retessellate, and never above the authored `n`. This is automatic and safe to leave
-on: `i` is a float and the geometry expressions are continuous in it, so a coarser step walks
+**Curve LOD**, when a player switches it on in the settings (it is off by default), samples it
+more coarsely when it is drawn small, quantised so camera drift does not retessellate, and
+never above the authored `n`. It is safe to switch on: `i` is a float and the geometry expressions are continuous in it, so a coarser step walks
 the *same* curve. Nothing is dropped, unlike count LOD on a repeat.
 
 ### `LS` — sampled polyline

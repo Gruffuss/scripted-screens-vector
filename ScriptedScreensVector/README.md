@@ -604,10 +604,12 @@ it, `0..1`, and follows that shape if it moves or resizes.
 **Fade to the same colour, not to black.** Blending is straight (non-premultiplied), so
 `#5FD9A8FF → #00000000` greys out through the middle. Use `#5FD9A8FF → #5FD9A800`.
 
-**Level of detail is automatic in time, opt-in in count.** Scenes drawn small rebuild less
-often — free, nothing needed from you. Shedding *instances* from a repeat requires `lod = 1`
-on that node and never happens otherwise, because dropping members of a gauge's tick marks
-would be a bug while dropping motes is invisible:
+**Level of detail is off by default.** Every visible console rebuilds at full rate and full
+detail. A player who runs many animated consoles can switch on Rate LOD (small consoles rebuild
+less often), Curve LOD (small curves use fewer segments) and Count LOD in the mod settings.
+Count LOD only ever sheds *instances* from a repeat that carries `lod = 1`, because dropping
+members of a gauge's tick marks would be a bug while dropping motes is invisible — so mark
+decoration with it and it costs nothing until a player turns it on:
 
 ```lua
 { op = "RP", n = 400, lod = 1, c = { ... } }
@@ -619,8 +621,8 @@ whether a wave reads as a curve or a polygon, and the tempting figure — the sa
 to *draw* one. Aim for roughly 20 segments per period of the fastest term you use.
 
 Sampling generously is cheap: a curve is one node however many points it has, and the renderer
-now samples it more coarsely by itself when it is drawn small (Curve LOD, on by default). That
-one is safe to leave on because nothing is dropped — `i` is a float, so a coarser step walks
+can sample it more coarsely when it is drawn small (Curve LOD, off by default). That one is
+safe to switch on because nothing is dropped — `i` is a float, so a coarser step walks
 the *same* curve.
 
 **A stroke is centred on its path**, half inside and half out. An outline drawn on a shape's
@@ -759,9 +761,9 @@ StationeersLaunchPad's settings UI.
 | Renderer | `SmoothData` | ease `$name` values between payloads |
 | Renderer | `CullOffScreen` | skip rebuilds for consoles not in view |
 | Renderer | `PauseWithGame` | freeze animation when the game is paused |
-| Rate LOD | `Enabled`, `MaximumHz`, `MinimumHz`, `FullRatePixels` | rebuild rate versus on-screen size |
-| Count LOD | `Enabled`, `MinimumFraction`, `FullDetailPixels` | thinning for `lod = 1` repeats |
-| Curve LOD | `Enabled`, `PixelsPerSegment`, `MinimumSegments` | how finely `YS`/`LS` curves are sampled at distance |
+| Rate LOD | `Enabled`, `MaximumHz`, `MinimumHz`, `FullRatePixels` | rebuild rate versus on-screen size; off by default, `MaximumHz` (60) applies either way |
+| Count LOD | `Enabled`, `MinimumFraction`, `FullDetailPixels` | thinning for `lod = 1` repeats; off by default |
+| Curve LOD | `Enabled`, `PixelsPerSegment`, `MinimumSegments` | how finely `YS`/`LS` curves are sampled at distance; off by default |
 | Diagnostics | `Enabled` | the logging above; off by default |
 
 ---

@@ -59,7 +59,7 @@ internal static class VectorConfig
     internal static bool PauseWithGame => _pauseWithGame?.Value ?? true;
 
     /// <summary>Rate LOD: reduce rebuild frequency for elements drawn small.</summary>
-    internal static bool RateLodEnabled => _rateLodEnabled?.Value ?? true;
+    internal static bool RateLodEnabled => _rateLodEnabled?.Value ?? false;
 
     /// <summary>Rebuild ceiling regardless of size. Rendering is unaffected and stays per-frame.</summary>
     internal static float MaximumHz => _maximumHz?.Value ?? 60f;
@@ -75,13 +75,13 @@ internal static class VectorConfig
     private static ConfigEntry<float>? _pixelsPerSegment;
     private static ConfigEntry<int>? _minimumSegments;
 
-    internal static bool CurveLodEnabled => _curveLodEnabled?.Value ?? true;
+    internal static bool CurveLodEnabled => _curveLodEnabled?.Value ?? false;
 
     internal static float PixelsPerSegment => _pixelsPerSegment?.Value ?? 3f;
 
     internal static int MinimumSegments => _minimumSegments?.Value ?? 8;
 
-    internal static bool CountLodEnabled => _countLodEnabled?.Value ?? true;
+    internal static bool CountLodEnabled => _countLodEnabled?.Value ?? false;
 
     /// <summary>Smallest fraction of instances ever drawn. Higher keeps a field looking full.</summary>
     internal static float CountFloor => _countFloor?.Value ?? 0.45f;
@@ -127,30 +127,16 @@ internal static class VectorConfig
             "keep moving (and keep costing CPU) while everything else is stopped.");
 
         _rateLodEnabled = _file.Bind(
-            "Rate LOD", "Enabled", true,
-            "Rebuild animated scenes less often when they are drawn small. Every shape still " +
-            "draws in the right place; only the update rate falls, which is invisible at " +
-            "small sizes. Off = always rebuild at MaximumHz.");
+            "Rate LOD", "Enabled", false,
+            "Off by default. On: rebuild animated scenes less often when they are drawn small, " +
+            "down to MinimumHz, to save CPU with many consoles. Every shape still draws in the " +
+            "right place; only the update rate falls. Off = always rebuild at MaximumHz.");
 
         _maximumHz = _file.Bind(
             "Rate LOD", "MaximumHz", 60f,
             "Ceiling on mesh rebuilds per second, independent of frame rate. Rendering still " +
             "happens every frame. 60 lets script-driven animation follow the frame rate; 30 " +
             "halves the background work and is ample for drift, ripple and sweeping needles.");
-
-        // 0.11.28 raised the MaximumHz default from 30 to 60. A config file keeps the value it
-        // was first written with, so an install still at the old default is moved once; the
-        // version entry stops a later, deliberate 30 from being moved again.
-        var settingsVersion = _file.Bind(
-            "Settings", "Version", 1,
-            "Which defaults this file has been brought up to. Managed by the mod; do not edit.");
-        if (settingsVersion.Value < 2)
-        {
-            if (System.Math.Abs(_maximumHz.Value - 30f) < 0.001f)
-                _maximumHz.Value = 60f;
-
-            settingsVersion.Value = 2;
-        }
 
         _minimumHz = _file.Bind(
             "Rate LOD", "MinimumHz", 15f,
@@ -163,8 +149,8 @@ internal static class VectorConfig
             "full rate is kept further away.");
 
         _curveLodEnabled = _file.Bind(
-            "Curve LOD", "Enabled", true,
-            "Sample YS and LS curves more coarsely when they are drawn small. These join " +
+            "Curve LOD", "Enabled", false,
+            "Off by default. On: sample YS and LS curves more coarsely when they are drawn small. These join " +
             "their samples with straight lines, so the count decides whether a wave reads " +
             "as a curve or a polygon -- and the right count depends on on-screen size, " +
             "which the author cannot know. Unlike Count LOD nothing is dropped: the same " +
@@ -181,8 +167,8 @@ internal static class VectorConfig
             "couple of straight lines. Never exceeds the authored count.");
 
         _countLodEnabled = _file.Bind(
-            "Count LOD", "Enabled", true,
-            "Allow repeats that opted in with lod = 1 to shed instances when drawn small. " +
+            "Count LOD", "Enabled", false,
+            "Off by default. On: allow repeats that opted in with lod = 1 to shed instances when drawn small. " +
             "Saves more than rate LOD but instances visibly pop in and out. Off = never shed.");
 
         _countFloor = _file.Bind(
@@ -193,5 +179,27 @@ internal static class VectorConfig
         _countFullDetailPixels = _file.Bind(
             "Count LOD", "FullDetailPixels", 320f,
             "On-screen width at which every instance is drawn.");
+
+        // A config file keeps the values it was first written with, so a changed default only
+        // reaches existing installs if the mod moves it. Each step runs once; the version entry
+        // keeps a later, deliberate choice from being overwritten again.
+        //   2 (0.11.28): MaximumHz default 30 -> 60.
+        //   3 (0.11.29): every LOD kind off by default (was on).
+        var settingsVersion = _file.Bind(
+            "Settings", "Version", 1,
+            "Which defaults this file has been brought up to. Managed by the mod; do not edit.");
+
+        if (settingsVersion.Value < 2 && System.Math.Abs(_maximumHz.Value - 30f) < 0.001f)
+            _maximumHz.Value = 60f;
+
+        if (settingsVersion.Value < 3)
+        {
+            _rateLodEnabled.Value = false;
+            _curveLodEnabled.Value = false;
+            _countLodEnabled.Value = false;
+        }
+
+        if (settingsVersion.Value < 3)
+            settingsVersion.Value = 3;
     }
 }

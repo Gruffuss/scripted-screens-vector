@@ -82,7 +82,8 @@ ui:element({
             --    same on every client and every frame, with nothing transmitted. Feed it
             --    different offsets to get independent values per instance.
             --
-            --    lod = 1 lets the renderer thin this field when the console is drawn small.
+            --    lod = 1 lets the renderer thin this field when the console is drawn small, if the
+            --    player has switched Count LOD on in the mod settings (it is off by default).
             --    Opt in for DECORATION ONLY: dropping tick marks or chart bars would be a
             --    bug, which is why it never happens unless you ask for it.
             { op = "RP", n = 120, lod = 1, c = {

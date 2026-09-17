@@ -55,7 +55,7 @@ local function tank(x, y, w, h, key, clipId)
               y2 = inner_bottom,
               f  = "@liquid" },
 
-            -- Motes. Decoration, so lod = 1: the renderer may thin them at distance.
+            -- Motes. Decoration, so lod = 1: with Count LOD on, the renderer may thin them at distance.
             { op = "RP", n = 40, lod = 1, c = {
                 { op = "R",
                   x = string.format("=%f+mod(hash(i)*%f + 1.5*sin(t*(0.3+hash(i+9)*0.6) + hash(i+1)*6.283), %f)",
