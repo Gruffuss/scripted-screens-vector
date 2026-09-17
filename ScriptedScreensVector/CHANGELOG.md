@@ -2,6 +2,16 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.26
+
+- `snap = 1` on a data payload applies its numbers at once instead of easing them in; other values keep easing.
+- Fixed: a data patch (`keep = 1`) that arrived while an earlier one was still waiting to apply replaced it, losing the earlier patch's values.
+- Fixed: a new payload made values still easing jump to their end before easing to the new value; they now continue from where they are on screen.
+- Fixed: a linear gradient with more than two stops multiplied a shape's geometry up to a thousandfold; ten rounded boxes took about 231,000 vertices. It is now cut exactly at its stops: about 1,100 vertices, and exact.
+- An inset shadow with no blur costs about half the vertices.
+- Fixed: screen captures of a scene that had just been rebuilt drew the old and the new contents on top of each other, which showed as doubled or garbled text.
+- Fixed: a reused label could show its previous text's glyphs as dark blocks in a screen capture.
+
 ## 0.11.25
 
 - **MCP support for AI editors.** With StationeersLua's MCP server, the mod publishes a brief written for AI editors (stationeers://vector/index), the guide and reference split into searchable sections (scope **vector**), the changelog, Patterns.lua and all examples, next to the existing vector_stats tool.

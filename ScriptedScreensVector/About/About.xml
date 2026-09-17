@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.11.25.0</Version>
+	<Version>0.11.26.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Client-side only. Nothing on disk is modified.[/i]
@@ -86,20 +86,21 @@ Nothing changes without StationeersLua; the mod works the same.
 [/list]
 
 [h2]Changelog[/h2]
+[b]0.11.26[/b]
+[list]
+[*] [b]snap = 1[/b] on a data payload applies its numbers at once instead of easing them in; other values keep easing.
+[*] Fixed: a data patch (keep = 1) that arrived while an earlier one was still waiting to apply replaced it, losing the earlier patch's values.
+[*] Fixed: a new payload made values still easing jump to their end before easing to the new value; they now continue from where they are on screen.
+[*] Fixed: a linear gradient with more than two stops multiplied a shape's geometry up to a thousandfold; ten rounded boxes took about 231,000 vertices. It is now cut exactly at its stops: about 1,100 vertices, and exact.
+[*] An inset shadow with no blur costs about half the vertices.
+[*] Fixed: screen captures of a scene that had just been rebuilt drew the old and the new contents on top of each other, which showed as doubled or garbled text.
+[*] Fixed: a reused label could show its previous text's glyphs as dark blocks in a screen capture.
+[/list]
 [b]0.11.25[/b]
 [list]
 [*] [b]MCP support for AI editors.[/b] With StationeersLua's MCP server, the mod publishes a brief written for AI editors (stationeers://vector/index), the guide and reference split into searchable sections (scope [b]vector[/b]), the changelog, Patterns.lua and all examples, next to the existing vector_stats tool.
 [*] QUICKSTART.md ships in the mod folder: the same one-page brief, with a working template and a checklist.
 [*] The published DLL no longer carries the build machine's folder paths in its debug information.
-[/list]
-[b]0.11.24[/b]
-[list]
-[*] Other mods on the same client can follow a scroll container's offset (ScrollChanged, TryGetScroll); with Diagnostics on, each change is logged.
-[*] Fixed: a script-set scroll jump (so, sov) landed short of its target while data was easing, e.g. at 149.1 instead of 150.
-[/list]
-[b]0.11.23[/b]
-[list]
-[*] Fixed: a path with a hole inside a clipped group drew solid. Clipped fills keep their holes, including one the clip cuts through or one crossing a concave clip's pieces.
 [/list]
 Older releases: [b]CHANGELOG.md[/b] in the mod folder, or [url=https://github.com/Gruffuss/scripted-screens-vector/blob/main/ScriptedScreensVector/CHANGELOG.md]on GitHub[/url].
 

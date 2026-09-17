@@ -31,6 +31,7 @@ A scene is **two elements** sharing a `scene` name.
 | `data` | map | named numbers, arrays of numbers, and colour strings |
 | `nodes` | map | geometry patches by node `id` — see below |
 | `keep` | number | `1` makes the payload a patch: names it omits keep their values |
+| `snap` | number | `1` applies this payload's numbers and number arrays at once instead of easing them in |
 
 **Node patching.** Any node may carry an `id`, anywhere in the tree. The data element can then
 change that node's attributes without resending the scene:
@@ -58,6 +59,22 @@ props = { scene = "log", keep = 1, data = { … } }
 
 Off by default, deliberately. With merging always on there would be no way to clear a value,
 and the missing-name diagnostic would go quiet for any name ever sent once.
+
+**`snap = 1` turns easing off for one payload.** Numbers normally glide from the value on
+screen to the new one over the gap between payloads, which is right for a gauge and wrong for
+a value that must change at once: a mode switch, a jump to a new item, or the constants
+inside a running animation expression, which would otherwise drift mid-animation. Snap is
+recorded per name: the latest payload that mentions a name decides, so a later payload without
+`snap` eases that name again, and names a snapped payload leaves out keep easing. Colours and
+strings never ease anyway. Several data elements may write to one scene, so eased and snapped
+values can live on separate elements, each with `keep = 1`:
+
+```lua
+props = { scene = "log", keep = 1, snap = 1, data = { mode = 2 } }
+```
+
+A payload that arrives while the previous one is still waiting to apply is merged into it
+(`keep = 1`) or replaces it (a full payload), so no patch is lost.
 
 Give it a 1×1 rect at negative coordinates so it draws nothing.
 

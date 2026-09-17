@@ -2614,8 +2614,112 @@ internal static class Tessellator
         }
     }
 
+    [ThreadStatic] private static List<Vector2>? _bandIn;
+    [ThreadStatic] private static List<Vector2>? _bandOut;
+    [ThreadStatic] private static List<float>? _bandInT;
+    [ThreadStatic] private static List<float>? _bandOutT;
+
+    /// <summary>
+    /// A triangle under a linear gradient, cut along the stop lines so each piece is exact.
+    /// </summary>
+    /// <remarks>
+    /// A linear gradient is affine between two stops, so vertex colours reproduce it exactly
+    /// once no piece spans a stop. Midpoint subdivision was used before and never met its
+    /// tolerance on a gradient spanning the whole shape: every triangle went to full depth,
+    /// 1,024 triangles each, and ten 171x52 rounded boxes with a three-stop fill came to about
+    /// 231,000 vertices. Cut at the stops they are a few hundred.
+    /// </remarks>
+    private static void BandTriangle(MeshBuilder vh, Vector2 a, Vector2 b, Vector2 c, Paint paint, Matrix4x4 matrix)
+    {
+        var gradient = paint.Gradient!;
+        var ta = gradient.Parameter(paint.ToGradientSpace(a));
+        var tb = gradient.Parameter(paint.ToGradientSpace(b));
+        var tc = gradient.Parameter(paint.ToGradientSpace(c));
+        var low = Mathf.Min(ta, Mathf.Min(tb, tc));
+        var high = Mathf.Max(ta, Mathf.Max(tb, tc));
+
+        var input = _bandIn ??= new List<Vector2>(8);
+        var output = _bandOut ??= new List<Vector2>(8);
+        var inputT = _bandInT ??= new List<float>(8);
+        var outputT = _bandOutT ??= new List<float>(8);
+
+        var from = float.NegativeInfinity;
+        var any = false;
+        for (var k = 0; k <= gradient.Positions.Count; k++)
+        {
+            var to = k < gradient.Positions.Count ? gradient.Positions[k] : float.PositiveInfinity;
+            if (to <= low || from >= high)
+            {
+                from = Mathf.Max(from, to);
+                continue;
+            }
+
+            input.Clear(); inputT.Clear();
+            input.Add(a); input.Add(b); input.Add(c);
+            inputT.Add(ta); inputT.Add(tb); inputT.Add(tc);
+
+            ClipScalar(input, inputT, output, outputT, from, keepAbove: true);
+            ClipScalar(output, outputT, input, inputT, to, keepAbove: false);
+            from = to;
+
+            if (input.Count < 3 || Starved(vh, input.Count, "a gradient band"))
+                continue;
+
+            any = true;
+            var origin = vh.currentVertCount;
+            foreach (var point in input)
+                vh.AddVert(matrix.MultiplyPoint3x4(point), paint.At(point), Vector2.zero);
+            for (var j = 1; j + 1 < input.Count; j++)
+                vh.AddTriangle(origin, origin + j, origin + j + 1);
+        }
+
+        if (!any)
+            Triangle(vh, a, b, c, paint, matrix);
+    }
+
+    /// <summary>Clips a convex polygon to one side of <c>t = edge</c>, t being affine in the point.</summary>
+    private static void ClipScalar(List<Vector2> points, List<float> values, List<Vector2> into, List<float> intoValues, float edge, bool keepAbove)
+    {
+        into.Clear();
+        intoValues.Clear();
+        if (float.IsInfinity(edge))
+        {
+            into.AddRange(points);
+            intoValues.AddRange(values);
+            return;
+        }
+
+        for (var i = 0; i < points.Count; i++)
+        {
+            var j = (i + 1) % points.Count;
+            var vi = values[i];
+            var vj = values[j];
+            var inI = keepAbove ? vi >= edge : vi <= edge;
+            var inJ = keepAbove ? vj >= edge : vj <= edge;
+
+            if (inI)
+            {
+                into.Add(points[i]);
+                intoValues.Add(vi);
+            }
+
+            if (inI != inJ)
+            {
+                var s = (edge - vi) / (vj - vi);
+                into.Add(Vector2.Lerp(points[i], points[j], s));
+                intoValues.Add(edge);
+            }
+        }
+    }
+
     private static void Subdivide(MeshBuilder vh, Vector2 a, Vector2 b, Vector2 c, Paint paint, Matrix4x4 matrix, int depth)
     {
+        if (depth == 0 && paint.Gradient is { Radial: false, Conic: false })
+        {
+            BandTriangle(vh, a, b, c, paint, matrix);
+            return;
+        }
+
         if (depth < MaxGradientDepth)
         {
             if (paint.Gradient!.SpreadOver(paint.ToGradientSpace(a), paint.ToGradientSpace(b), paint.ToGradientSpace(c)) > GradientTolerance)

@@ -122,7 +122,8 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
   - Functions: `sin cos tan atan2 abs sign sqrt floor ceil round min max clamp lerp mod saw
     tri pulse step smoothstep if eq lt gt lte gte and or not hash hash2 pi tau`. `^` is power;
     there is no `pow`. Unknown functions fail the scene.
-- Data values ease between ticks by themselves; do not interpolate in Lua.
+- Data values ease between ticks by themselves; do not interpolate in Lua. For a value that
+  must change at once (a mode, a selection), send it in a payload with `snap = 1`.
 
 ## Rules that fail silently: check every one
 

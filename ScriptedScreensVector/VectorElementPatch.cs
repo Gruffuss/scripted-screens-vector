@@ -167,6 +167,12 @@ internal static class VectorElementPatch
             && !ReferenceEquals(previous, graphic))
         {
             graphic.SetData(previous.Snapshot());
+
+            // The old host is only destroyed at the end of the frame, and a capture copies the
+            // surface before that: both pages were drawn, the old one's labels over the new,
+            // which showed as doubled lines and garbled text wherever the two differed.
+            if (previous && previous.transform.parent != null && previous.transform.parent != host.transform)
+                previous.transform.parent.gameObject.SetActive(false);
         }
 
         Scenes[key] = graphic;
@@ -192,6 +198,8 @@ internal static class VectorElementPatch
 
         if (Scenes.TryGetValue(key, out var graphic) && graphic != null)
             graphic.SetData(context);
+        else if (PendingData.TryGetValue(key, out var waiting))
+            waiting.MergeFrom(context);   // a later patch must not drop an earlier one
         else
             PendingData[key] = context;
     }

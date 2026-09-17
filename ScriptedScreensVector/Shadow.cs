@@ -308,7 +308,10 @@ internal static class Shadow
         var levels = new List<float> { uFar };
         if (uHi > uLo)
         {
-            var rings = Mathf.Clamp(Mathf.CeilToInt((uHi - uLo) * Mathf.Max(0.0001f, screenScale) / 4f), MinRings, MaxRings);
+            // A ramp under a pixel wide -- a zero blur, floored above -- is an edge, not a
+            // gradient: one ring draws it. Four were 510 vertices a shape for a hard 2-unit ring.
+            var ramp = (uHi - uLo) * Mathf.Max(0.0001f, screenScale);
+            var rings = ramp < 1f ? 1 : Mathf.Clamp(Mathf.CeilToInt(ramp / 4f), MinRings, MaxRings);
 
             for (var r = 0; r <= rings; r++)
                 levels.Add(Mathf.Lerp(uLo, uHi, r / (float)rings));

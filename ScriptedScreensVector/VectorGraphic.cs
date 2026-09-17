@@ -940,32 +940,69 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     {
         if (_job != null)
         {
-            // One payload may supersede another that never got applied. The newer one wins;
-            // the blend then eases from whatever is currently on screen, which is what it
-            // would have done anyway.
-            _pendingData = source;
+            // One payload may arrive while another is still parked. A full payload replaces
+            // it; a `keep = 1` patch is folded in, since replacing it lost what the earlier
+            // patch carried.
+            if (_pendingData == null)
+                _pendingData = source;
+            else
+                _pendingData.MergeFrom(source);
+
             return;
         }
 
         ApplyData(source);
     }
 
+    private static bool EasesSomething(EvalContext source)
+    {
+        foreach (var name in source.Scalars.Keys)
+        {
+            if (!source.Snapped.Contains(name))
+                return true;
+        }
+
+        foreach (var name in source.Arrays.Keys)
+        {
+            if (!source.Snapped.Contains(name))
+                return true;
+        }
+
+        return false;
+    }
+
     private void ApplyData(EvalContext source)
     {
-        // Keep what we had: the next few frames ease from it to the new payload rather than
-        // snapping, which is what stops a data-driven gauge stepping at the tick rate.
-        _context.Previous.Clear();
-        foreach (var pair in _context.Scalars)
-            _context.Previous[pair.Key] = pair.Value;
-
-        var now = Now();
-        _dataInterval = Mathf.Clamp(now - _dataArrived, MinBlendSeconds, MaxBlendSeconds);
-        _dataArrived = now;
-
         // `keep = 1` means a payload is a PATCH: names it does not mention hold their last
         // value. Without it a payload is the whole truth and anything absent is gone, which
         // is what forces a console to resend every string it displays on every tick.
         var keep = source.KeepUnmentioned;
+
+        // Only a payload carrying EASED numbers restarts the blend clock. A patch of snapped
+        // values or strings used to restart it too, so a snapped value sent beside an eased one
+        // collapsed the eased glide to the 0.05 s minimum -- it jumped. Patches arriving within
+        // that minimum of each other are one batch, so two data elements sending in the same
+        // tick do not shorten the glide either. A full payload always starts a batch, as before.
+        var now = Now();
+        var batch = !keep || (EasesSomething(source) && now - _dataArrived >= MinBlendSeconds);
+
+        if (batch)
+        {
+            // Keep what is on screen: the next frames ease from it to the new payload rather
+            // than snapping, which is what stops a data-driven gauge stepping at the tick rate.
+            _context.Rebase(VectorConfig.SmoothData
+                ? Mathf.Clamp01((now - _dataArrived) / _dataInterval)
+                : 1f);
+
+            _dataInterval = Mathf.Clamp(now - _dataArrived, MinBlendSeconds, MaxBlendSeconds);
+            _dataArrived = now;
+
+            // Hand the old arrays over rather than copying them: ReadData allocates fresh ones
+            // for every payload, so the outgoing set can simply become the previous set.
+            _context.PreviousArrays.Clear();
+            foreach (var pair in _context.Arrays)
+                _context.PreviousArrays[pair.Key] = pair.Value;
+        }
 
         if (!keep)
             _context.Scalars.Clear();
@@ -973,17 +1010,18 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         foreach (var pair in source.Scalars)
             _context.Scalars[pair.Key] = pair.Value;
 
-        // Hand the old arrays over rather than copying them: ReadData allocates fresh ones
-        // for every payload, so the outgoing set can simply become the previous set.
-        _context.PreviousArrays.Clear();
-        foreach (var pair in _context.Arrays)
-            _context.PreviousArrays[pair.Key] = pair.Value;
-
         if (!keep)
             _context.Arrays.Clear();
 
         foreach (var pair in source.Arrays)
             _context.Arrays[pair.Key] = pair.Value;
+
+        // `snap = 1`: no previous value, so these names read their new value at once.
+        foreach (var name in source.Snapped)
+        {
+            _context.Previous.Remove(name);
+            _context.PreviousArrays.Remove(name);
+        }
 
         // Colours were parsed into `source` by ReadData and then dropped on the floor: this
         // copy did not exist, so `f = "$name"` never resolved and every data-bound fill fell

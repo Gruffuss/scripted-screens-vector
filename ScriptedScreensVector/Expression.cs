@@ -114,6 +114,94 @@ internal sealed class EvalContext
     internal bool KeepUnmentioned { get; set; }
 
     /// <summary>
+    /// Numeric names that apply without easing: `snap = 1` on the payload that carried them.
+    /// </summary>
+    /// <remarks>
+    /// Per name rather than per payload, so two parked payloads merge correctly -- one eased,
+    /// one snapped -- and so a snapped name never drags the rest of the scene's easing with it.
+    /// For a page a value moves only when a transition says so, and the constants inside a
+    /// running tween must not glide.
+    /// </remarks>
+    internal HashSet<string> Snapped { get; } = new(StringComparer.Ordinal);
+
+    private readonly List<string> _staleScratch = new();
+
+    /// <summary>
+    /// Makes <see cref="Previous"/> what is on screen now, at <paramref name="blend"/>, before a
+    /// new payload replaces the targets.
+    /// </summary>
+    /// <remarks>
+    /// It used to be the old TARGETS, so a payload arriving before the last blend finished made
+    /// every still-moving value jump to its end first. Invisible while payloads came at one
+    /// steady rate -- the blend window is that rate -- but not once patches arrive in between.
+    /// Names no longer in <see cref="Scalars"/> are dropped, so one that returns later snaps in
+    /// as a new name always has.
+    /// </remarks>
+    internal void Rebase(float blend)
+    {
+        _staleScratch.Clear();
+        foreach (var name in Previous.Keys)
+        {
+            if (!Scalars.ContainsKey(name))
+                _staleScratch.Add(name);
+        }
+
+        foreach (var name in _staleScratch)
+            Previous.Remove(name);
+
+        foreach (var pair in Scalars)
+        {
+            Previous[pair.Key] = blend < 1f && Previous.TryGetValue(pair.Key, out var from)
+                ? from + (pair.Value - from) * blend
+                : pair.Value;
+        }
+    }
+
+    /// <summary>
+    /// Folds a later payload into this one, as if both had arrived: a patch (`keep = 1`) adds
+    /// to what is here, anything else replaces it.
+    /// </summary>
+    /// <remarks>
+    /// Needed wherever a payload waits -- behind a running rebuild, or before its scene exists.
+    /// Keeping only the newest lost every value an earlier patch had carried.
+    /// </remarks>
+    internal void MergeFrom(EvalContext later)
+    {
+        if (!later.KeepUnmentioned)
+        {
+            Scalars.Clear();
+            Arrays.Clear();
+            Colours.Clear();
+            Strings.Clear();
+            StringArrays.Clear();
+            ColourArrays.Clear();
+            Snapped.Clear();
+            KeepUnmentioned = false;
+        }
+
+        foreach (var pair in later.Scalars)
+        {
+            Scalars[pair.Key] = pair.Value;
+            if (later.Snapped.Contains(pair.Key)) Snapped.Add(pair.Key); else Snapped.Remove(pair.Key);
+        }
+
+        foreach (var pair in later.Arrays)
+        {
+            Arrays[pair.Key] = pair.Value;
+            if (later.Snapped.Contains(pair.Key)) Snapped.Add(pair.Key); else Snapped.Remove(pair.Key);
+        }
+
+        foreach (var pair in later.Colours)
+            Colours[pair.Key] = pair.Value;
+        foreach (var pair in later.Strings)
+            Strings[pair.Key] = pair.Value;
+        foreach (var pair in later.StringArrays)
+            StringArrays[pair.Key] = pair.Value;
+        foreach (var pair in later.ColourArrays)
+            ColourArrays[pair.Key] = pair.Value;
+    }
+
+    /// <summary>
     /// Data names a scene asked for and did not get, gathered during a rebuild.
     /// </summary>
     /// <remarks>

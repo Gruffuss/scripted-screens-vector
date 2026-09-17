@@ -336,7 +336,14 @@ internal sealed class TextLayer
         var gradient = fill && slot < _gradients.Count ? _gradients[slot] : null;
         var shear = slot < _shears.Count ? _shears[slot] : null;
         if ((tint == null && gradient == null && shear == null) || info == null)
+        {
+            // A reused label that is no longer tinted must not keep the glyphs it saved for its
+            // previous text: a capture pasted them over the new text as black blocks.
+            if (info != null && label.TryGetComponent<GlyphColours>(out var stale))
+                stale.Clear();
+
             return;
+        }
 
         var positioned = gradient != null || (tint != null && tint.NeedsPosition);
 
@@ -383,7 +390,7 @@ internal sealed class TextLayer
                     GlyphColours.Creating = false;
                 }
 
-                keeper.Store(mesh.colors32, mesh.vertices, count);
+                keeper.Store(mesh.colors32, mesh.vertices, count, label.text);
             }
         }
     }

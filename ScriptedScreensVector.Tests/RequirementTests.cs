@@ -131,6 +131,65 @@ internal static class RequirementTests
         run.Check("sov: a new version applies", bumped && offsets["a"] == 70f, $"{offsets["a"]}");
     }
 
+    private static ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem.UiProp Num(string key, float value)
+    {
+        return new() { Key = key, Value = new() { Type = ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem.UiValueType.Number, Number = value } };
+    }
+
+    private static EvalContext Payload(bool keep, bool snap, params (string Key, float Value)[] values)
+    {
+        var map = new ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem.UiProp[values.Length];
+        for (var i = 0; i < values.Length; i++)
+            map[i] = Num(values[i].Key, values[i].Value);
+
+        var props = new List<ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem.UiProp>
+        {
+            new() { Key = "data", Value = new() { Type = ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem.UiValueType.Map, Map = map } },
+        };
+        if (keep) props.Add(Num("keep", 1f));
+        if (snap) props.Add(Num("snap", 1f));
+
+        var context = new EvalContext();
+        SceneParser.ReadData(props.ToArray(), context);
+        return context;
+    }
+
+    internal static void DataSnap(TestRun run)
+    {
+        var snapped = Payload(true, true, ("x", 5f));
+        var eased = Payload(true, false, ("y", 5f));
+        run.Check("snap: snap=1 marks the payload's numbers", snapped.Snapped.Contains("x") && eased.Snapped.Count == 0,
+            $"{snapped.Snapped.Count} / {eased.Snapped.Count}");
+
+        // Two parked patches: the later one must add to the earlier, not replace it.
+        var parked = Payload(true, false, ("a", 1f), ("b", 2f));
+        parked.MergeFrom(Payload(true, true, ("b", 3f), ("c", 4f)));
+        run.Check("merge: a later patch keeps what an earlier one carried",
+            parked.Scalars["a"] == 1f && parked.Scalars["b"] == 3f && parked.Scalars["c"] == 4f && parked.KeepUnmentioned,
+            string.Join(",", parked.Scalars));
+        run.Check("merge: snap follows each name's latest payload",
+            parked.Snapped.Contains("b") && parked.Snapped.Contains("c") && !parked.Snapped.Contains("a"), string.Join(",", parked.Snapped));
+
+        parked.MergeFrom(Payload(true, false, ("b", 9f)));
+        run.Check("merge: an eased resend clears a name's snap", !parked.Snapped.Contains("b"), string.Join(",", parked.Snapped));
+
+        parked.MergeFrom(Payload(false, false, ("z", 1f)));
+        run.Check("merge: a full payload replaces everything",
+            parked.Scalars.Count == 1 && parked.Scalars.ContainsKey("z") && !parked.KeepUnmentioned && parked.Snapped.Count == 0,
+            string.Join(",", parked.Scalars));
+
+        // Mid-glide: 0 -> 10 at blend 0.5 shows 5, and a new payload must ease from 5, not 10.
+        var live = new EvalContext();
+        live.Scalars["v"] = 10f;
+        live.Previous["v"] = 0f;
+        live.Previous["gone"] = 3f;
+        live.Rebase(0.5f);
+        run.Check("rebase: a new payload eases from what is on screen", Mathf.Abs(live.Previous["v"] - 5f) < 0.001f, $"{live.Previous["v"]}");
+        run.Check("rebase: names no longer sent are dropped", !live.Previous.ContainsKey("gone"), string.Join(",", live.Previous));
+        live.Rebase(1f);
+        run.Check("rebase: a finished blend starts from the target", live.Previous["v"] == 10f, $"{live.Previous["v"]}");
+    }
+
     internal static void InsetField(TestRun run)
     {
         // A 100x40 box: inradius from the centroid is 20.

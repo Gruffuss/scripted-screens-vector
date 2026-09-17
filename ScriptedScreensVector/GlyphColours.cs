@@ -31,8 +31,20 @@ internal sealed class GlyphColours : MonoBehaviour
 
     private TextMeshProUGUI? _label;
 
-    internal void Store(Color32[] colours, Vector3[] vertices, int count)
+    /// <summary>The text those glyphs belong to.</summary>
+    [SerializeField] private string _text = string.Empty;
+
+    internal void Clear()
     {
+        _text = string.Empty;
+        _colours = System.Array.Empty<Color32>();
+        _vertices = System.Array.Empty<Vector3>();
+    }
+
+    internal void Store(Color32[] colours, Vector3[] vertices, int count, string text)
+    {
+        _text = text ?? string.Empty;
+
         if (_colours.Length != count)
             _colours = new Color32[count];
 
@@ -63,6 +75,11 @@ internal sealed class GlyphColours : MonoBehaviour
         var mesh = info.meshInfo[0];
 
         if (mesh.colors32 == null || mesh.colors32.Length < _colours.Length || _colours.Length == 0)
+            return;
+
+        // Glyphs saved for other text would be pasted over this layout: a label whose value
+        // changed after its last draw captured as black blocks. Plain text beats that.
+        if (_label == null || _label.text != _text || mesh.vertexCount != _colours.Length)
             return;
 
         var count = Mathf.Min(mesh.vertexCount, _colours.Length);

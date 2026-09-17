@@ -496,6 +496,7 @@ internal static class SceneParser
         into.Strings.Clear();
         into.StringArrays.Clear();
         into.ColourArrays.Clear();
+        into.Snapped.Clear();
         into.KeepUnmentioned = PropNumber(props, "keep", 0f) > 0.5f;
 
         var data = PropValue(props, "data");
@@ -565,6 +566,15 @@ internal static class SceneParser
                     break;
                 }
             }
+        }
+
+        // `snap = 1`: this payload's numbers apply at once instead of easing in.
+        if (PropNumber(props, "snap", 0f) > 0.5f)
+        {
+            foreach (var name in into.Scalars.Keys)
+                into.Snapped.Add(name);
+            foreach (var name in into.Arrays.Keys)
+                into.Snapped.Add(name);
         }
     }
 
