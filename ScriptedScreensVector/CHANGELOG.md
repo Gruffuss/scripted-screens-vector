@@ -2,6 +2,12 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.29
+
+- Fixed: a scene fed new data every frame rebuilt only on every second frame whenever a payload arrived while a rebuild was running (35 times a second at 71 FPS). It now keeps up with the frame rate.
+- A finished rebuild is also picked up at the end of the frame, so new geometry reaches the screen a frame sooner.
+- Diagnostics: each surface's line also reports the data payloads and structures it received and how often a rebuild was still running at frame start.
+
 ## 0.11.28
 
 - Animated scenes rebuild up to 60 times a second by default (was 30), so script-driven motion can follow the frame rate. Rate LOD MaximumHz still sets the ceiling; an existing settings file still at the old default of 30 is moved to 60 once.

@@ -109,7 +109,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                     $"{mainThread:F2}% of a frame on the main thread, " +
                     $"{workerText}, {graphic._peakVertices} verts, " +
                     $"{graphic._lastShapeCount} shapes, " +
-                    (graphic._screenPixels < 0f ? "size UNKNOWN" : $"{graphic._screenPixels:F0} px"));
+                    (graphic._screenPixels < 0f ? "size UNKNOWN" : $"{graphic._screenPixels:F0} px") +
+                    $", job still running at Update on {graphic._lateAtUpdate} frame(s), landed in LateUpdate {graphic._rescuedLate}, received {graphic._payloads} data payload(s) and {graphic._structures} structure(s)");
 
                 // Where the time actually went, biggest first. Six inferences about this
                 // have been wrong; this is measured per node type.
@@ -147,6 +148,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 }
 
                 graphic._rebuilds = 0;
+                graphic._lateAtUpdate = 0;
+                graphic._payloads = 0;
+                graphic._structures = 0;
+                graphic._rescuedLate = 0;
                 graphic._countersSince = now;
                 graphic._milliseconds = 0d;
                 graphic._tessellateMs = 0d;
@@ -417,6 +422,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>Installs a parsed structure. Resets the clock so animations start at t=0.</summary>
     internal void SetScene(VecScene scene)
     {
+        _structures++;
         if (_job != null)
         {
             _pendingScene = scene;
@@ -941,6 +947,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
     internal void SetData(EvalContext source)
     {
+        _payloads++;
         if (_job != null)
         {
             // One payload may arrive while another is still parked. A full payload replaces
@@ -1057,6 +1064,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         foreach (var pair in source.ColourArrays)
             _context.ColourArrays[pair.Key] = pair.Value;
 
+        // Asked for here, not only through SetVerticesDirty: that reaches UpdateGeometry after
+        // this frame's Update has passed, so a payload parked behind a running job waited an
+        // extra frame -- a scene fed every frame rebuilt on every second one (35 Hz at 71 FPS).
+        _needsRebuild = true;
         SetVerticesDirty();
     }
 
@@ -1205,8 +1216,39 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         base.OnDisable();
     }
 
+    /// <summary>Frames on which a job was still running when Update came round, and how many LateUpdate then landed.</summary>
+    private int _lateAtUpdate;
+    private int _payloads;
+    private int _structures;
+    private int _rescuedLate;
+
+    /// <summary>
+    /// A second chance to land a job in the same frame, and to start the next one.
+    /// </summary>
+    /// <remarks>
+    /// A job finishing a moment after Update used to wait a whole frame, and no new job can
+    /// start while one is held, so a scene fed every frame fell to every second frame for as
+    /// long as the worker ran slightly late (a garbage collection was enough). LateUpdate is
+    /// still before the canvas renders, so a job landed here is also on screen a frame sooner.
+    /// </remarks>
+    private void LateUpdate()
+    {
+        if (_job == null || !_job.IsCompleted)
+            return;
+
+        _rescuedLate++;
+        LandJob();
+        ApplyDeferred();
+
+        if (VectorConfig.RendererEnabled && _scene != null && _needsRebuild)
+            Dispatch();
+    }
+
     private void Update()
     {
+        if (_job != null && !_job.IsCompleted)
+            _lateAtUpdate++;
+
         // Land first: a finished job releases the shared state that any deferred scene or
         // data payload is waiting on, so both can happen in the same frame.
         LandJob();
