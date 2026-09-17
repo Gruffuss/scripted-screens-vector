@@ -231,6 +231,12 @@ the capture rebuilds the surface and renders a clone inside one call, so the geo
 tessellated **inline on the main thread** rather than on a worker. A capture of a dense
 console costs a frame; ordinary rendering is unaffected.
 
+The capture rebuilds the scene from its elements, so a `keep = 1` scene keeps the values it was
+sent only if its structure is unchanged; a scene that sends a different structure on rebuild
+must send its values with it. With Diagnostics on, every capture writes what it copied (each
+object, whether it is active, each label's text and font) to
+`ScriptedScreensVector-captures` in the system temp folder, and the log names the file.
+
 ### Text and draw order — `ztext`
 
 **Labels obey scene order by default.** A shape declared after a label covers it; one declared

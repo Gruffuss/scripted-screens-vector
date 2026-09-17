@@ -77,7 +77,7 @@ internal static class VectorElementPatch
 
             if (HasProp(element.Props, "data") || HasProp(element.Props, "nodes"))
             {
-                ApplyData(key, element);
+                ApplyData(key, element, roots);
                 return;
             }
 
@@ -156,6 +156,7 @@ internal static class VectorElementPatch
             graphic.SetClickTarget(clicks, element.Id);
         }
         graphic.SetScene(scene);
+        graphic.StructureText = source;
 
         // A rebuild -- which is what a capture does -- makes a NEW graphic with an empty
         // context, and the data element ScriptedScreens replays afterwards is one payload, not
@@ -166,7 +167,12 @@ internal static class VectorElementPatch
             && !ReferenceEquals(previous, null)
             && !ReferenceEquals(previous, graphic))
         {
-            graphic.SetData(previous.Snapshot());
+            // Only for the SAME structure. A scene that fills named slots can come back as a
+            // different structure with the same slot names meaning other things -- a page
+            // rebuilt from scratch -- and the old values then landed in the wrong slots: a
+            // capture showed stale text in other fonts, and dark blocks.
+            if (string.Equals(previous.StructureText, source, StringComparison.Ordinal))
+                graphic.SetData(previous.Snapshot());
 
             // The old host is only destroyed at the end of the frame, and a capture copies the
             // surface before that: both pages were drawn, the old one's labels over the new,
@@ -187,16 +193,27 @@ internal static class VectorElementPatch
             $"scene \"{scene.Id}\": {scene.Root.Count} root node(s), animated={scene.UsesTime}");
     }
 
-    private static void ApplyData(string key, SS.UiElement element)
+    private static void ApplyData(string key, SS.UiElement element, Dictionary<string, GameObject> roots)
     {
         var context = new EvalContext();
         SceneParser.ReadData(element.Props, context);
 
-        // A geometry patch is applied to the live scene; it is not evaluator data.
-        if (Scenes.TryGetValue(key, out var patched) && patched != null)
-            patched.PatchScene(element.Props);
+        // A graphic whose host has left the surface is being replaced: a rebuild cleared the
+        // hosts and is re-applying elements. Data arriving now belongs to the graphic its
+        // structure is about to create, so it waits for it instead of going to the old one,
+        // which is how a page's full payload sent ahead of its new structure was lost.
+        Scenes.TryGetValue(key, out var graphic);
+        if (graphic != null && (!graphic || graphic.transform.parent == null
+                                || !roots.ContainsValue(graphic.transform.parent.gameObject)))
+        {
+            graphic = null;
+        }
 
-        if (Scenes.TryGetValue(key, out var graphic) && graphic != null)
+        // A geometry patch is applied to the live scene; it is not evaluator data.
+        if (graphic != null)
+            graphic.PatchScene(element.Props);
+
+        if (graphic != null)
             graphic.SetData(context);
         else if (PendingData.TryGetValue(key, out var waiting))
             waiting.MergeFrom(context);   // a later patch must not drop an earlier one

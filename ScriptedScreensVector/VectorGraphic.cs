@@ -206,6 +206,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
     private TextLayer? _text;
 
+    /// <summary>The `src` text this surface was built from; null for the table form.</summary>
+    internal string? StructureText { get; set; }
+
     /// <summary>The scene this surface is showing, for the stats tool.</summary>
     internal string SceneId => _sceneId;
 

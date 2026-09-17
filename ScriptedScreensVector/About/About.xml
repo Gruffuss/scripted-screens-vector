@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<Name>ScriptedScreens Vector [StationeersLaunchPad]</Name>
 	<Author>Gruffuss</Author>
-	<Version>0.11.26.0</Version>
+	<Version>0.11.27.0</Version>
 	<Description>
 [h1]ScriptedScreens Vector[/h1]
 [i]Crisp, animated vector graphics for ScriptedScreens consoles. Client-side only.[/i]
@@ -21,11 +21,11 @@ Adds a [b]vector[/b] element: describe a screen once -- shapes, gradients, text,
 [h2]Getting started[/h2]
 The mod folder holds fifteen examples that run on paste, a guide (README.md), a full reference (REFERENCE.md) and the release history (CHANGELOG.md), also [url=https://github.com/Gruffuss/scripted-screens-vector/tree/main/ScriptedScreensVector]on GitHub[/url]. With StationeersLua installed, AI editors can read and search the same docs through its MCP server.
 
-[h2]What's new in 0.11.26[/h2]
+[h2]What's new in 0.11.27[/h2]
 [list]
-[*] [b]snap = 1[/b] makes a data update apply at once instead of gliding
-[*] Multi-colour linear gradients are exact and far lighter
-[*] Screen captures no longer show doubled or garbled text
+[*] Screen captures of data-driven scenes are reliable: no stale text or dark blocks
+[*] [b]snap = 1[/b] makes a data update apply at once instead of gliding (0.11.26)
+[*] Multi-colour linear gradients are exact and far lighter (0.11.26)
 [/list]
 Full history: [url=https://github.com/Gruffuss/scripted-screens-vector/blob/main/ScriptedScreensVector/CHANGELOG.md]CHANGELOG.md[/url].
 

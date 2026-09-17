@@ -2,6 +2,12 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.27
+
+- Fixed: a screen capture of a scene that fills named data slots could show the previous build's values in the rebuilt page, as stale text, wrong fonts and dark blocks.
+- Fixed: data sent just before a new structure during a rebuild went to the outgoing surface and was lost.
+- With Diagnostics on, each screen capture writes what it copied to a text file in the temp folder.
+
 ## 0.11.26
 
 - `snap = 1` on a data payload applies its numbers at once instead of easing them in; other values keep easing.
