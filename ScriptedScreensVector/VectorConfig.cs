@@ -62,7 +62,7 @@ internal static class VectorConfig
     internal static bool RateLodEnabled => _rateLodEnabled?.Value ?? true;
 
     /// <summary>Rebuild ceiling regardless of size. Rendering is unaffected and stays per-frame.</summary>
-    internal static float MaximumHz => _maximumHz?.Value ?? 30f;
+    internal static float MaximumHz => _maximumHz?.Value ?? 60f;
 
     /// <summary>Floor for the smallest elements. Below ~12 Hz motion starts to read as choppy.</summary>
     internal static float MinimumHz => _minimumHz?.Value ?? 15f;
@@ -133,9 +133,24 @@ internal static class VectorConfig
             "small sizes. Off = always rebuild at MaximumHz.");
 
         _maximumHz = _file.Bind(
-            "Rate LOD", "MaximumHz", 30f,
+            "Rate LOD", "MaximumHz", 60f,
             "Ceiling on mesh rebuilds per second, independent of frame rate. Rendering still " +
-            "happens every frame. 30 is ample for drift, ripple and sweeping needles.");
+            "happens every frame. 60 lets script-driven animation follow the frame rate; 30 " +
+            "halves the background work and is ample for drift, ripple and sweeping needles.");
+
+        // 0.11.28 raised the MaximumHz default from 30 to 60. A config file keeps the value it
+        // was first written with, so an install still at the old default is moved once; the
+        // version entry stops a later, deliberate 30 from being moved again.
+        var settingsVersion = _file.Bind(
+            "Settings", "Version", 1,
+            "Which defaults this file has been brought up to. Managed by the mod; do not edit.");
+        if (settingsVersion.Value < 2)
+        {
+            if (System.Math.Abs(_maximumHz.Value - 30f) < 0.001f)
+                _maximumHz.Value = 60f;
+
+            settingsVersion.Value = 2;
+        }
 
         _minimumHz = _file.Bind(
             "Rate LOD", "MinimumHz", 15f,

@@ -233,7 +233,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// client (a page script wants `scroll` events and a real `scrollTop`); a chip cannot see
     /// it. Arguments: the `vector` element's host object, the `SC` id, then offset, maximum
     /// offset and viewport height, all in scene units. At most once per container per rebuild,
-    /// so it runs at the rebuild rate (30 Hz at most), not per wheel event.
+    /// so it runs at the rebuild rate (MaximumHz at most), not per wheel event.
     /// </remarks>
     public static event Action<GameObject, string, float, float, float>? ScrollChanged;
 

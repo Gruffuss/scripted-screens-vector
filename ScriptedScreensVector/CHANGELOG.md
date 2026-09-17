@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.28
+
+- Animated scenes rebuild up to 60 times a second by default (was 30), so script-driven motion can follow the frame rate. Rate LOD MaximumHz still sets the ceiling; an existing settings file still at the old default of 30 is moved to 60 once.
+
 ## 0.11.27
 
 - Fixed: a screen capture of a scene that fills named data slots could show the previous build's values in the rebuilt page, as stale text, wrong fonts and dark blocks.

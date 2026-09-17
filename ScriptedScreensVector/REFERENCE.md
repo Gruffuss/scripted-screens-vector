@@ -529,7 +529,7 @@ VectorGraphic.TryGetScroll(host, "log", out var offset, out var max, out var vie
 ```
 
 `ScrollChanged` is raised on the main thread after the rebuild that shows the change, once
-per container per rebuild (30 Hz at most), and once when a container first appears. `max` is
+per container per rebuild (MaximumHz at most, 60 by default), and once when a container first appears. `max` is
 `ch - h`. The type is internal to this mod, so reach it by reflection
 (`ScriptedScreensVector.VectorGraphic, ScriptedScreensVector`). With Diagnostics on, every
 report is logged as `scroll Ui:<element>/<id>: offset of max, view h`.

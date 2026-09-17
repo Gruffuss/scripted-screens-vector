@@ -403,7 +403,7 @@ every tick or it disappears.
 
 Three things it cannot do, because TMP builds its own geometry on its own object:
 
-- It updates at the **rebuild rate**, not instantly. In practice that is 30 Hz.
+- It updates at the **rebuild rate**, not instantly. In practice that is up to 60 Hz (`MaximumHz`).
 - A clip that is not an axis-aligned rectangle — rounded, elliptical, concave — masks the text
   through the stencil, which is one more draw call per label it touches.
 - It cannot be part of a gradient fill — `f` is a flat colour sampled at the node's origin.
