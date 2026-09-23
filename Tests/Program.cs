@@ -169,6 +169,7 @@ internal static class Program
         RequirementTests.ImagePosition(run);
         RequirementTests.LabelUnchanged(run);
         RequirementTests.TextTemplate(run);
+        RequirementTests.AnimatedReached(run);
         EasingTests.Curves(run);
         EasingTests.Payload(run);
 

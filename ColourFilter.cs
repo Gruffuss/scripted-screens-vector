@@ -141,14 +141,40 @@ internal sealed class MaskInfo
         if (Gradient is { Conic: true, BoundingBox: true })
             return Gradient.Sample(Gradient.ConicParameter(local - (Min + Vector2.Scale(Gradient.Start, Size)))).a;
 
-        if (Gradient.BoundingBox)
-        {
-            local = new Vector2(
+        return Gradient.At(InGradientSpace(local)).a;
+    }
+
+    private Vector2 InGradientSpace(Vector2 local)
+    {
+        return Gradient.BoundingBox
+            ? new Vector2(
                 (local.x - Min.x) / (Mathf.Abs(Size.x) < 0.0001f ? 1f : Size.x),
-                (local.y - Min.y) / (Mathf.Abs(Size.y) < 0.0001f ? 1f : Size.y));
+                (local.y - Min.y) / (Mathf.Abs(Size.y) < 0.0001f ? 1f : Size.y))
+            : local;
+    }
+
+    /// <summary>
+    /// Whether any of these canvas-space vertices lies past either end of a linear ramp.
+    /// </summary>
+    /// <remarks>
+    /// There the mask holds its end alpha flat, and alpha interpolated between corners runs
+    /// straight through that flat part: a list longer than its fade faded evenly from end to end
+    /// instead of staying opaque until the fade began. Fills have had the same check since
+    /// 0.11.31; masks did not.
+    /// </remarks>
+    internal bool LeavesRamp(System.Collections.Generic.List<Vector3> positions, int from, int to)
+    {
+        if (Gradient.Radial || Gradient.Conic)
+            return false;
+
+        for (var v = from; v < to; v++)
+        {
+            var t = Gradient.Parameter(InGradientSpace(CanvasToLocal.MultiplyPoint3x4(positions[v])));
+            if (t < -0.0001f || t > 1.0001f)
+                return true;
         }
 
-        return Gradient.At(local).a;
+        return false;
     }
 
     /// <summary>

@@ -2,6 +2,14 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.35
+
+- A group whose only animation is its own `o` over `t` -- a blinking status dot -- is drawn once and faded by its renderer every frame, so it costs no redraws at all. It takes one extra draw call per such group. Groups that move, hold text, sit inside a repeat, or whose `o` reads data redraw as before.
+- A gradient def that reads `sy` or `vh` follows the scroll container where it is used, in fills and in a `mask`, so one fade def works in every list. Scrolling the host scroll view also redraws it now.
+- Fixed: a scene with a blink or pulse inside a hidden group (`v = 0`, `o = 0`, or hidden by data) redrew every frame although nothing moving was on screen. It now redraws for `t` only while something that reads it is shown.
+- Fixed: a scene whose only animation was in `fo2`, a `$name[...]` index, text `size` or `min_size`, per-corner radii, a scroll container's `ch` or forced scroll, or a `{$name[...]}` placeholder index was treated as still and froze on its first frame.
+- Fixed: a two-stop linear `mask` over a shape reaching past the ends of its ramp faded evenly from one end of the shape to the other, instead of holding its end values outside the ramp. A list longer than its fade was faded all the way down.
+
 ## 0.11.34
 
 - `off = { ox, oy }` on `IMG` moves the picture by scene units after `at` has placed it, so CSS `object-position: right 10px` is `at = { 1, 0.5 }, off = { -10, 0 }`. It applies under every `fit`, `fill` included.

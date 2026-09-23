@@ -370,6 +370,17 @@ node by node, so keeping an alternative layout in the scene and showing it with 
 nothing while it is hidden. Clicks, scroll containers and pictures under it still register,
 as `opacity: 0` does in a browser; use `o = 0` on those only when you mean them to stay live.
 
+**Animation inside a hidden group costs nothing.** A scene redraws for `t` only when the last
+redraw reached something that reads it, so a blink or pulse inside a group hidden by `v = 0`,
+by `o = 0`, or by data stops the redraws while it is hidden and resumes when it is shown.
+
+**A group that only fades is redrawn by nothing.** When a group's own `o` is its only
+animation -- an expression of `t` alone, over content that does not move and holds no text,
+outside any `RP` -- it is drawn once at full opacity in a mesh of its own, and the renderer
+sets its opacity every frame. A blinking status dot then costs no redraws at all, at one extra
+draw call per such group. An `o` that also reads data, a group that moves, or one holding a `T`
+redraws as usual.
+
 **`v = 0` is the other half**, and it is CSS `visibility: hidden`: the subtree is not there
 at all, so a button under it cannot be clicked and a scroll container under it reports
 nothing. It is an expression like anything else, so one scene can carry several states and
@@ -595,6 +606,17 @@ own `y` plus `sy`:
 -- container at y = 20, height 120
 { op = "R", x = 4, y = "=20+sy",         w = 192, h = 18, f = "#0B1622" }  -- pinned header
 { op = "R", x = 4, y = "=20+sy+vh-12",   w = 192, h = 12, f = "@fade" }    -- bottom fade
+```
+
+**The same holds in a gradient that a shape or a `mask` inside the container uses.** A def
+reading `sy` or `vh` is resolved where it is used, so one `@fade` def serves a list fade in
+every container that uses it:
+
+```lua
+-- container at y = 20, as above: the last 16 units of its window fade out
+{ op = "GL", id = "fade", x1 = 0, y1 = "=20+sy+vh-16", x2 = 0, y2 = "=20+sy+vh",
+  stops = { { 0, "#FFFFFFFF" }, { 1, "#FFFFFF00" } } }
+{ op = "SC", id = "list", y = 20, ..., c = { { op = "G", mask = "@fade", c = { ... } } } }
 ```
 
 **`sy` is an offset, not a position**, exactly as it is for a ScrollRect. The difference is

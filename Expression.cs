@@ -466,6 +466,36 @@ internal sealed class Expression
     /// </remarks>
     internal bool UsesScroll { get; private set; }
 
+    /// <summary>
+    /// True when nothing but <c>t</c> and literals is involved -- no data, no repeat index, no
+    /// scroll -- so it can be evaluated on the main thread with only a clock, while a rebuild
+    /// may be using the shared context on a worker.
+    /// </summary>
+    internal bool ReadsOnlyTime()
+    {
+        switch (_kind)
+        {
+            case Kind.Constant:
+            case Kind.Time:
+                return true;
+            case Kind.ScrollY:
+            case Kind.ViewportH:
+            case Kind.RepeatIndex:
+            case Kind.RepeatCount:
+            case Kind.Scalar:
+            case Kind.Element:
+                return false;
+        }
+
+        foreach (var argument in _args)
+        {
+            if (argument != null && !argument.ReadsOnlyTime())
+                return false;
+        }
+
+        return true;
+    }
+
     /// <summary>True when nothing but a literal number is involved.</summary>
     internal bool IsConstant => _kind == Kind.Constant;
 

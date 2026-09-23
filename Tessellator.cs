@@ -235,6 +235,10 @@ internal static class Tessellator
         stats.BandFeatherMs = BandFeatherMs;
         stats.BandQuads = BandQuads;
         stats.Shapes = shapes;
+        stats.DrewTime = DrewTime || scene.DefsUseTime;
+        stats.AlphaGroups.Clear();
+        if (AlphaFound != null)
+            stats.AlphaGroups.AddRange(AlphaFound);
 
         stats.Text.Clear();
         if (TextFound != null)
@@ -278,6 +282,7 @@ internal static class Tessellator
         BandStripMs = 0d;
         BandFeatherMs = 0d;
         BandQuads = 0;
+        DrewTime = false;
 
         _starved = null;
 
@@ -285,6 +290,7 @@ internal static class Tessellator
         (HitsFound ??= new List<HitRegion>(16)).Clear();
         (ImagesFound ??= new List<ImagePlacement>(4)).Clear();
         (ScrollsFound ??= new List<ScrollRegion>(4)).Clear();
+        (AlphaFound ??= new List<AlphaGroup>(4)).Clear();
 
         vh.TrackBounds(scene.TextInOrder);
 
@@ -512,8 +518,28 @@ internal static class Tessellator
         return result;
     }
 
+    [ThreadStatic] internal static List<AlphaGroup>? AlphaFound;
+
+    /// <summary>Whether this group is faded by its renderer on this visit rather than rebuilt.</summary>
+    private static bool Fades(VecNode node, EvalContext context)
+    {
+        return node.AlphaOnly && context.RepeatDepth == 0 && AlphaFound != null && !_repeatPiece;
+    }
+
+    /// <summary>Set when the walk reaches a node whose own values read `t`.</summary>
+    [ThreadStatic] private static bool DrewTime;
+
     private static void EmitNode(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
     {
+        // Before any early-out: a group hidden by a `t`-driven `v` or `o` must still count,
+        // since time is what will show it again. What it hides is never reached, and that is
+        // the point -- an animation inside a hidden group costs no rebuilds.
+        //
+        // A group that only fades is the exception: the renderer applies its `o` every frame,
+        // so reaching it is no reason to rebuild. Inside a repeat its `o` differs per instance
+        // and one mesh cannot carry them all, so there it counts as usual.
+        DrewTime |= node.SelfUsesTime && !Fades(node, context);
+
         if (Starved(vh, 1, "a node"))
             return;
 
@@ -539,7 +565,9 @@ internal static class Tessellator
                     break;
                 }
 
-                var alpha = parent.Opacity * Mathf.Clamp01(node.Opacity.Evaluate(context));
+                // A fading group is drawn at full opacity and faded by its renderer; see AlphaOnly.
+                var fades = Fades(node, context);
+                var alpha = fades ? parent.Opacity : parent.Opacity * Mathf.Clamp01(node.Opacity.Evaluate(context));
 
                 // A fully transparent group draws nothing today, child by child. Stopping at
                 // the group makes a hidden subtree free instead of merely cheap, which is what
@@ -633,7 +661,18 @@ internal static class Tessellator
                 // re-expression) is separated from its children's.
                 Charge(VecOp.Group, mark);
 
+                // Meshes of its own, so the renderer can fade exactly this and nothing else.
+                var firstShape = vh.ShapeCount;
+                if (fades)
+                    vh.ForceCutBefore(firstShape);
+
                 EmitGroupChildren(vh, scene, node, context, stack, ref emitted, vh.Tint == savedTint ? null : vh.Tint!.Mask);
+
+                if (fades && vh.ShapeCount > firstShape)
+                {
+                    vh.ForceCutBefore(vh.ShapeCount);
+                    AlphaFound!.Add(new AlphaGroup(firstShape, vh.ShapeCount, node.Opacity));
+                }
 
                 vh.Tint = savedTint;
                 stack.Pop();
@@ -848,7 +887,7 @@ internal static class Tessellator
         if (node.MaskGradient != null)
         {
             if (scene.Gradients.TryGetValue(node.MaskGradient, out var gradient))
-                mask = new MaskInfo { Gradient = gradient, CanvasToLocal = AffineInverse(groupMatrix) };
+                mask = new MaskInfo { Gradient = gradient.AtUse(context), CanvasToLocal = AffineInverse(groupMatrix) };
             else
                 scene.Problem($"mask gradient \"{node.MaskGradient}\" is not declared in defs");
         }
@@ -3314,8 +3353,9 @@ internal static class Tessellator
 
         if (!string.IsNullOrEmpty(name))
         {
-            if (scene.Gradients.TryGetValue(name!, out var gradient))
+            if (scene.Gradients.TryGetValue(name!, out var found))
             {
+                var gradient = found.AtUse(context);
                 var at = stroke ? node.StrokeGradientAt : node.FillGradientAt;
                 if (at == null)
                     return new Paint(Color.white, gradient, opacity);

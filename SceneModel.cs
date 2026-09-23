@@ -211,6 +211,20 @@ internal sealed class VecNode
     /// <summary>True if this node or anything under it references <c>t</c>.</summary>
     internal bool UsesTime;
 
+    /// <summary>
+    /// Whether this node's OWN values read `t`, children aside. What decides animation is
+    /// whether a rebuild actually reached such a node: one inside a hidden group draws nothing
+    /// and must not keep the scene rebuilding.
+    /// </summary>
+    internal bool SelfUsesTime;
+
+    /// <summary>
+    /// A group whose only animation is its own `o`, over `t` alone, above static content with
+    /// no text: it is drawn at full opacity into a mesh of its own and faded by the renderer
+    /// every frame, so a blinking dot costs no rebuilds at all.
+    /// </summary>
+    internal bool AlphaOnly;
+
     internal bool UsesScroll;
 
     /// <summary>The node's <c>id</c>, when it has one. Patch target and, later, hit target.</summary>
@@ -355,6 +369,9 @@ internal sealed class VecScene
     /// </remarks>
     internal bool DefsUseTime;
 
+    /// <summary>Whether a gradient def reads `sy` or `vh`, and so has to follow scrolling.</summary>
+    internal bool DefsUseScroll;
+
     /// <summary>
     /// Re-reads the live parts of <c>defs</c> for this rebuild: clip outlines that are
     /// expressions, gradient geometry and gradient stops bound to the payload.
@@ -497,6 +514,7 @@ internal static class SceneParser
 
         // A clip or gradient that animates is as much a reason to rebuild as a node that does.
         scene.UsesTime |= scene.DefsUseTime;
+        scene.UsesScroll |= scene.DefsUseScroll;
 
         Reindex(scene);
         Expression.Report = null;
@@ -566,7 +584,7 @@ internal static class SceneParser
             // A patch can introduce or remove a `t` or `sy` reference, and the rebuild gate
             // reads these off the scene.
             scene.UsesTime = scene.DefsUseTime;
-            scene.UsesScroll = false;
+            scene.UsesScroll = scene.DefsUseScroll;
 
             foreach (var node in scene.Root)
             {
@@ -1342,7 +1360,12 @@ internal static class SceneParser
         if (!string.IsNullOrEmpty(node.Id))
             node.SourceProps = map;
 
-        node.UsesTime = NodeUsesTime(node) || node.Visible is { UsesTime: true };
+        node.SelfUsesTime = NodeUsesTime(node) || node.Visible is { UsesTime: true };
+        node.UsesTime = node.SelfUsesTime;
+        node.AlphaOnly = node.Op == VecOp.Group
+                         && node.Opacity.UsesTime && node.Opacity.ReadsOnlyTime()
+                         && !NodeUsesTime(node, withOpacity: false) && node.Visible is not { UsesTime: true }
+                         && !node.Children.Exists(c => c.UsesTime || HoldsText(c));
         node.UsesScroll = NodeUsesScroll(node);
         node.Interactive = node.Clickable || node.Op is VecOp.Scroll or VecOp.Image;
         foreach (var child in node.Children)
@@ -1355,14 +1378,19 @@ internal static class SceneParser
         return node;
     }
 
-    private static bool NodeUsesTime(VecNode node)
+    private static bool HoldsText(VecNode node)
+    {
+        return node.Op == VecOp.Text || node.Children.Exists(HoldsText);
+    }
+
+    private static bool NodeUsesTime(VecNode node, bool withOpacity = true)
     {
         return node.X.UsesTime || node.Y.UsesTime || node.W.UsesTime || node.H.UsesTime
                || node.Rx.UsesTime || node.Ry.UsesTime
                || node.Tx.UsesTime || node.Ty.UsesTime || node.Rotate.UsesTime
                || node.Sx.UsesTime || node.Sy.UsesTime || node.Ax.UsesTime || node.Ay.UsesTime
                || node.Y2.UsesTime
-               || node.Opacity.UsesTime || node.FillOpacity.UsesTime || node.Feather.UsesTime
+               || (withOpacity && node.Opacity.UsesTime) || node.FillOpacity.UsesTime || node.Feather.UsesTime
                || node.EdgeFeather is { UsesTime: true }
                || node.StrokeWidth.UsesTime || node.StrokeOpacity.UsesTime || node.DashOffset.UsesTime
                || node.FillGradientAt is { UsesTime: true } || node.StrokeGradientAt is { UsesTime: true }
@@ -1370,6 +1398,13 @@ internal static class SceneParser
                || node.ImageOffX.UsesTime || node.ImageOffY.UsesTime
                || node.ImageTileW is { UsesTime: true } || node.ImageTileH is { UsesTime: true }
                || node.TextOutlineWidth is { UsesTime: true }
+               || node.EdgeOpacity is { UsesTime: true } || node.ContentH.UsesTime
+               || node.FillIndex is { UsesTime: true } || node.StrokeIndex is { UsesTime: true }
+               || node.TextIndex is { UsesTime: true } || node.TextSize is { UsesTime: true }
+               || node.MinSize is { UsesTime: true }
+               || node.ScrollSet is { UsesTime: true } || node.ScrollSetVersion is { UsesTime: true }
+               || (node.CornerRadii != null && System.Array.Exists(node.CornerRadii, e => e.UsesTime))
+               || (node.TextParts != null && System.Array.Exists(node.TextParts, p => p.Index is { UsesTime: true }))
                || (node.Filters != null && node.Filters.Exists(f => f.Amount.UsesTime));
     }
 
@@ -1387,7 +1422,13 @@ internal static class SceneParser
                || node.ImageAtX.UsesScroll || node.ImageAtY.UsesScroll
                || node.ImageOffX.UsesScroll || node.ImageOffY.UsesScroll
                || node.ImageTileW is { UsesScroll: true } || node.ImageTileH is { UsesScroll: true }
-               || node.TextOutlineWidth is { UsesScroll: true };
+               || node.TextOutlineWidth is { UsesScroll: true }
+               || node.EdgeOpacity is { UsesScroll: true } || node.ContentH.UsesScroll
+               || node.FillIndex is { UsesScroll: true } || node.StrokeIndex is { UsesScroll: true }
+               || node.TextIndex is { UsesScroll: true } || node.TextSize is { UsesScroll: true }
+               || node.MinSize is { UsesScroll: true }
+               || (node.CornerRadii != null && System.Array.Exists(node.CornerRadii, e => e.UsesScroll))
+               || (node.TextParts != null && System.Array.Exists(node.TextParts, p => p.Index is { UsesScroll: true }));
     }
 
     private static void ParseFill(SS.UiProp[] map, VecNode node)
@@ -1737,6 +1778,14 @@ internal static class SceneParser
 
         scene.LiveDefs = true;
         scene.DefsUseTime |= slots.UsesTime;
+
+        slots.UsesScroll = Scroll(slots.X1) || Scroll(slots.Y1) || Scroll(slots.X2) || Scroll(slots.Y2)
+                           || Scroll(slots.Cx) || Scroll(slots.Cy) || Scroll(slots.Radius)
+                           || Scroll(slots.Fx) || Scroll(slots.Fy) || Scroll(slots.Angle)
+                           || (slots.StopPositions != null && System.Array.Exists(slots.StopPositions, e => e is { UsesScroll: true }));
+        scene.DefsUseScroll |= slots.UsesScroll;
+
+        static bool Scroll(Expression? expression) => expression is { UsesScroll: true };
 
         static bool Time(Expression? expression) => expression is { UsesTime: true };
 

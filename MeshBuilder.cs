@@ -373,6 +373,7 @@ internal sealed class MeshBuilder
 
         _alphaAt.Clear();
         var aligned = from == 0 || (firstCut > 0 && _cuts[firstCut - 1] == from);
+        refine = refine || mask.LeavesRamp(_positions, from, to);
         if (refine && aligned && firstCut < _cuts.Count && _cuts[^1] == to)
             Refine(from, firstCut, mask, screenScale);
 

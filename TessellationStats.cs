@@ -25,6 +25,16 @@ internal sealed class TessellationStats
 
     internal int Shapes;
 
+    /// <summary>
+    /// Whether the rebuild reached anything that reads `t` -- a node drawn, or a def. False
+    /// when every animated node sat under a hidden group, which leaves the scene idle until
+    /// data or structure changes. True until a rebuild has said otherwise.
+    /// </summary>
+    internal bool DrewTime = true;
+
+    /// <summary>Groups drawn at full opacity whose `o` the renderer applies every frame.</summary>
+    internal readonly System.Collections.Generic.List<AlphaGroup> AlphaGroups = new();
+
     /// <summary>Text nodes found by the walk, for the main thread to realise as TMP.</summary>
     internal readonly System.Collections.Generic.List<TextPlacement> Text = new();
 
@@ -47,4 +57,23 @@ internal sealed class TessellationStats
 
     /// <summary>Data names the scene asked for and did not get, this rebuild.</summary>
     internal readonly System.Collections.Generic.List<string> Missing = new();
+}
+
+/// <summary>
+/// A group faded by its renderer rather than rebuilt: shapes <see cref="FirstShape"/> up to
+/// <see cref="EndShape"/> sit in meshes of their own, drawn at full opacity.
+/// </summary>
+internal readonly struct AlphaGroup
+{
+    internal readonly int FirstShape;
+    internal readonly int EndShape;
+    /// <summary>The group's own `o`; its ancestors' opacity is already in the vertices.</summary>
+    internal readonly Expression Opacity;
+
+    internal AlphaGroup(int firstShape, int endShape, Expression opacity)
+    {
+        FirstShape = firstShape;
+        EndShape = endShape;
+        Opacity = opacity;
+    }
 }

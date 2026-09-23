@@ -75,6 +75,29 @@ internal sealed class Gradient
     /// land in the same fields a static gradient parses into, so everything downstream —
     /// sampling, banding, refinement — is unchanged and costs nothing extra.
     /// </remarks>
+    /// <summary>
+    /// This gradient as seen from where it is being used. A def reading `sy`/`vh` is resolved
+    /// again here, inside whichever scroll container the walk is in, on a copy: the same def
+    /// used in two containers would otherwise end on whichever was drawn last, and a mask or a
+    /// text gradient is read again after the walk.
+    /// </summary>
+    /// <remarks>Allocates, but only for a def that reads the scroll position.</remarks>
+    internal Gradient AtUse(EvalContext context)
+    {
+        if (Slots is not { UsesScroll: true })
+            return this;
+
+        var copy = new Gradient
+        {
+            Radial = Radial, Conic = Conic, Angle = Angle, BoundingBox = BoundingBox,
+            Start = Start, End = End, Focus = Focus, Radius = Radius, Spread = Spread, Slots = Slots,
+        };
+        copy.Positions.AddRange(Positions);
+        copy.Colours.AddRange(Colours);
+        copy.Resolve(context);
+        return copy;
+    }
+
     internal void Resolve(EvalContext context)
     {
         var slots = Slots;
@@ -413,6 +436,12 @@ internal sealed class GradientSlots
     internal string?[]? StopColours;
 
     internal bool UsesTime;
+
+    /// <summary>
+    /// Reads `sy` or `vh`, which mean the scroll container around the shape using it -- so the
+    /// def is resolved where it is used rather than once per rebuild. See <see cref="Gradient.AtUse"/>.
+    /// </summary>
+    internal bool UsesScroll;
 
     internal bool Any =>
         X1 != null || Y1 != null || X2 != null || Y2 != null

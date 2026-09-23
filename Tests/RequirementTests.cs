@@ -365,6 +365,36 @@ internal static class RequirementTests
             $"{small} / {large}");
     }
 
+    /// <summary>A scene animates only where a rebuild reached something that reads `t`.</summary>
+    internal static void AnimatedReached(TestRun run)
+    {
+        bool Drew(string body)
+        {
+            var scene = SceneParser.Parse(SceneText.ToProps("SCENE w=100 h=100 fit=stretch\n" + body, "anim")!)!;
+            var stats = new TessellationStats();
+            Tessellator.Emit(new MeshBuilder(), scene, new EvalContext(), new Rect(0f, 0f, 100f, 100f), 1f, true, stats);
+            return scene.UsesTime && stats.DrewTime;
+        }
+
+        const string Blink = "R x==10+5*sin(t*6) y=10 w=20 h=20";
+        run.Check("animated: a blink that is drawn animates", Drew(Blink), "");
+        run.Check("animated: a blink under v=0 does not", !Drew("G v=0 { " + Blink + " }"), "");
+        run.Check("animated: nor under a group at o=0", !Drew("G o=0 { " + Blink + " }"), "");
+        run.Check("animated: nor under a data-hidden group", !Drew("G v=$show { " + Blink + " }"), "");
+        run.Check("animated: a group whose own v reads t does, hidden or not",
+            Drew("G v==step(2,mod(t,1)) { R x=10 y=10 w=20 h=20 }"), "");
+        // An `o` over `t` alone is faded by the renderer instead (see the probe); one that also
+        // reads data cannot be, and rebuilds.
+        run.Check("animated: so does one whose own o reads t and data", Drew("G o==$k*t { R x=10 y=10 w=20 h=20 }"), "");
+
+        // Values the time check used to miss, so a scene animating only through them froze.
+        run.Check("animated: text size reading t counts", Drew("T w=50 h=10 text=hi size==8+sin(t)"), "");
+        run.Check("animated: an array index reading t counts", Drew("T w=50 h=10 text=\"$rows[mod(floor(t),4)]\""), "");
+        run.Check("animated: a fo2 ramp reading t counts",
+            Drew("YS n=4 x==i*10 y=10 y2=30 fo=1 fo2==0.5+0.5*sin(t)"), "");
+        run.Check("animated: a placeholder index reading t counts", Drew("T w=50 h=10 text=\"{$rows[mod(floor(t),4)]}\""), "");
+    }
+
     /// <summary>A text with several bound values, each printed through its own format.</summary>
     internal static void TextTemplate(TestRun run)
     {

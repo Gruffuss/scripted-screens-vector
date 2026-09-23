@@ -716,6 +716,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // leave the surface in the state a normal rebuild would.
         ApplySlices();
         ApplyImages();
+        MapFades();
 
         if (_stats.Text.Count > 0 || _text != null)
         {
@@ -777,6 +778,74 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         // Rebuilt when any request finishes. A static scene has nothing else to wake it.
         _imagesWaitingOn = waiting ? ImageCache.Version : -1;
+    }
+
+    /// <summary>A group faded by its meshes' renderers: slices <c>First..Last</c>, and its `o`.</summary>
+    private readonly List<(int First, int Last, Expression Opacity)> _fades = new();
+
+    /// <summary>Renderers this surface has faded, so a slice reused for other content is reset.</summary>
+    private readonly List<CanvasRenderer> _faded = new();
+
+    /// <summary>A clock for the fades, never the rebuild's context: that one may be on a worker.</summary>
+    private readonly EvalContext _fadeClock = new();
+
+    /// <summary>After a rebuild: which slices each fading group landed in.</summary>
+    private void MapFades()
+    {
+        foreach (var renderer in _faded)
+        {
+            if (renderer != null)
+                renderer.SetAlpha(1f);
+        }
+
+        _faded.Clear();
+        _fades.Clear();
+
+        foreach (var group in _stats.AlphaGroups)
+        {
+            if (group.EndShape <= group.FirstShape || group.EndShape > _builder.ShapeCount)
+                continue;
+
+            var first = _builder.SlicesBefore(_builder.ShapeStart(group.FirstShape));
+            var last = _builder.SlicesBefore(_builder.ShapeStart(group.EndShape - 1));
+            _fades.Add((first, last, group.Opacity));
+        }
+
+        ApplyFades();
+    }
+
+    /// <summary>Every frame: each fading group's `o` at the current `t`, set on its renderers.</summary>
+    /// <remarks>
+    /// This is the whole per-frame cost of a blinking dot: one expression and a SetAlpha, where a
+    /// rebuild would re-tessellate the scene and re-apply every label. SetAlpha only runs when
+    /// the value moves by a visible step, so a paused game costs nothing either.
+    /// </remarks>
+    private void ApplyFades()
+    {
+        // Off screen, nothing is looking: the next frame on screen sets the right value anyway.
+        if (_fades.Count == 0 || (VectorConfig.CullOffScreen && !IsOnScreen()))
+            return;
+
+        _fadeClock.Time = Now() - _startTime;
+
+        foreach (var (first, last, opacity) in _fades)
+        {
+            var alpha = Mathf.Clamp01(opacity.Evaluate(_fadeClock));
+            for (var slice = first; slice <= last; slice++)
+            {
+                var renderer = slice == 0 ? canvasRenderer
+                    : slice - 1 < _slices.Count && _slices[slice - 1] != null ? _slices[slice - 1].canvasRenderer : null;
+                if (renderer == null)
+                    continue;
+
+                if (Mathf.Abs(renderer.GetAlpha() - alpha) >= 0.5f / 255f)
+                {
+                    renderer.SetAlpha(alpha);
+                    if (!_faded.Contains(renderer))
+                        _faded.Add(renderer);
+                }
+            }
+        }
     }
 
     private void ApplySlices()
@@ -902,7 +971,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                         + $"{VectorStatsTool.N(up)} ms upload on-thread");
 
         var size = _screenPixels < 0f ? "size unknown" : VectorStatsTool.N(_screenPixels, 0) + " px";
-        into.AppendLine($"  on screen {size}, animated {_scene.UsesTime}, scroll-driven {_scene.UsesScroll}");
+        into.AppendLine($"  on screen {size}, animated {_scene.UsesTime && _stats.DrewTime}"
+                        + (_scene.UsesTime && !_stats.DrewTime ? " (its `t` is all under hidden groups)" : "")
+                        + $", scroll-driven {_scene.UsesScroll}");
 
         if (_stats.Starved != null)
             into.AppendLine($"  TOO LARGE at this size: {_stats.Starved} was dropped");
@@ -1385,6 +1456,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // data payload is waiting on, so both can happen in the same frame.
         LandJob();
         ApplyDeferred();
+        ApplyFades();
 
         // The entire per-frame cost of a static scene is this one boolean.
         // A scene with no `t` still has to redraw while data is easing to a new value.
@@ -1397,7 +1469,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // freeze the moment it was first drawn. Only rebuild when the offset actually moved.
         var scrolled = _scene is { UsesScroll: true } && ScrollMoved();
 
-        var animated = _scene != null && (_scene.UsesTime || blending || scrolled);
+        // `t` counts only where the last rebuild reached it: an animation under a hidden group
+        // draws nothing. Hiding and showing come from data or structure, both of which rebuild
+        // and so re-decide this.
+        var animated = _scene != null && ((_scene.UsesTime && _stats.DrewTime) || blending || scrolled);
 
         // Walking toward a console changes how much detail its geometry should have. Nothing
         // else notices for a static scene, so the size bucket is what asks for the rebuild.
@@ -1797,6 +1872,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         ApplySlices();
 
         ApplyImages();
+        MapFades();
 
         _stopwatch.Stop();
 
