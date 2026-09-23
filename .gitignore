@@ -16,3 +16,8 @@ Stationeers.VS.User.props
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Local session notes: paths and session talk, never published
+CLAUDE.md
+HISTORY.md
+.claude/
