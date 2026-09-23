@@ -2,6 +2,44 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.34
+
+- `off = { ox, oy }` on `IMG` moves the picture by scene units after `at` has placed it, so CSS `object-position: right 10px` is `at = { 1, 0.5 }, off = { -10, 0 }`. It applies under every `fit`, `fill` included.
+- `fit = "none"` draws a picture at one scene unit per texel, and `fit = "scale-down"` does that unless the picture is larger than the box, when it contains it — CSS `object-fit`.
+- `tile = { tw, th }` on `IMG` repeats the picture across its box at that size, starting from where `at` and `off` place one copy — CSS `background-repeat`. `0` is the natural size; a `uv` crop repeats as the cropped part.
+- `smp = "point"` on `IMG` draws hard-edged pixels, CSS `image-rendering: pixelated`. The same picture drawn smooth elsewhere is unaffected.
+- `spread = "repeat"` or `"reflect"` on `GL` and `GR` repeats the ramp past its ends — SVG `spreadMethod`, CSS `repeating-linear-gradient` — in fills, strokes and masks. Linear ones are exact, hard seams included. The default `pad` is unchanged.
+- `ow` and `oc` on `T` outline the text, centred on each letter's edge — CSS `-webkit-text-stroke`. An outline wider than the font's atlas can hold is capped, and the surface's text warnings say so.
+- `slice = { t, r, b, l }` on `IMG` draws a nine-slice frame — CSS `border-image` — with corners `bw` scene units wide, edges and middle stretched. `mid = 0` leaves the middle out.
+- A picture that does not cover its box now draws only where it is, under any `fit`. Only `contain` did before; a picture moved off its box would have stretched its edge pixels across the gap.
+- A label may carry several values, each with its own format: `text = "set {$press:%.1f} kPa · trip {$trip:%.0f}"`. The chip sends the two numbers and the label is built here, so changing either one no longer means building the whole string in Lua. A value that is missing shows `missing` in its place and the rest of the label still shows.
+- An empty string in a data payload is a value: `text = "$note"` with `note = ""` clears the label. It used to be skipped, so the label went on showing whatever it showed before.
+- Fixed: every redraw re-applied every text label from scratch -- text, box, rotation and a dozen TextMeshPro settings -- even when nothing about the label had changed. Measured in game at about 100-150 bytes a label on every frame of an animating console. A label identical to last time is now left alone, and the text-ordering pass no longer re-sets a label's place in the hierarchy when it has not moved.
+- Fixed: an `IMG` whose `at` depended on the scroll position did not follow the scroll.
+- Fixed: a label bound to one slot of a number array, `text = "$rows[i]"`, was reported as missing data every rebuild although it drew correctly.
+- Fixed: under `keep = 1`, a value sent as a number after it had been sent as a string (or the other way round) kept its old kind alongside the new one, and a label bound to it went on showing the string.
+
+## 0.11.33
+
+- `ease` on a data payload gives a value its own glide time and curve: `ease = { bar = { 0.6, "ease-out" } }` settles that bar in 0.6 seconds whatever the tick rate, instead of gliding straight across the gap to the next payload. Curves are CSS's — `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, `cubic-bezier(a,b,c,d)`, `steps(n)` — and seconds alone means a straight line. An optional third element delays the start, so `{ 0.3, "ease-in", 0.15 }` waits a moment and then glides, and a row of bars given `i * 0.05` sets off in sequence from one payload. A value with no entry behaves exactly as before, `snap = 1` still wins, and restating a value mid-glide carries on from what is on screen.
+- Labels that show a number no longer make a new string on every redraw. A readout like `text = "$fill", fmt = "%.0f"` cost about 90 bytes a label on every frame of an animating console, even while it printed the same digits; it now reuses the previous text unless the characters actually change. What it prints is unchanged, checked against the old formatter over a thousand format, unit and value combinations.
+- `at = { ax, ay }` on `IMG` places the picture within the room `fit` leaves it — CSS `object-position`. Centred by default, as before; under `cover` it chooses which part of the picture is kept, and it takes expressions, so a picture can pan.
+
+## 0.11.32
+
+- Much less garbage while tessellating. A stroked shape allocated three buffers every time it was drawn; they are pooled now, and an undashed stroke no longer builds a list to hold its single run. Tessellating a page of 120 bordered boxes went from 86,136 to 5,496 bytes, 717 to 45 bytes a shape; an unstroked shape was already 5 bytes and is unchanged. In game, where a rebuild also uploads its mesh and updates its labels, a page animating at forty frames a second measured about **14%** less garbage overall — tessellation is a minority of what a rebuild costs there.
+- A data payload no longer allocates a fresh evaluation context. Reading 26 values into the reused one allocates **nothing**; it was 3,176 bytes per payload, which is invisible at two payloads a second and 1.6 MB/s at forty.
+- **New values now rebuild under the same ceiling as animation.** A payload used to force a rebuild immediately, so a page sending forty payloads a second rebuilt forty times a second on every console it owned, on screen or not, ignoring MaximumHz, Rate LOD and the off-screen cull. A new structure still draws at once; only values wait their turn.
+
+## 0.11.31
+
+- Clip paths take values: `CP id=track { R w = "$w" }` is re-cut every rebuild, so a clipped bar, a masked gauge or a list window follows the data payload with no new structure. A clip that shrinks to nothing hides what it clips.
+- Gradients take values: `x1 y1 x2 y2`, `cx cy r fx fy`, `a`, stop positions and `$name` stop colours may all be expressions, re-read every rebuild.
+- Fixed: a two-stop gradient whose ramp ended before the shape did kept ramping past its last stop instead of holding that colour, so a fade to transparent never finished fading.
+- A group at zero opacity is skipped whole instead of node by node, so an alternative layout kept in the scene and hidden with `o = 0` costs nothing. Clicks, scrolling and pictures under it still register, as they do in a browser.
+- Fixed: a screen capture of a console the player is not standing near came back as the terrain and sky behind it. The game switches a console's screen off while nobody is in the room with it, and a switched-off screen copies as a switched-off screen; the capture now switches it on for its own length and puts it back. Captures of a distant console work from now on, whatever is drawn on it.
+- `v` on a group: `v = 0` removes the whole subtree, clicks and scrolling included, the way CSS `visibility: hidden` does. It takes an expression, so one scene can carry several states and show one of them.
+
 ## 0.11.30
 
 - Level of detail is off by default: Rate, Curve and Count LOD all ship switched off, so every visible console rebuilds at full rate and full detail. Each can be switched on in the settings to save CPU with many consoles; an existing settings file is switched to the new defaults once.

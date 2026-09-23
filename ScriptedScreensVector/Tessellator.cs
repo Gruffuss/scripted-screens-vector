@@ -292,6 +292,10 @@ internal static class Tessellator
         NoFeather = scene.DebugNoFeather;
         NoEval = scene.DebugNoEval;
 
+        // Clips and gradients declared with expressions are re-read here, once, before the
+        // walk: everything below sees resolved numbers exactly as a static declaration gives.
+        scene.ResolveLiveDefs(context);
+
         var scale = Fit(scene, target);
         var offset = Centre(scene, target, scale);
 
@@ -527,6 +531,27 @@ internal static class Tessellator
                 var parent = stack.Peek();
                 var anchor = new Vector2(node.Ax.Evaluate(context), node.Ay.Evaluate(context));
 
+                // `v = 0` is CSS visibility: the subtree is not there at all, so its hit
+                // regions and scroll containers go with it.
+                if (node.Visible != null && node.Visible.Evaluate(context) <= 0.5f)
+                {
+                    Charge(VecOp.Group, mark);
+                    break;
+                }
+
+                var alpha = parent.Opacity * Mathf.Clamp01(node.Opacity.Evaluate(context));
+
+                // A fully transparent group draws nothing today, child by child. Stopping at
+                // the group makes a hidden subtree free instead of merely cheap, which is what
+                // a page carrying two skins and showing one is made of. Skipped only when
+                // nothing under it has to be reached anyway (clicks, scroll, pictures), since
+                // a browser still sends a click to an `opacity: 0` element.
+                if (alpha <= 0.002f && !node.Interactive)
+                {
+                    Charge(VecOp.Group, mark);
+                    break;
+                }
+
                 var sx = node.Sx.Evaluate(context);
                 var local = GroupMatrix(
                     node.Tx.Evaluate(context), node.Ty.Evaluate(context), anchor.x, anchor.y,
@@ -553,9 +578,24 @@ internal static class Tessellator
                         // safe default available: "draw everything" rather than "draw
                         // nothing" or "complain".
                         if (Mathf.Abs(Triangulator.SignedArea(outline)) < 0.000001f)
+                        {
+                            // A live clip that has shrunk to nothing means nothing is inside
+                            // it -- a bar at 0%, a list with no room. Drawing the subtree
+                            // unclipped there would flood the screen with what the clip
+                            // exists to hide, so it is the one degenerate case that hides
+                            // rather than reports.
+                            if (scene.ClipNodes.ContainsKey(node.ClipRef!))
+                            {
+                                Charge(VecOp.Group, mark);
+                                break;
+                            }
+
                             scene.Problem($"clip \"{node.ClipRef}\" is degenerate; group drawn unclipped");
+                        }
                         else
+                        {
                             ownOutline = outline;
+                        }
                     }
                     else
                     {
@@ -576,7 +616,7 @@ internal static class Tessellator
                 stack.Push(new Frame
                 {
                     Matrix = parent.Matrix * local,
-                    Opacity = parent.Opacity * Mathf.Clamp01(node.Opacity.Evaluate(context)),
+                    Opacity = alpha,
                     Clip = clip,
                     Pieces = pieces,
                     CanvasClip = canvasClip,
@@ -1003,8 +1043,10 @@ internal static class Tessellator
         // ORDER, so skipping one would shift every label after it onto the wrong text --
         // the saving is a TMP update, the cost is a scene that shows the wrong numbers.
         var body = node.TextLiteral;
-        if (node.TextData != null)
-            body = BindText(node, context);
+        if (node.TextParts != null)
+            body = BindTemplate(node, context, scene, TextFound.Count);
+        else if (node.TextData != null)
+            body = BindText(node, context, scene, TextFound.Count);
 
         if (string.IsNullOrEmpty(body))
             return;
@@ -1138,6 +1180,8 @@ internal static class Tessellator
             Wrap = node.Wrap,
             LineHeight = node.LineHeight,
             Shadow = textShadow,
+            OutlineWidth = Mathf.Max(0f, node.TextOutlineWidth?.Evaluate(context) ?? 0f) * frame.Scale,
+            OutlineColour = node.TextOutlineColour,
             ExtraShadows = extraShadows?.ToArray(),
             InsetShadow = insetShadow,
             ClipRect = clip,
@@ -1180,33 +1224,64 @@ internal static class Tessellator
 
         // The natural size fit works from is the cropped part's, not the whole texture's.
         var crop = node.ImageCrop;
-        var picture = ImageRect(x, y, w, h, Mathf.Max(1, Mathf.RoundToInt(texW * crop.width)), Mathf.Max(1, Mathf.RoundToInt(texH * crop.height)), node.ImageFit);
+        var natW = Mathf.Max(1, Mathf.RoundToInt(texW * crop.width));
+        var natH = Mathf.Max(1, Mathf.RoundToInt(texH * crop.height));
+        var ax = node.ImageAtX.Evaluate(context);
+        var ay = node.ImageAtY.Evaluate(context);
+        var ox = node.ImageOffX.Evaluate(context);
+        var oy = node.ImageOffY.Evaluate(context);
 
-        // Contain leaves the box partly empty: the drawn area is the box cut to the picture.
-        var shape = box;
-        if (node.ImageFit == 1)
+        // `tile`: one picture of the tile's size placed by at/off, repeated to cover the box.
+        // Tiled in geometry rather than with the texture's wrap mode, which is shared by every
+        // console showing that source and would repeat the whole texture rather than a `uv` crop.
+        var tiles = 1;
+        var across = 1;
+        Rect picture;
+        var bounds = BoundsOf(box);
+
+        if (node.ImageSlice != null)
         {
-            var within = ClipRegion.FromPolygon(new List<Vector2>
-            {
-                new(picture.xMin, picture.yMin), new(picture.xMax, picture.yMin),
-                new(picture.xMax, picture.yMax), new(picture.xMin, picture.yMax),
-            });
-
-            shape = within == null ? new List<Vector2>() : new List<Vector2>(within.ClipPolygon(box));
+            // Nine-slice draws over the box itself; `fit`, `at`, `off` and `tile` do not apply.
+            picture = new Rect(x, y, w, h);
+            tiles = 9;
         }
+        else if (node.ImageTileW != null)
+        {
+            var tileW = node.ImageTileW.Evaluate(context);
+            var tileH = node.ImageTileH!.Evaluate(context);
+            if (tileW <= 0f) tileW = natW;
+            if (tileH <= 0f) tileH = natH;
 
-        if (frame.Clip != null)
-            shape = new List<Vector2>(frame.Clip.ClipPolygon(shape));
+            var anchor = new Rect(x + (w - tileW) * ax + ox, y + (h - tileH) * ay + oy, tileW, tileH);
+            var firstX = anchor.xMin + Mathf.Floor((bounds.xMin - anchor.xMin) / tileW) * tileW;
+            var firstY = anchor.yMin + Mathf.Floor((bounds.yMin - anchor.yMin) / tileH) * tileH;
+            across = Mathf.CeilToInt((bounds.xMax - firstX) / tileW);
+            var down = Mathf.CeilToInt((bounds.yMax - firstY) / tileH);
 
-        if (shape.Count < 3 || Starved(vh, shape.Count, "an image"))
-            return;
+            if ((long)across * down > MaxImageTiles)
+            {
+                scene.Problem($"IMG \"{src}\": tile makes {(long)across * down} tiles, more than {MaxImageTiles}; drawn untiled");
+                picture = ImageRect(x, y, w, h, natW, natH, node.ImageFit, ax, ay, ox, oy);
+            }
+            else
+            {
+                picture = new Rect(firstX, firstY, tileW, tileH);
+                tiles = across * down;
+                if (tiles <= 0)
+                    return;
+            }
+        }
+        else
+        {
+            picture = ImageRect(x, y, w, h, natW, natH, node.ImageFit, ax, ay, ox, oy);
+        }
 
         var alpha = Mathf.Clamp01(node.Opacity.Evaluate(context)) * frame.Opacity;
         Color32 colour = new Color(1f, 1f, 1f, alpha);
 
-        // A mesh of its own: cut before, draw, cut after.
-        vh.ForceCutBefore(vh.ShapeCount);
-        var shapeIndex = vh.ShapeCount;
+        var region = ClipRegion.FromPolygon(box);
+        if (region == null)
+            return;
 
         // Filters act on vertex colours, and an image's colour is in its texels: filtering the
         // white vertex would tint the picture flat rather than, say, invert it. So an image is
@@ -1217,14 +1292,69 @@ internal static class Tessellator
 
         vh.Tint = null;
 
-        var origin = vh.currentVertCount;
-        foreach (var point in shape)
-            vh.AddVert(frame.Matrix.MultiplyPoint3x4(point), colour, ImageUv(picture, point, crop));
+        // Where a picture does not cover its box -- contain, none, a tile, or any picture moved
+        // by `off` -- the drawn area is the box cut to the picture, which CSS leaves empty. Drawn
+        // whole, the texture's edge texels would smear across the gap.
+        var piece = new List<Vector2>(4);
+        var cut = new List<Vector2>(box.Count + 8);
+        var clipped = new List<Vector2>(box.Count + 8);
+        var shapeIndex = -1;
+
+        for (var t = 0; t < tiles; t++)
+        {
+            var at = picture;
+            var pieceCrop = crop;
+            if (node.ImageSlice != null)
+            {
+                if (!SlicePiece(node, t, picture, natW, natH, ref at, ref pieceCrop))
+                    continue;
+            }
+            else if (tiles > 1)
+            {
+                at = new Rect(picture.xMin + (t % across) * picture.width, picture.yMin + (t / across) * picture.height,
+                              picture.width, picture.height);
+            }
+
+            List<Vector2> shape;
+            if (at.xMin <= bounds.xMin + 0.001f && at.yMin <= bounds.yMin + 0.001f
+                && at.xMax >= bounds.xMax - 0.001f && at.yMax >= bounds.yMax - 0.001f)
+            {
+                shape = box;
+            }
+            else
+            {
+                piece.Clear();
+                piece.Add(new Vector2(at.xMin, at.yMin));
+                piece.Add(new Vector2(at.xMax, at.yMin));
+                piece.Add(new Vector2(at.xMax, at.yMax));
+                piece.Add(new Vector2(at.xMin, at.yMax));
+                shape = region.ClipPolygon(piece, cut);
+            }
+
+            if (frame.Clip != null)
+                shape = frame.Clip.ClipPolygon(shape, clipped);
+
+            if (shape.Count < 3 || Starved(vh, shape.Count, "an image"))
+                continue;
+
+            // A mesh of its own: cut before the first piece, draw, cut after.
+            if (shapeIndex < 0)
+            {
+                vh.ForceCutBefore(vh.ShapeCount);
+                shapeIndex = vh.ShapeCount;
+            }
+
+            var origin = vh.currentVertCount;
+            foreach (var point in shape)
+                vh.AddVert(frame.Matrix.MultiplyPoint3x4(point), colour, ImageUv(at, point, pieceCrop));
+
+            for (var i = 1; i < shape.Count - 1; i++)
+                vh.AddTriangle(origin, origin + i, origin + i + 1);
+        }
 
         vh.Tint = tint;
-
-        for (var i = 1; i < shape.Count - 1; i++)
-            vh.AddTriangle(origin, origin + i, origin + i + 1);
+        if (shapeIndex < 0)
+            return;
 
         vh.MarkShape();
         vh.ForceCutBefore(vh.ShapeCount);
@@ -1233,21 +1363,98 @@ internal static class Tessellator
         ImagesFound?.Add(new ImagePlacement { Src = src!, ShapeIndex = shapeIndex });
     }
 
-    /// <summary>Where the picture lies for CSS object-fit: fill (0), contain (1), cover (2).</summary>
-    internal static Rect ImageRect(float x, float y, float w, float h, int texW, int texH, int fit)
+    /// <summary>
+    /// One of a nine-slice's pieces, row by row from the top left: where it is drawn and which
+    /// part of the texture it shows. False for a piece with no area, or the middle under `mid = 0`.
+    /// </summary>
+    /// <remarks>
+    /// Corners are drawn at the border widths, edges stretch between them, the middle stretches
+    /// both ways -- CSS border-image with `stretch`. Borders wider than the box are scaled down
+    /// together, as CSS does, so opposite corners meet rather than overlap.
+    /// </remarks>
+    internal static bool SlicePiece(VecNode node, int index, Rect box, int natW, int natH, ref Rect at, ref Rect crop)
+    {
+        var column = index % 3;
+        var row = index / 3;
+        if (column == 1 && row == 1 && !node.ImageMiddle)
+            return false;
+
+        var slice = node.ImageSlice!;
+        var border = node.ImageBorder!;
+        var fit = Mathf.Min(1f, Mathf.Min(
+            border[1] + border[3] > box.width ? box.width / (border[1] + border[3]) : 1f,
+            border[0] + border[2] > box.height ? box.height / (border[0] + border[2]) : 1f));
+
+        float Edge(int i, float start, float size, float near, float far) =>
+            i == 0 ? start : i == 1 ? start + near * fit : i == 2 ? start + size - far * fit : start + size;
+
+        // Texture fractions of the (cropped) picture, clamped so over-large slices cannot cross.
+        float Cut(int i, float near, float far, int texels) =>
+            i == 0 ? 0f : i == 3 ? 1f
+            : i == 1 ? Mathf.Clamp01(near / texels) : Mathf.Max(Mathf.Clamp01(near / texels), 1f - Mathf.Clamp01(far / texels));
+
+        var x0 = Edge(column, box.xMin, box.width, border[3], border[1]);
+        var x1 = Edge(column + 1, box.xMin, box.width, border[3], border[1]);
+        var y0 = Edge(row, box.yMin, box.height, border[0], border[2]);
+        var y1 = Edge(row + 1, box.yMin, box.height, border[0], border[2]);
+        if (x1 - x0 <= 0.0001f || y1 - y0 <= 0.0001f)
+            return false;
+
+        var u0 = Cut(column, slice[3], slice[1], natW);
+        var u1 = Cut(column + 1, slice[3], slice[1], natW);
+        var v0 = Cut(row, slice[0], slice[2], natH);
+        var v1 = Cut(row + 1, slice[0], slice[2], natH);
+
+        at = Rect.MinMaxRect(x0, y0, x1, y1);
+        crop = new Rect(crop.xMin + u0 * crop.width, crop.yMin + v0 * crop.height,
+                        (u1 - u0) * crop.width, (v1 - v0) * crop.height);
+        return true;
+    }
+
+    /// <summary>Tiles one `IMG` may draw; past it the picture is drawn once and a problem logged.</summary>
+    private const int MaxImageTiles = 4096;
+
+    /// <summary>
+    /// Where the picture sits in its box: the fit decides its size, the alignment decides
+    /// which part of the free space it takes.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="ax"/> and <paramref name="ay"/> are fractions of the free space, 0.5
+    /// each being centred -- so 0 is flush left or top, 1 flush right or bottom, and for
+    /// `cover`, where the free space is negative, the same numbers choose which edge of the
+    /// picture is kept. `fill` leaves nothing free, so they do not apply there. `ox`/`oy` are
+    /// scene units added afterwards, fill included -- CSS `right 10px` is `at` 1 and `off` -10.
+    ///
+    /// Fits are CSS object-fit: fill (0), contain (1), cover (2), none (3, one scene unit per
+    /// texel) and scale-down (4, contain when the picture is larger than the box, else none).
+    /// </remarks>
+    internal static Rect ImageRect(float x, float y, float w, float h, int texW, int texH, int fit,
+                                   float ax = 0.5f, float ay = 0.5f, float ox = 0f, float oy = 0f)
     {
         if (fit == 0 || w <= 0f || h <= 0f)
-            return new Rect(x, y, w, h);
+            return new Rect(x + ox, y + oy, w, h);
 
-        var boxAspect = w / h;
-        var picAspect = texW / (float)texH;
+        if (fit == 4)
+            fit = texW > w || texH > h ? 1 : 3;
 
-        // Contain fits the long side; cover fills the short one and overflows the other.
-        var widthLimited = fit == 1 ? picAspect > boxAspect : picAspect < boxAspect;
-        var pw = widthLimited ? w : h * picAspect;
-        var ph = widthLimited ? w / picAspect : h;
+        float pw, ph;
+        if (fit == 3)
+        {
+            pw = texW;
+            ph = texH;
+        }
+        else
+        {
+            var boxAspect = w / h;
+            var picAspect = texW / (float)texH;
 
-        return new Rect(x + (w - pw) * 0.5f, y + (h - ph) * 0.5f, pw, ph);
+            // Contain fits the long side; cover fills the short one and overflows the other.
+            var widthLimited = fit == 1 ? picAspect > boxAspect : picAspect < boxAspect;
+            pw = widthLimited ? w : h * picAspect;
+            ph = widthLimited ? w / picAspect : h;
+        }
+
+        return new Rect(x + (w - pw) * ax + ox, y + (h - ph) * ay + oy, pw, ph);
     }
 
     /// <summary>Texture coordinate of a scene point. Scenes are +Y down, textures +V up.</summary>
@@ -1955,7 +2162,7 @@ internal static class Tessellator
             {
                 EmitTriangles(vh, soupVertices, soupIndices!, paint, frame.Matrix);
             }
-            else if (holes == null && !NeedsRefinement(paint) && IsConvex(contour))
+            else if (holes == null && !NeedsRefinement(paint) && !LeavesRamp(contour, paint) && IsConvex(contour))
             {
                 shared = FanShared(vh, contour, paint, frame.Matrix);
             }
@@ -2172,29 +2379,30 @@ internal static class Tessellator
     /// deliberately sends "OFFLINE" for a numeric readout should show that word rather than a
     /// formatted zero.
     /// </remarks>
-    private static string? BindText(VecNode node, EvalContext context)
+    private static string? BindText(VecNode node, EvalContext context, VecScene scene, int ordinal)
     {
         var name = node.TextData!;
 
         if (node.TextIndex != null)
         {
             var at = node.TextIndex.Evaluate(context);
-            var element = context.StringElement(name, at);
+            var element = StringSlot(context, name, at);
             if (element != null)
-                return element + node.TextUnit;
+                return WithUnit(element, node, scene, ordinal);
 
             // A numeric array formats exactly as a scalar does.
             if (context.Arrays.ContainsKey(name))
-                return Format(node, context.Element(name, at));
+                return Format(node, context.Element(name, at), scene, ordinal);
 
+            context.Missing.Add(name);
             return node.TextMissing;
         }
 
         if (context.Strings.TryGetValue(name, out var text))
-            return text + node.TextUnit;
+            return WithUnit(text, node, scene, ordinal);
 
         if (context.Scalars.ContainsKey(name))
-            return Format(node, context.Scalar(name));
+            return Format(node, context.Scalar(name), scene, ordinal);
 
         // Neither a string nor a number under that name. Reported once per rebuild, and the
         // node renders its placeholder rather than vanishing: an empty box on a console is
@@ -2203,7 +2411,189 @@ internal static class Tessellator
         return node.TextMissing;
     }
 
-    private static string Format(VecNode node, float value)
+    [ThreadStatic] private static char[]? _textBuffer;
+
+    /// <summary>
+    /// A text with several bound values, `"set {$press:%.1f} kPa, trip {$trip:%.0f}"`, written
+    /// into the reused buffer so a label whose characters did not change makes no string.
+    /// </summary>
+    /// <remarks>
+    /// Each placeholder resolves exactly as a whole-text binding does -- a string first, then a
+    /// number through its format -- and one with no value prints `missing` in its place while
+    /// the rest of the text stands.
+    /// </remarks>
+    internal static string BindTemplate(VecNode node, EvalContext context, VecScene scene, int ordinal)
+    {
+        var at = 0;
+
+        foreach (var part in node.TextParts!)
+        {
+            if (part.Literal != null)
+            {
+                Append(part.Literal, ref at);
+                continue;
+            }
+
+            var name = part.Name!;
+            if (part.Index != null)
+            {
+                var index = part.Index.Evaluate(context);
+                var element = StringSlot(context, name, index);
+                if (element != null)
+                {
+                    Append(element, ref at);
+                }
+                else if (context.Arrays.ContainsKey(name))
+                {
+                    AppendNumber(part, context.Element(name, index), node, ref at);
+                }
+                else
+                {
+                    context.Missing.Add(name);
+                    Append(node.TextMissing, ref at);
+                }
+            }
+            else if (context.Strings.TryGetValue(name, out var text))
+            {
+                Append(text, ref at);
+            }
+            else if (context.Scalars.ContainsKey(name))
+            {
+                AppendNumber(part, context.Scalar(name), node, ref at);
+            }
+            else
+            {
+                context.Missing.Add(name);
+                Append(node.TextMissing, ref at);
+            }
+        }
+
+        if (node.TextUnit != null)
+            Append(node.TextUnit, ref at);
+
+        return Remember(scene, ordinal, _textBuffer.AsSpan(0, at));
+    }
+
+    /// <summary>
+    /// One slot of a string array, or null -- without reporting the name missing, which
+    /// `StringElement` does and which was wrong for every label bound to a NUMERIC array.
+    /// </summary>
+    private static string? StringSlot(EvalContext context, string name, float index)
+    {
+        return context.StringArrays.ContainsKey(name) ? context.StringElement(name, index) : null;
+    }
+
+    private static void Append(string text, ref int at)
+    {
+        Reserve(at + text.Length);
+        text.AsSpan().CopyTo(_textBuffer.AsSpan(at));
+        at += text.Length;
+    }
+
+    private static void AppendNumber(in TextPart part, float value, VecNode node, ref int at)
+    {
+        if (part.Split)
+        {
+            Reserve(at + part.Prefix.Length + 64 + part.Suffix.Length);
+            var start = at;
+            part.Prefix.AsSpan().CopyTo(_textBuffer.AsSpan(at));
+            at += part.Prefix.Length;
+
+            if (value.TryFormat(_textBuffer.AsSpan(at, 64), out var written, part.Spec, CultureInfo.InvariantCulture))
+            {
+                at += written;
+                part.Suffix.AsSpan().CopyTo(_textBuffer.AsSpan(at));
+                at += part.Suffix.Length;
+                return;
+            }
+
+            at = start;
+        }
+
+        // The formats the buffer cannot take: a literal brace, or no conversion at all.
+        string printed;
+        try
+        {
+            printed = part.Net == null
+                ? value.ToString("0.##", CultureInfo.InvariantCulture)
+                : string.Format(CultureInfo.InvariantCulture, part.Net, value);
+        }
+        catch (FormatException)
+        {
+            printed = node.TextMissing;
+        }
+
+        Append(printed, ref at);
+    }
+
+    /// <summary>Grows the text buffer keeping what is already written.</summary>
+    private static void Reserve(int length)
+    {
+        if (_textBuffer == null)
+            _textBuffer = new char[Math.Max(128, length * 2)];
+        else if (_textBuffer.Length < length)
+            Array.Resize(ref _textBuffer, Math.Max(_textBuffer.Length * 2, length));
+    }
+
+    /// <summary>A bound string with its unit, without concatenating when nothing changed.</summary>
+    private static string WithUnit(string text, VecNode node, VecScene scene, int ordinal)
+    {
+        if (string.IsNullOrEmpty(node.TextUnit))
+            return text;
+
+        var unit = node.TextUnit!;
+        var buffer = TextBuffer(text.Length + unit.Length);
+        text.AsSpan().CopyTo(buffer);
+        unit.AsSpan().CopyTo(buffer.AsSpan(text.Length));
+        return Remember(scene, ordinal, buffer.AsSpan(0, text.Length + unit.Length));
+    }
+
+    /// <summary>
+    /// A number printed through the node's format, written into a reused buffer and turned into
+    /// a string only when the characters differ from what this label showed last rebuild.
+    /// </summary>
+    /// <remarks>
+    /// `string.Format` boxed the number and made two strings per label per rebuild (the text and
+    /// the text with its unit) whether or not a single character had changed -- 88 bytes a label
+    /// on every frame of an animating console. The printf translation is always one `{0:SPEC}`
+    /// between a literal prefix and suffix, which `float.TryFormat` can fill directly; anything
+    /// else (a literal brace, or no conversion at all) keeps the old path and its behaviour.
+    /// </remarks>
+    private static string Format(VecNode node, float value, VecScene scene, int ordinal)
+    {
+        string? spec = "0.##";
+        string prefix = string.Empty, suffix = string.Empty;
+
+        if (node.TextFormat != null && !Printf.TrySplit(Printf.ToNet(node.TextFormat), out prefix, out spec, out suffix))
+            return FormatSlow(node, value);
+
+        var unit = node.TextUnit ?? string.Empty;
+
+        try
+        {
+            var buffer = TextBuffer(prefix.Length + 64 + suffix.Length + unit.Length);
+            prefix.AsSpan().CopyTo(buffer);
+            var at = prefix.Length;
+
+            if (!value.TryFormat(buffer.AsSpan(at, 64), out var written, spec, CultureInfo.InvariantCulture))
+                return FormatSlow(node, value);
+
+            at += written;
+            suffix.AsSpan().CopyTo(buffer.AsSpan(at));
+            at += suffix.Length;
+            unit.AsSpan().CopyTo(buffer.AsSpan(at));
+            at += unit.Length;
+
+            return Remember(scene, ordinal, buffer.AsSpan(0, at));
+        }
+        catch (FormatException)
+        {
+            return node.TextMissing;
+        }
+    }
+
+    /// <summary>The original formatter, kept for the formats the fast path does not take.</summary>
+    private static string FormatSlow(VecNode node, float value)
     {
         if (node.TextFormat == null)
             return value.ToString("0.##", CultureInfo.InvariantCulture) + node.TextUnit;
@@ -2217,6 +2607,31 @@ internal static class Tessellator
         {
             return node.TextMissing;
         }
+    }
+
+    private static char[] TextBuffer(int length)
+    {
+        var buffer = _textBuffer;
+        if (buffer == null || buffer.Length < length)
+            _textBuffer = buffer = new char[Math.Max(128, length * 2)];
+
+        return buffer;
+    }
+
+    /// <summary>Last rebuild's string for this label if it reads the same, else a new one.</summary>
+    private static string Remember(VecScene scene, int ordinal, ReadOnlySpan<char> chars)
+    {
+        var cache = scene.TextCache;
+        while (cache.Count <= ordinal)
+            cache.Add(null);
+
+        var previous = cache[ordinal];
+        if (previous != null && chars.SequenceEqual(previous.AsSpan()))
+            return previous;
+
+        var made = new string(chars);
+        cache[ordinal] = made;
+        return made;
     }
 
     private static void RecordHit(string id, List<Vector2> outline, Matrix4x4 matrix, List<Vector2>? clip, EvalContext context)
@@ -2403,7 +2818,44 @@ internal static class Tessellator
 
     private static bool NeedsRefinement(Paint paint)
     {
-        return paint.IsGradient && (paint.Gradient!.Radial || paint.Gradient.Conic || paint.Gradient.StopCount > 2);
+        if (!paint.IsGradient)
+            return false;
+
+        var gradient = paint.Gradient!;
+        if (gradient.Radial || gradient.Conic || gradient.StopCount > 2 || gradient.Spread != 0)
+            return true;
+
+        // A two-stop linear gradient is exact only while its stops span the whole parameter.
+        // Stops at, say, 0 and 0.64 hold the last colour flat from there on, and that flat
+        // part is NOT affine -- interpolating two corner colours across it ramps straight
+        // past the stop instead of stopping at it. Cutting at the stop lines fixes it, and
+        // that is what refinement does.
+        return gradient.StopCount > 0
+               && (gradient.Positions[0] > 0.0001f || gradient.Positions[gradient.StopCount - 1] < 0.9999f);
+    }
+
+    /// <summary>
+    /// Whether a shape reaches past either end of its gradient, where the ramp holds its end
+    /// colour flat and interpolating corners would run straight through that flat part.
+    /// </summary>
+    /// <remarks>
+    /// Only asked of a two-stop linear gradient — anything else refines already — and only
+    /// of a shape that has one, so the ordinary case never walks this.
+    /// </remarks>
+    private static bool LeavesRamp(List<Vector2> points, Paint paint)
+    {
+        if (!paint.IsGradient)
+            return false;
+
+        var gradient = paint.Gradient!;
+        foreach (var point in points)
+        {
+            var t = gradient.Parameter(paint.ToGradientSpace(point));
+            if (t < -0.0001f || t > 1.0001f)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -2495,7 +2947,19 @@ internal static class Tessellator
             sceneRadius = Mathf.Max(sceneRadius, (point - focus).magnitude);
 
         var screenRadius = sceneRadius * scale * ScreenScale;
-        var rings = RadialFill.Rings(screenRadius, paint.Gradient.StopCount);
+        // A spread ramp repeats out to the shape's edge, and each period wants the rings a whole
+        // ramp gets.
+        var stops = paint.Gradient.StopCount;
+        if (paint.Gradient.Spread != 0)
+        {
+            var reach = 0f;
+            foreach (var point in outline)
+                reach = Mathf.Max(reach, paint.Gradient.Parameter(paint.ToGradientSpace(point)));
+
+            stops = Mathf.Max(2, stops) * Mathf.Clamp(Mathf.CeilToInt(reach), 1, MaxSpreadPeriods);
+        }
+
+        var rings = RadialFill.Rings(screenRadius, stops);
 
         if (Starved(vh, RadialFill.VertexCount(count, rings), "a radial gradient"))
             return;
@@ -2599,7 +3063,7 @@ internal static class Tessellator
     /// </remarks>
     private static void EmitTriangles(MeshBuilder vh, List<Vector2> vertices, List<int> indices, Paint paint, Matrix4x4 matrix)
     {
-        var refine = NeedsRefinement(paint);
+        var refine = NeedsRefinement(paint) || LeavesRamp(vertices, paint);
 
         for (var i = 0; i + 2 < indices.Count; i += 3)
         {
@@ -2618,6 +3082,10 @@ internal static class Tessellator
     [ThreadStatic] private static List<Vector2>? _bandOut;
     [ThreadStatic] private static List<float>? _bandInT;
     [ThreadStatic] private static List<float>? _bandOutT;
+    [ThreadStatic] private static List<float>? _bandCuts;
+
+    /// <summary>Periods of a repeating ramp one triangle is cut into; past it the ramp is left smeared.</summary>
+    private const int MaxSpreadPeriods = 256;
 
     /// <summary>
     /// A triangle under a linear gradient, cut along the stop lines so each piece is exact.
@@ -2643,16 +3111,44 @@ internal static class Tessellator
         var inputT = _bandInT ??= new List<float>(8);
         var outputT = _bandOutT ??= new List<float>(8);
 
+        // The parameters to cut at: the stops, or under a spread the stops of every period the
+        // triangle covers plus each period's edge, where `repeat` jumps back to the first colour.
+        var cuts = _bandCuts ??= new List<float>(16);
+        cuts.Clear();
+        var spread = gradient.Spread != 0 && Mathf.Floor(high) - Mathf.Floor(low) < MaxSpreadPeriods;
+        if (spread)
+        {
+            for (var period = Mathf.Floor(low); period <= high; period++)
+            {
+                cuts.Add(period);
+                var mirrored = gradient.Spread == 2 && ((int)period & 1) != 0;
+                for (var k = 0; k < gradient.Positions.Count; k++)
+                {
+                    var p = gradient.Positions[mirrored ? gradient.Positions.Count - 1 - k : k];
+                    cuts.Add(period + (mirrored ? 1f - p : p));
+                }
+            }
+        }
+        else
+        {
+            cuts.AddRange(gradient.Positions);
+        }
+
         var from = float.NegativeInfinity;
         var any = false;
-        for (var k = 0; k <= gradient.Positions.Count; k++)
+        for (var k = 0; k <= cuts.Count; k++)
         {
-            var to = k < gradient.Positions.Count ? gradient.Positions[k] : float.PositiveInfinity;
+            var to = k < cuts.Count ? cuts[k] : float.PositiveInfinity;
             if (to <= low || from >= high)
             {
                 from = Mathf.Max(from, to);
                 continue;
             }
+
+            // Which period this band is in, so its vertices are coloured within it: the vertex
+            // on a `repeat` seam belongs to the end of one period and the start of the next,
+            // and sampling it by position alone would give both bands the first colour.
+            var period = spread ? Mathf.Floor((Mathf.Max(from, low) + Mathf.Min(to, high)) * 0.5f) : 0f;
 
             input.Clear(); inputT.Clear();
             input.Add(a); input.Add(b); input.Add(c);
@@ -2667,14 +3163,20 @@ internal static class Tessellator
 
             any = true;
             var origin = vh.currentVertCount;
-            foreach (var point in input)
-                vh.AddVert(matrix.MultiplyPoint3x4(point), paint.At(point), Vector2.zero);
+            for (var j = 0; j < input.Count; j++)
+            {
+                var colour = spread ? paint.AtParameter(Local(inputT[j] - period, period)) : paint.At(input[j]);
+                vh.AddVert(matrix.MultiplyPoint3x4(input[j]), colour, Vector2.zero);
+            }
             for (var j = 1; j + 1 < input.Count; j++)
                 vh.AddTriangle(origin, origin + j, origin + j + 1);
         }
 
         if (!any)
             Triangle(vh, a, b, c, paint, matrix);
+
+        float Local(float within, float period) =>
+            gradient.Spread == 2 && ((int)period & 1) != 0 ? 1f - within : within;
     }
 
     /// <summary>Clips a convex polygon to one side of <c>t = edge</c>, t being affine in the point.</summary>
@@ -2763,32 +3265,40 @@ internal static class Tessellator
         var paint = ResolvePaint(scene, node, context, frame, stroke: true);
         var feather = FeatherWidth(node, context, frame.Scale);
 
-        var runs = new List<List<Vector2>>();
-        var wasClosed = closed;
-
-        if (node.DashPattern.Length > 0)
+        // An undashed stroke is one run -- the outline itself -- so it is drawn straight
+        // rather than through a list built to hold it. The list was the last per-shape
+        // allocation on this path, and a page of bordered boxes redraws every one of them
+        // on every rebuild.
+        if (node.DashPattern.Length == 0)
         {
-            runs.AddRange(Stroke.Dash(Loop(points, closed), node.DashPattern, node.DashOffset.Evaluate(context)));
-            wasClosed = false;
-        }
-        else
-        {
-            runs.Add(points);
+            StrokeRun(vh, points, closed, width, paint, node, feather, frame);
+            return;
         }
 
-        foreach (var run in runs)
-        {
-            // A clipped stroke is cut into the pieces that fall inside, rather than being
-            // redirected along the boundary the way a filled contour is.
-            if (frame.Clip == null)
-            {
-                StrokeWithBudget(vh, run, wasClosed, width, paint, node, feather, frame.Matrix);
-                continue;
-            }
+        foreach (var run in Stroke.Dash(Loop(points, closed), node.DashPattern, node.DashOffset.Evaluate(context)))
+            StrokeRun(vh, run, false, width, paint, node, feather, frame);
+    }
 
-            foreach (var piece in frame.Clip.ClipPolyline(Loop(run, wasClosed)))
-                StrokeWithBudget(vh, piece, closed: false, width, paint, node, feather, frame.Matrix);
+    /// <summary>
+    /// Draws one run of a stroke, clipped if the frame clips.
+    /// </summary>
+    /// <remarks>
+    /// A method rather than a local function on purpose: a local function capturing the
+    /// frame and the paint allocates a display class per call, which is what replaced the
+    /// list this was written to remove. Measured, both times.
+    /// </remarks>
+    private static void StrokeRun(MeshBuilder vh, List<Vector2> run, bool runClosed, float width, Paint paint, VecNode node, float feather, Frame frame)
+    {
+        // A clipped stroke is cut into the pieces that fall inside, rather than being
+        // redirected along the boundary the way a filled contour is.
+        if (frame.Clip == null)
+        {
+            StrokeWithBudget(vh, run, runClosed, width, paint, node, feather, frame.Matrix);
+            return;
         }
+
+        foreach (var piece in frame.Clip.ClipPolyline(Loop(run, runClosed)))
+            StrokeWithBudget(vh, piece, closed: false, width, paint, node, feather, frame.Matrix);
     }
 
     private static Paint ResolvePaint(VecScene scene, VecNode node, EvalContext context, Frame frame, bool stroke, float opacityOverride = -1f)

@@ -361,6 +361,25 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     private VecScene? _pendingScene;
     private EvalContext? _pendingData;
     private bool _needsRebuild = true;
+
+    /// <summary>New values are waiting. Rate-limited, unlike a structural rebuild.</summary>
+    private bool _dataDirty;
+
+    /// <summary>
+    /// Glides with a stated duration: when each started, how long it runs and its curve.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the scene-wide blend because these do not share its clock. A name here
+    /// runs from the moment its payload applied, for the time that payload asked for, whatever
+    /// the gap to the next payload turns out to be.
+    /// </remarks>
+    private readonly Dictionary<string, (float Start, float Seconds, Easing Curve, float Delay)> _glides = new(StringComparer.Ordinal);
+
+    /// <summary>When the last stated glide ends, so the scene keeps redrawing until it does.</summary>
+    private float _glidesUntil;
+
+    /// <summary>Reused while dropping finished glides; a dictionary cannot be edited mid-walk.</summary>
+    private readonly List<string> _finishedGlides = new();
     private float _jobScreenPixels = -1f;
     private readonly TessellationStats _stats = new();
 
@@ -643,6 +662,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         _context.Time = Now() - _startTime;
         _context.Blend = 1f;
 
+        // A capture shows where the values ARE going, not where a glide has got to, which is
+        // what `Blend = 1` above says for the scene-wide one.
+        _context.NameBlend.Clear();
+
         SampleScroll(rect);
 
         ApplyForcedScrolls();
@@ -667,6 +690,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         _lastVertices = _builder.currentVertCount;
         _builtForBucket = ScaleBucket();
         _needsRebuild = false;
+        _dataDirty = false;
 
         EnsureMesh();
         _builder.Apply(_mesh!);
@@ -826,16 +850,30 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 if (placements[i].SliceDepth != depth)
                     continue;
 
+                // Moved only when it is not already there: re-setting an unchanged sibling index
+                // every rebuild is hierarchy churn for nothing, the same fault as re-applying
+                // an unchanged label.
                 var mask = _text.MaskFor(i);
                 if (mask != null)
-                    mask.SetSiblingIndex(sibling++);
+                {
+                    if (mask.GetSiblingIndex() != sibling)
+                        mask.SetSiblingIndex(sibling);
+
+                    sibling++;
+                }
             }
 
             // The mesh this depth sits on top of. Slice d is child d-1; the last depth has
             // no slice after it, which is the ordinary "text on top" case.
             var slice = depth - 1;
             if (slice < extra && slice < _slices.Count && _slices[slice] != null)
-                _slices[slice].transform.SetSiblingIndex(sibling++);
+            {
+                var sliceTransform = _slices[slice].transform;
+                if (sliceTransform.GetSiblingIndex() != sibling)
+                    sliceTransform.SetSiblingIndex(sibling);
+
+                sibling++;
+            }
         }
     }
 
@@ -945,7 +983,11 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         return copy;
     }
 
-    internal void SetData(EvalContext source)
+    /// <summary>
+    /// Takes a payload. Returns true when the context was KEPT rather than read and dropped,
+    /// so the caller knows it may not reuse its buffer.
+    /// </summary>
+    internal bool SetData(EvalContext source)
     {
         _payloads++;
         if (_job != null)
@@ -954,14 +996,17 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             // it; a `keep = 1` patch is folded in, since replacing it lost what the earlier
             // patch carried.
             if (_pendingData == null)
+            {
                 _pendingData = source;
-            else
-                _pendingData.MergeFrom(source);
+                return true;
+            }
 
-            return;
+            _pendingData.MergeFrom(source);
+            return false;
         }
 
         ApplyData(source);
+        return false;
     }
 
     private static bool EasesSomething(EvalContext source)
@@ -1016,6 +1061,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         if (!keep)
             _context.Scalars.Clear();
+        else
+            _context.Evict(source);
 
         foreach (var pair in source.Scalars)
             _context.Scalars[pair.Key] = pair.Value;
@@ -1031,6 +1078,31 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         {
             _context.Previous.Remove(name);
             _context.PreviousArrays.Remove(name);
+            _glides.Remove(name);
+            _context.NameBlend.Remove(name);
+        }
+
+        // A stated glide starts now and runs for as long as the payload asked, regardless of
+        // when the next payload arrives. Restating a name restarts its glide from whatever it
+        // is showing, which `Rebase` above has already written into `Previous`.
+        foreach (var pair in source.Eased)
+        {
+            _glides[pair.Key] = (now, pair.Value.Seconds, pair.Value.Curve, pair.Value.Delay);
+            _glidesUntil = Mathf.Max(_glidesUntil, now + pair.Value.Delay + pair.Value.Seconds);
+        }
+
+        // A name this payload carries without timing goes back to the scene-wide blend; its
+        // old glide would otherwise hold a stale fraction for ever.
+        foreach (var name in source.Scalars.Keys)
+        {
+            if (!source.Eased.ContainsKey(name))
+                Forget(name);
+        }
+
+        foreach (var name in source.Arrays.Keys)
+        {
+            if (!source.Eased.ContainsKey(name))
+                Forget(name);
         }
 
         // Colours were parsed into `source` by ReadData and then dropped on the floor: this
@@ -1067,8 +1139,65 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // Asked for here, not only through SetVerticesDirty: that reaches UpdateGeometry after
         // this frame's Update has passed, so a payload parked behind a running job waited an
         // extra frame -- a scene fed every frame rebuilt on every second one (35 Hz at 71 FPS).
-        _needsRebuild = true;
+        //
+        // Its own flag rather than `_needsRebuild`, because the two deserve different answers:
+        // a new STRUCTURE must draw at once, while new VALUES are just the next frame of an
+        // animation and belong under the same ceiling as `t`. Without the split a page sending
+        // 37 payloads a second rebuilt 37 times a second on every console it owned, on screen
+        // or not, ignoring MaximumHz, rate LOD and the off-screen cull -- none of which a
+        // hand-written console at 2 Hz could ever have revealed.
+        _dataDirty = true;
         SetVerticesDirty();
+
+        void Forget(string name)
+        {
+            if (_glides.Count == 0)
+                return;
+
+            _glides.Remove(name);
+            _context.NameBlend.Remove(name);
+        }
+    }
+
+    /// <summary>
+    /// Works out how far along each stated glide is, for this rebuild.
+    /// </summary>
+    /// <remarks>
+    /// Main thread, at dispatch, with everything else the clock decides -- the worker reads
+    /// the fractions and never the time. A finished glide is dropped rather than left at 1,
+    /// so the dictionary empties itself and the common case stays a count test.
+    /// </remarks>
+    private void SampleGlides(float now)
+    {
+        if (_glides.Count == 0)
+        {
+            if (_context.NameBlend.Count > 0)
+                _context.NameBlend.Clear();
+
+            return;
+        }
+
+        _finishedGlides.Clear();
+
+        foreach (var pair in _glides)
+        {
+            // Clamped at the bottom as well as the top, so during a delay the fraction is 0 and
+            // the value holds exactly where the payload found it.
+            var progress = Mathf.Clamp01(
+                (now - pair.Value.Start - pair.Value.Delay) / Mathf.Max(0.0001f, pair.Value.Seconds));
+            _context.NameBlend[pair.Key] = VectorConfig.SmoothData ? pair.Value.Curve.Evaluate(progress) : 1f;
+
+            if (progress >= 1f)
+                _finishedGlides.Add(pair.Key);
+        }
+
+        foreach (var name in _finishedGlides)
+        {
+            _glides.Remove(name);
+            _context.NameBlend.Remove(name);
+            _context.Previous.Remove(name);
+            _context.PreviousArrays.Remove(name);
+        }
     }
 
     /// <summary>Shapes emitted by the last rebuild. Diagnostic.</summary>
@@ -1240,8 +1369,11 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         LandJob();
         ApplyDeferred();
 
-        if (VectorConfig.RendererEnabled && _scene != null && _needsRebuild)
+        if (VectorConfig.RendererEnabled && _scene != null
+            && (_needsRebuild || (_dataDirty && DueForRebuild())))
+        {
             Dispatch();
+        }
     }
 
     private void Update()
@@ -1256,7 +1388,11 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         // The entire per-frame cost of a static scene is this one boolean.
         // A scene with no `t` still has to redraw while data is easing to a new value.
-        var blending = VectorConfig.SmoothData && Now() - _dataArrived < _dataInterval;
+        // A stated glide keeps its own clock, so the scene-wide window does not cover it: a
+        // 0.6 s ease across a 0.5 s tick would otherwise stop redrawing four fifths of the way
+        // through and arrive with a jump.
+        var blending = VectorConfig.SmoothData
+                       && (Now() - _dataArrived < _dataInterval || Now() < _glidesUntil);
         // A scroll-driven scene has no `t`, so without this it would be judged static and
         // freeze the moment it was first drawn. Only rebuild when the offset actually moved.
         var scrolled = _scene is { UsesScroll: true } && ScrollMoved();
@@ -1275,7 +1411,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         }
 
         if (VectorConfig.RendererEnabled && _scene != null && _job == null
-            && (_needsRebuild || (animated && DueForRebuild())))
+            && (_needsRebuild || ((animated || _dataDirty) && DueForRebuild())))
         {
             Dispatch();
         }
@@ -1485,6 +1621,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // and the main thread writes it, never at the same time, because only one job for a
         // surface is ever in flight.
         ApplyForcedScrolls();
+        SampleGlides(Now());
 
         _context.ScrollOffsets.Clear();
         foreach (var pair in _offsets)
@@ -1495,6 +1632,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         _jobScreenPixels = known ? rect.width * screenScale : -1f;
         _needsRebuild = false;
+        _dataDirty = false;
         _builtForBucket = ScaleBucket();
 
         var scene = _scene!;

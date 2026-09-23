@@ -193,9 +193,20 @@ internal static class VectorElementPatch
             $"scene \"{scene.Id}\": {scene.Root.Count} root node(s), animated={scene.UsesTime}");
     }
 
+    /// <summary>
+    /// One payload buffer, reused. Reading a payload into it allocates nothing.
+    /// </summary>
+    /// <remarks>
+    /// A fresh context per payload is eight dictionaries, a set and their buckets -- 3.1 KB
+    /// measured, which is nothing twice a second and 1.6 MB/s at the rate a compiled page
+    /// sends. It is handed over and replaced only when something KEEPS it: a graphic parking
+    /// it behind a running job, or a payload waiting for a structure that has not arrived.
+    /// </remarks>
+    private static EvalContext _payloadBuffer = new();
+
     private static void ApplyData(string key, SS.UiElement element, Dictionary<string, GameObject> roots)
     {
-        var context = new EvalContext();
+        var context = _payloadBuffer;
         SceneParser.ReadData(element.Props, context);
 
         // A graphic whose host has left the surface is being replaced: a rebuild cleared the
@@ -214,11 +225,19 @@ internal static class VectorElementPatch
             graphic.PatchScene(element.Props);
 
         if (graphic != null)
-            graphic.SetData(context);
+        {
+            if (graphic.SetData(context))
+                _payloadBuffer = new EvalContext();
+        }
         else if (PendingData.TryGetValue(key, out var waiting))
+        {
             waiting.MergeFrom(context);   // a later patch must not drop an earlier one
+        }
         else
+        {
             PendingData[key] = context;
+            _payloadBuffer = new EvalContext();
+        }
     }
 
     /// <summary>

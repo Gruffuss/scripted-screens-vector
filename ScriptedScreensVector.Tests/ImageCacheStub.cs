@@ -10,6 +10,8 @@ internal static class ImageCache
 {
     internal static readonly Dictionary<string, (int W, int H, string? Error)> Loaded = new();
 
+    internal const string PointPrefix = "point:";
+
     internal static bool TryGet(string src, out int width, out int height, out string? error)
     {
         width = 0;

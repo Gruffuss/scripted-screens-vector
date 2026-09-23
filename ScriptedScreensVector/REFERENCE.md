@@ -32,6 +32,7 @@ A scene is **two elements** sharing a `scene` name.
 | `nodes` | map | geometry patches by node `id` — see below |
 | `keep` | number | `1` makes the payload a patch: names it omits keep their values |
 | `snap` | number | `1` applies this payload's numbers and number arrays at once instead of easing them in |
+| `ease` | map | per-name glide timing: `{ name = seconds }` or `{ name = { seconds, "curve", delay } }` |
 
 **Node patching.** Any node may carry an `id`, anywhere in the tree. The data element can then
 change that node's attributes without resending the scene:
@@ -72,6 +73,39 @@ values can live on separate elements, each with `keep = 1`:
 ```lua
 props = { scene = "log", keep = 1, snap = 1, data = { mode = 2 } }
 ```
+
+**`ease` gives one value its own glide time and curve.** By default a number glides to its new
+value across the measured gap to the next payload, in a straight line. That is right for a
+gauge fed at a steady tick and wrong whenever a change should have its own pace — a bar that
+should settle in 0.6 s whatever the tick rate, a needle that should ease out, a readout that
+should step:
+
+```lua
+data:set_props({
+    keep = 1,
+    data = { bar = 62, needle = 0.8 },
+    ease = { bar = { 0.6, "ease-out" }, needle = 0.25 },
+})
+```
+
+A name with an entry glides for exactly that long, from the moment the payload applies,
+whatever the gap to the next one; give it seconds alone for a straight line. Curves are CSS's:
+`linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, `cubic-bezier(a,b,c,d)` and
+`steps(n)`. A duration of 0 or less snaps, and so does `snap = 1`, which wins over any timing
+in the same payload.
+
+**A third element delays the start**: `{ 0.3, "ease-in", 0.15 }` holds the value where it is
+for 0.15 s and then glides for 0.3 s. Stagger a row of bars by giving each a delay of its
+own — `i * 0.05` — and they set off in sequence from one payload.
+
+Timing describes a **change**, not a value: it applies to the glide that payload starts. Send
+it again with the next value if that one should glide the same way — a payload that restates a
+name without timing glides it the ordinary way, exactly as one that restates a name without
+`snap` eases it again.
+
+Restating a name mid-glide restarts it **from what is on screen**, so a value that changes
+faster than it can glide keeps moving smoothly instead of jumping back. Number arrays take
+timing the same way. Colours and strings never glide at all.
 
 A payload that arrives while the previous one is still waiting to apply is merged into it
 (`keep = 1`) or replaces it (a full payload), so no patch is lost.
@@ -322,6 +356,7 @@ ignored, so annotations are harmless.
 | `s` | `{sx, sy}` | scale |
 | `a` | `{x, y}` | anchor the transform pivots about, default `{0, 0}` |
 | `o` | number/expr | group opacity `0..1`, multiplied into all descendants |
+| `v` | number/expr | `0` removes the subtree entirely, clicks included (CSS `visibility`) |
 | `clip` | string | id of a `CP` in `defs` |
 | `m` | `{a, b, c, d, e, f}` | CSS `matrix()`, applied after `t r s` (innermost) |
 | `bri` `con` `sat` `hue` `gray` `sep` `inv` | number/expr | colour filters, CSS `filter()` semantics |
@@ -329,6 +364,24 @@ ignored, so annotations are harmless.
 | `c` | array | child nodes |
 
 Applied scale → rotate → translate, about `a`. Nests without limit.
+
+**`o = 0` is free, not merely cheap.** A group at zero opacity is skipped whole rather than
+node by node, so keeping an alternative layout in the scene and showing it with `o` costs
+nothing while it is hidden. Clicks, scroll containers and pictures under it still register,
+as `opacity: 0` does in a browser; use `o = 0` on those only when you mean them to stay live.
+
+**`v = 0` is the other half**, and it is CSS `visibility: hidden`: the subtree is not there
+at all, so a button under it cannot be clicked and a scroll container under it reports
+nothing. It is an expression like anything else, so one scene can carry several states and
+show one:
+
+```lua
+{ op = "G", v = "$night", c = { --[[ dark skin ]] } },
+{ op = "G", v = "=1-$night", c = { --[[ light skin ]] } },
+```
+
+Which to reach for: `o` to fade something out that should stay live, `v` to switch between
+states that must not overlap.
 
 **`m` is a CSS matrix**, `x' = a·x + c·y + e`, `y' = b·x + d·y + f`, and it is the innermost
 factor, as in `transform: translate() rotate() scale() matrix()`: points go through the
@@ -568,10 +621,10 @@ container, where it will be clipped away and look like nothing happened.
 | Key | Meaning |
 |-----|---------|
 | `x`, `y`, `w`, `h` | the box the text is laid out in |
-| `text` | a literal, `"$name"`, or `"$rows[i]"` for one slot of a data array |
+| `text` | a literal, `"$name"`, `"$rows[i]"` for one slot of a data array, or a literal holding several `{$name}` placeholders |
 | `fmt` | printf spec for a bound **number**, e.g. `"%.1f"` |
 | `unit` | literal suffix appended after the text |
-| `missing` | what to draw when the name has no value; default `"--"` |
+| `missing` | what to draw when the name has no value; default `"--"`. An empty string is a value and draws nothing |
 | `size` | font size in scene units; scales with the transform |
 | `f` | colour, as on any shape |
 | `fo` | opacity `0..1`, as on any shape; multiplied by the enclosing group's `o` |
@@ -583,6 +636,8 @@ container, where it will be clipped away and look like nothing happened.
 | `wrap` | `1` lets the text run to more than one line inside its box |
 | `lh` | line height as a multiple of the font size, CSS style; omitted uses the font's own |
 | `sh` | text shadows, several allowed, one of them `inset` — see Shadows |
+| `ow` | outline width in scene units, centred on the glyph edge (CSS `-webkit-text-stroke`); scales with the transform |
+| `oc` | outline colour, `#rrggbb` or `#rrggbbaa`; default black |
 | `fl` | first-line overrides, `"f=#fff size=12 weight=bold font='Name'"` — see below |
 | `fit` | `none` (default), `ellipsis`, `shrink` |
 | `min_size` | floor for `shrink` |
@@ -603,11 +658,30 @@ rather than as a long string. A paragraph says so:
 
 `lh` is a multiple, as in CSS `line-height: 1.4`, not an absolute.
 
+**Several values in one label.** A literal `text` may hold placeholders, each with its own
+format; one without a format takes the node's `fmt`:
+
+```lua
+{ op = "T", x = 8, y = 8, w = 220, h = 14, size = 9,
+  text = "set {$press:%.1f} kPa · trip {$trip:%.0f} · {$rows[i]}" }
+```
+
+Each placeholder resolves as `text = "$name"` would: a string as it is, a number through its
+format, and `missing` in its place when the name has no value, while the rest of the text still
+shows. `unit` still goes after the whole text. A `{` not followed by `$` is ordinary text, and a
+label whose printed characters did not change makes no new string, so a line of readouts costs
+the same as one.
+
 **`f` may be a gradient.** `f = "@name"` samples the gradient at every glyph's corners, so a
 linear ramp is exact within each glyph and continuous across the label; radial and conic are
 exact at the corners and interpolated between them. With `units = "bbox"` the ramp spans the
 text's box (`x y w h`), not the glyphs' ink. Rich-text `<color>` tags multiply into it. It is the
-face only: text shadows keep their own colours, and a text outline is not supported.
+face only: text shadows and the outline keep their own colours.
+
+**`ow` outlines the glyphs** inside the text engine's own shader, half inside the letter's edge
+and half outside, as CSS `-webkit-text-stroke` does. How wide it can go depends on the font's
+atlas padding; past it the outline is capped at the widest the font allows and the surface's
+TEXT warnings say so. A text shadow is cast by the letters, not by their outline.
 
 **`fl` styles the first line**, like CSS `::first-line`: a string of `f`, `size` (scene units,
 scaled like `size`), `weight` and `font`, quoted where a value has spaces. Only the text engine
@@ -709,10 +783,17 @@ Catmull-Rom, so the curve passes **through** its points rather than being pulled
 |-----|---------|
 | `x`, `y`, `w`, `h` | the box |
 | `src` | URL (`https://`, `file://`) |
-| `fit` | `fill` (default, stretch), `contain`, `cover` — CSS `object-fit` |
+| `fit` | `fill` (default, stretch), `contain`, `cover`, `none` (one scene unit per texel), `scale-down` (`contain` if the picture is larger than the box, else `none`) — CSS `object-fit` |
 | `rx` / `ry` | corner radii, as `R` |
 | `o` | opacity `0..1`, multiplied by the enclosing group's |
 | `uv` | `{u0, v0, u1, v1}`: the part of the picture shown, fractions of the texture, **v from the top**; default `{0, 0, 1, 1}` |
+| `at` | `{ax, ay}`: where the picture sits in the room `fit` leaves it, fractions of the free space; default `{0.5, 0.5}` (centred), CSS `object-position` |
+| `off` | `{ox, oy}`: scene units added after `at` has placed the picture, under every `fit`; default `{0, 0}` |
+| `tile` | `{tw, th}`: repeat the picture at that size across the box, from where `at`/`off` place one; `0` is its natural size (one scene unit per texel). `fit` does not apply |
+| `smp` | `point` for hard-edged pixels (CSS `image-rendering: pixelated`); default smooth |
+| `slice` | `{t, r, b, l}`: nine-slice insets in texels of the picture (of the `uv` crop, if any) |
+| `bw` | `{t, r, b, l}`: how wide those borders are drawn, in scene units; default the `slice` numbers |
+| `mid` | `0` leaves a nine-slice's middle undrawn; default `1` |
 
 ```
 IMG x=10 y=10 w=80 h=45 src=https://example.com/map.png fit=cover rx=6
@@ -727,11 +808,42 @@ underneath. That needs a mesh of its own, so each image is one more draw call. C
 group opacity apply; colour filters do not — see `G`.
 
 `contain` draws only where the picture is, leaving the rest of the box empty; `cover` fills
-the box and crops the picture's long side. Corner radii cut the box in all three.
+the box and crops the picture's long side. Corner radii cut the box in every fit. A picture
+that does not cover its box — `contain`, a small one under `none`, or one moved by `off` —
+draws only where it is.
+
+**`at` places the picture** within whatever `fit` leaves free: `{0, 0}` is flush top-left,
+`{1, 1}` flush bottom-right. Under `cover` the free space is negative, so the same numbers
+choose which part of the picture is kept — `{0.5, 0}` keeps the top. It has no effect under
+`fill`, which leaves nothing free. Both values take expressions, so a slow pan across a
+cropped picture needs no data at all.
+
+**`off` shifts it by a length** after `at` has placed it, the way CSS writes an edge offset:
+`object-position: right 10px bottom 4px` is `at = {1, 1}, off = {-10, -4}`. It applies under
+`fill` too, moving the whole picture and leaving the uncovered strip empty.
+
+**`tile` repeats it**, CSS `background-repeat`: one copy is placed by `at` and `off` exactly as
+under `none`, then copies are laid edge to edge in every direction until the box is covered,
+and the edge ones are cut by the box and its corner radii. With `uv` the cropped part is what
+repeats. Each copy is a quad, so a box of small tiles costs vertices; past 4096 tiles the
+picture is drawn once and the scene reports why.
+
+**`smp = point`** keeps pixel art square at any size. The pixelated picture is loaded as a
+texture of its own, once per session, so the same source drawn smooth elsewhere is unaffected.
 
 With `uv`, the cropped part is the picture: `fit` works from its size, not the texture's. That is
-what a sprite sheet, a nine-slice border (nine `IMG` nodes) or canvas `drawImage` with a source
-rectangle needs.
+what a sprite sheet or canvas `drawImage` with a source rectangle needs.
+
+**`slice` draws a nine-slice frame**, CSS `border-image`: the picture is cut `t r b l` texels in
+from its edges, the corners drawn `bw` wide, the edges stretched between them and the middle
+stretched both ways. It covers the box itself, so `fit`, `at`, `off` and `tile` do not apply.
+Borders that add up to more than the box are scaled down together, as in CSS. CSS draws the
+middle only with `fill`; here it is drawn unless `mid = 0`.
+
+```
+IMG x=10 y=10 w=180 h=60 src=file:///panel.png slice=[12,12,12,12] bw=[6,6,6,6]
+```
+
 
 ## Paint
 
@@ -983,6 +1095,7 @@ Without feathering every edge is hard — UGUI applies no antialiasing of its ow
 | `x1`, `y1`, `x2`, `y2` | the ramp axis |
 | `units` | omitted for scene coordinates, `"bbox"` for shape-relative |
 | `stops` | array of `{ position, colour }`, position `0..1` |
+| `spread` | past the ends of the ramp: `pad` (default, hold the end colours), `repeat`, `reflect` |
 
 ### `GR` — radial gradient
 
@@ -993,13 +1106,32 @@ Without feathering every edge is hard — UGUI applies no antialiasing of its ow
 | `fx`, `fy` | optional focus, default the centre |
 | `units` | as above |
 | `stops` | as above |
+| `spread` | as above |
 
 **`units = "bbox"`** spans the referencing shape's own bounding box, `0..1`. Prefer it: no
 coordinates to get wrong, and it tracks a shape that moves or resizes. Without it,
 coordinates are in scene units and must be placed over the shape that uses them.
 
-Gradient coordinates are **static** — `PropNumber`, not expressions. `units = "bbox"` is what
-makes a gradient follow a moving shape.
+**Geometry and stops can be values.** Anywhere a gradient takes a number — `x1 y1 x2 y2`,
+`cx cy r fx fy`, `a`, and a stop's position — an expression works instead, and a stop's
+colour may be `$name` from the data payload. They are re-read every rebuild, so a ramp can
+follow a level, a threshold or a theme colour without the structure being resent:
+
+```lua
+{ op = "GL", id = "fade", units = "bbox", x1 = 0, y1 = 0, x2 = "$edge", y2 = 0,
+  stops = { { 0, "#E0A44F" }, { "=clamp($level,0,1)", "$sky" } } }
+```
+
+A gradient of plain numbers is resolved once, as before, and costs nothing per rebuild.
+Outside its stops a ramp holds its end colour, so a two-stop ramp ending at `0.64` is flat
+from there on.
+
+**`spread` repeats the ramp** past its ends, SVG `spreadMethod` and CSS
+`repeating-linear-gradient`: `repeat` starts it again at every period, `reflect` runs it back
+and forth. A linear one is exact, the seams of `repeat` included, because the shape is cut at
+every stop of every period; a radial one draws more rings the more periods it covers. Stripes
+cost vertices in proportion to how many fit in the shape. A `mask` takes it too. A conic
+gradient already goes all the way round and ignores it.
 
 Gradients are baked into vertex colours. A two-stop linear gradient is exact; multi-stop and
 radial are subdivided automatically, and radial fills as concentric bands so vertices land at
@@ -1113,8 +1245,14 @@ the same group.
 | `c` | one shape |
 
 Rectangle, rounded rectangle, ellipse, polygon or path — **convex or not**. Outlines are in
-**scene coordinates** and stay put when the referencing group is transformed. Clip outlines
-are static; `t` inside one is silently constant. A path clips to its outer contour.
+**scene coordinates** and stay put when the referencing group is transformed. A path clips to
+its outer contour.
+
+**A clip's geometry can be a value.** `CP id=track { R x=20 y=20 w="$w" h=16 }` is re-cut
+every rebuild, so a clipped bar, a masked gauge or a list window follows the data payload
+with no new structure. A clip that evaluates to nothing — a width of zero — hides what it
+clips rather than releasing it, which is what an empty window means. A clip written with
+plain numbers is cut once at parse, as before.
 
 **A concave clip costs more than a convex one.** Clipping stays geometric: the outline is split
 into convex pieces and every shape under the group is emitted once per piece, so an L-shaped

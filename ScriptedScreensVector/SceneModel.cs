@@ -84,12 +84,40 @@ internal sealed class VecNode
     internal Expression? ScrollSet;
     internal Expression? ScrollSetVersion;
 
-    /// <summary>`IMG`: source URL and object-fit (0 fill, 1 contain, 2 cover).</summary>
+    /// <summary>`IMG`: source URL and object-fit (0 fill, 1 contain, 2 cover, 3 none, 4 scale-down).</summary>
     internal string? ImageSource;
     internal int ImageFit;
 
     /// <summary>`uv=[u0,v0,u1,v1]` on IMG: the part of the texture shown, v from the top.</summary>
     internal Rect ImageCrop = new(0f, 0f, 1f, 1f);
+
+    /// <summary>
+    /// `at = { ax, ay }`: where the picture sits in whatever room `fit` leaves it, as
+    /// fractions of the free space. Centred by default, which is what every image did before
+    /// this existed.
+    /// </summary>
+    internal Expression ImageAtX = Expression.Constant(0.5f);
+
+    internal Expression ImageAtY = Expression.Constant(0.5f);
+
+    /// <summary>`off = { ox, oy }`: scene units added after `at` places the picture.</summary>
+    internal Expression ImageOffX = Expression.Constant(0f);
+
+    internal Expression ImageOffY = Expression.Constant(0f);
+
+    /// <summary>`tile = { tw, th }`: the picture repeated at that size; 0 is its natural size. Null untiled.</summary>
+    internal Expression? ImageTileW;
+
+    internal Expression? ImageTileH;
+
+    /// <summary>`slice = { t, r, b, l }`: nine-slice insets in texels of the (cropped) picture. Null unsliced.</summary>
+    internal float[]? ImageSlice;
+
+    /// <summary>`bw = { t, r, b, l }`: the drawn border widths in scene units; defaults to the slice.</summary>
+    internal float[]? ImageBorder;
+
+    /// <summary>`mid = 0` leaves a nine-slice's middle undrawn, CSS border-image without `fill`.</summary>
+    internal bool ImageMiddle = true;
 
     /// <summary>`fl="..."` on T: first-line overrides.</summary>
     internal FirstLineStyle? FirstLine;
@@ -201,11 +229,23 @@ internal sealed class VecNode
     /// <summary>Index expression for `text = "$rows[i]"`; null for a plain `$name`.</summary>
     internal Expression? TextIndex;
 
+    /// <summary>
+    /// A literal `text` with `{$name}` / `{$name:%.1f}` placeholders, split once at parse. Null
+    /// for a text with none, which keeps the plain literal and `$name` paths.
+    /// </summary>
+    internal TextPart[]? TextParts;
+
     /// <summary>printf-style numeric format for a bound NUMBER, e.g. "%.1f".</summary>
     internal string? TextFormat;
 
     /// <summary>Literal suffix appended after the formatted number.</summary>
     internal string? TextUnit;
+
+    /// <summary>`ow`: text outline width in scene units, centred on the glyph edge. Null for none.</summary>
+    internal Expression? TextOutlineWidth;
+
+    /// <summary>`oc`: text outline colour; black by default.</summary>
+    internal Color TextOutlineColour = Color.black;
 
     /// <summary>What to render when the bound value is absent. Defaults to "--".</summary>
     internal string TextMissing = "--";
@@ -238,6 +278,29 @@ internal sealed class VecNode
     /// be a surprise.
     /// </remarks>
     internal bool Clickable;
+
+    /// <summary>
+    /// `v` on a group: 0 takes the whole subtree out of the drawing, hit regions and all.
+    /// Null when the group never said, which is every group that does not ask for it.
+    /// </summary>
+    /// <remarks>
+    /// CSS `visibility: hidden`, where `o = 0` is `opacity: 0` — both invisible, but only
+    /// this one stops being there. Kept separate rather than folded into opacity because a
+    /// page that fades something out and still wants it clickable is the ordinary case, and
+    /// it is the one a browser serves.
+    /// </remarks>
+    internal Expression? Visible;
+
+    /// <summary>
+    /// True when this node or anything under it does something a rebuild has to reach even
+    /// when nothing of it is visible: a hit region, a scroll container, a picture.
+    /// </summary>
+    /// <remarks>
+    /// What lets a fully transparent group be skipped whole. A browser still sends clicks to
+    /// an `opacity: 0` element, so dropping the walk for a hidden subtree that owns one would
+    /// be a behaviour change rather than an optimisation.
+    /// </remarks>
+    internal bool Interactive;
 }
 
 /// <summary>A parsed scene: viewbox plus node tree.</summary>
@@ -276,6 +339,42 @@ internal sealed class VecScene
 
     /// <summary>Clip outlines declared in <c>defs</c>, by id, in scene coordinates.</summary>
     internal readonly Dictionary<string, List<Vector2>> Clips = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Clip shapes whose geometry is expressions, by id: re-cut once per rebuild.
+    /// </summary>
+    internal readonly Dictionary<string, VecNode> ClipNodes = new(StringComparer.Ordinal);
+
+    /// <summary>True when any clip or gradient in <c>defs</c> has to be re-read per rebuild.</summary>
+    internal bool LiveDefs;
+
+    /// <summary>Whether anything in <c>defs</c> references <c>t</c>.</summary>
+    /// <remarks>
+    /// Kept apart from <see cref="UsesTime"/> because that one is recomputed from the root
+    /// nodes whenever a patch lands, and a defs declaration is not a root node.
+    /// </remarks>
+    internal bool DefsUseTime;
+
+    /// <summary>
+    /// Re-reads the live parts of <c>defs</c> for this rebuild: clip outlines that are
+    /// expressions, gradient geometry and gradient stops bound to the payload.
+    /// </summary>
+    /// <remarks>
+    /// Once per rebuild, before the walk, so everything downstream reads the same resolved
+    /// numbers a static declaration would have parsed into. A scene with no live defs — the
+    /// usual case — pays one boolean test.
+    /// </remarks>
+    internal void ResolveLiveDefs(EvalContext context)
+    {
+        if (!LiveDefs)
+            return;
+
+        foreach (var pair in ClipNodes)
+            Clips[pair.Key] = Tessellator.Outline(pair.Value, context);
+
+        foreach (var gradient in Gradients.Values)
+            gradient.Resolve(context);
+    }
 
     /// <summary>
     /// Ablation switches, set from Lua so a measurement can be taken without restarting.
@@ -330,6 +429,19 @@ internal sealed class VecScene
     /// </remarks>
     internal readonly List<string> Problems = new();
 
+    /// <summary>
+    /// The text each label carried last rebuild, by its place in the rebuild's label order.
+    /// </summary>
+    /// <remarks>
+    /// A readout that prints the same characters as last time reuses last time's string instead
+    /// of making a new one: measured at 88 bytes a label per rebuild otherwise, paid on every
+    /// frame of an animating console for labels whose text had not changed. Keyed by order,
+    /// which is also how the label pool is keyed, so a scene whose labels shift just misses
+    /// and makes the string -- never shows the wrong one, since the characters are compared.
+    /// Touched only by this scene's own rebuild, and a surface runs one at a time.
+    /// </remarks>
+    internal readonly List<string?> TextCache = new();
+
     internal void Problem(string message)
     {
         if (Problems.Count < 16 && !Problems.Contains(message))
@@ -382,6 +494,9 @@ internal static class SceneParser
             scene.UsesTime |= node.UsesTime;
             scene.UsesScroll |= node.UsesScroll;
         }
+
+        // A clip or gradient that animates is as much a reason to rebuild as a node that does.
+        scene.UsesTime |= scene.DefsUseTime;
 
         Reindex(scene);
         Expression.Report = null;
@@ -450,7 +565,7 @@ internal static class SceneParser
 
             // A patch can introduce or remove a `t` or `sy` reference, and the rebuild gate
             // reads these off the scene.
-            scene.UsesTime = false;
+            scene.UsesTime = scene.DefsUseTime;
             scene.UsesScroll = false;
 
             foreach (var node in scene.Root)
@@ -497,6 +612,7 @@ internal static class SceneParser
         into.StringArrays.Clear();
         into.ColourArrays.Clear();
         into.Snapped.Clear();
+        into.Eased.Clear();
         into.KeepUnmentioned = PropNumber(props, "keep", 0f) > 0.5f;
 
         var data = PropValue(props, "data");
@@ -514,12 +630,14 @@ internal static class SceneParser
                     into.Scalars[entry.Key] = entry.Value.Number;
                     break;
 
-                case SS.UiValueType.String when !string.IsNullOrEmpty(entry.Value.String):
+                case SS.UiValueType.String when entry.Value.String != null:
                     // Stored as a string whether or not it is also a colour: a scene may
-                    // want to display "#FF0000" as text.
-                    into.Strings[entry.Key] = entry.Value.String!;
+                    // want to display "#FF0000" as text. An empty string is a value too -- it
+                    // clears a label -- where skipping it left the previous text showing.
+                    into.Strings[entry.Key] = entry.Value.String;
 
-                    if (ColorUtility.TryParseHtmlString(entry.Value.String, out var dataColour))
+                    if (entry.Value.String.Length > 0
+                        && ColorUtility.TryParseHtmlString(entry.Value.String, out var dataColour))
                         into.Colours[entry.Key] = dataColour;
 
                     break;
@@ -568,13 +686,87 @@ internal static class SceneParser
             }
         }
 
-        // `snap = 1`: this payload's numbers apply at once instead of easing in.
+        ReadEasing(props, into);
+
+        // `snap = 1`: this payload's numbers apply at once instead of easing in. It wins over
+        // any timing the same payload states, because "at once" and "over 0.6 s" cannot both
+        // be true and the shorter answer is the one that cannot surprise anyone.
         if (PropNumber(props, "snap", 0f) > 0.5f)
         {
             foreach (var name in into.Scalars.Keys)
                 into.Snapped.Add(name);
             foreach (var name in into.Arrays.Keys)
                 into.Snapped.Add(name);
+
+            into.Eased.Clear();
+        }
+    }
+
+    /// <summary>
+    /// `ease = { name = { seconds, "curve" } }` on the data element: how long that value's
+    /// glide takes and the curve it follows.
+    /// </summary>
+    /// <remarks>
+    /// Also accepts `name = seconds` for a linear glide of a stated length, which is the form
+    /// most hand-written consoles want -- "move this needle over a quarter of a second" needs
+    /// no curve named -- and an optional third element, a delay in seconds, during which the
+    /// value holds where it is before the glide begins.
+    ///
+    /// Nothing here is required: a name without an entry keeps the behaviour every scene has
+    /// had, which is to glide across the measured gap between payloads.
+    /// </remarks>
+    private static void ReadEasing(SS.UiProp[] props, EvalContext into)
+    {
+        var timings = PropValue(props, "ease");
+        if (timings?.Type != SS.UiValueType.Map || timings.Value.Map == null)
+            return;
+
+        foreach (var entry in timings.Value.Map)
+        {
+            if (string.IsNullOrEmpty(entry.Key))
+                continue;
+
+            var seconds = 0f;
+            var curve = Easing.Linear;
+            var delay = 0f;
+
+            switch (entry.Value.Type)
+            {
+                case SS.UiValueType.Number:
+                    seconds = entry.Value.Number;
+                    break;
+
+                case SS.UiValueType.Array when entry.Value.Array is { Length: > 0 }:
+                {
+                    var parts = entry.Value.Array;
+                    if (parts[0].Type != SS.UiValueType.Number)
+                        continue;
+
+                    seconds = parts[0].Number;
+
+                    if (parts.Length > 1 && parts[1].Type == SS.UiValueType.String)
+                        curve = Easing.Parse(parts[1].String, message => ScriptedScreensVectorPlugin.Log?.LogWarning($"ease \"{entry.Key}\": {message}"));
+
+                    if (parts.Length > 2 && parts[2].Type == SS.UiValueType.Number)
+                        delay = Mathf.Max(0f, parts[2].Number);
+
+                    break;
+                }
+
+                default:
+                    continue;
+            }
+
+            // A zero or negative duration is a snap, and saying so here means the glide code
+            // never has to divide by it.
+            if (seconds <= 0f)
+            {
+                into.Snapped.Add(entry.Key);
+                into.Eased.Remove(entry.Key);
+                continue;
+            }
+
+            into.Eased[entry.Key] = (seconds, curve, delay);
         }
     }
 
@@ -777,10 +969,10 @@ internal static class SceneParser
         "n", "p", "d", "seg", "t", "r", "s", "s_", "a", "o", "clip", "ref", "params", "ch",
         "f", "fo", "fo2", "fr", "fea", "fea_edge", "sh",
         "sw", "so", "cap", "join", "ml", "dash", "dofs", "sd", "sdo",
-        "grad", "at", "units", "stops", "fx", "fy",
+        "grad", "at", "units", "spread", "stops", "fx", "fy",
         "text", "size", "align", "valign", "font", "weight", "cspace", "fit", "min_size",
         "fmt", "unit", "missing", "wrap", "lh",
-        "fat", "sat", "m", "bri", "con", "hue", "gray", "sep", "inv", "mask", "sov", "src", "fl", "uv",
+        "fat", "sat", "m", "bri", "con", "hue", "gray", "sep", "inv", "mask", "sov", "src", "fl", "uv", "v", "at", "off", "tile", "smp", "slice", "bw", "mid", "ow", "oc",
     };
 
     private static void Validate(SS.UiProp[] map, VecScene scene, string? op, string? id)
@@ -855,6 +1047,7 @@ internal static class SceneParser
                 node.Ay = Pair(map, "a", 1, 0f);
                 node.Rotate = Attr(map, "r", 0f);
                 node.Opacity = Attr(map, "o", 1f);
+                node.Visible = HasKey(map, "v") ? Attr(map, "v", 1f) : null;
                 node.ClipRef = PropString(map, "clip");
 
                 // CSS matrix(a,b,c,d,e,f), composed after t r s the way a transform list is.
@@ -978,6 +1171,18 @@ internal static class SceneParser
                 node.TextSize = Attr(map, "size", 12f);
                 node.MinSize = Attr(map, "min_size", 6f);
 
+                if (HasKey(map, "ow"))
+                    node.TextOutlineWidth = Attr(map, "ow", 0f);
+
+                var outline = PropString(map, "oc");
+                if (outline != null)
+                {
+                    if (ColorUtility.TryParseHtmlString(outline, out var outlineColour))
+                        node.TextOutlineColour = outlineColour;
+                    else
+                        scene.Problem($"T: oc \"{outline}\" is not a colour");
+                }
+
                 // `text` is either a literal or a $name binding, resolved per rebuild.
                 var body = PropString(map, "text");
                 if (!string.IsNullOrEmpty(body) && body![0] == '$')
@@ -995,6 +1200,8 @@ internal static class SceneParser
                 // already has in the payload and does no string work at all.
                 node.TextFormat = PropString(map, "fmt");
                 node.TextUnit = PropString(map, "unit");
+                if (node.TextLiteral != null)
+                    node.TextParts = TextTemplate(node.TextLiteral, node.TextFormat);
 
                 var missing = PropString(map, "missing");
                 if (missing != null)
@@ -1044,11 +1251,42 @@ internal static class SceneParser
                 {
                     "CONTAIN" => 1,
                     "COVER" => 2,
+                    "NONE" => 3,
+                    "SCALE-DOWN" => 4,
                     _ => 0,
                 };
 
                 if (string.IsNullOrEmpty(node.ImageSource))
                     scene.Problem("IMG has no src");
+                else if (string.Equals(PropString(map, "smp"), "point", StringComparison.OrdinalIgnoreCase))
+                    node.ImageSource = ImageCache.PointPrefix + node.ImageSource;
+
+                node.ImageAtX = Pair(map, "at", 0, 0.5f);
+                node.ImageAtY = Pair(map, "at", 1, 0.5f);
+                node.ImageOffX = Pair(map, "off", 0, 0f);
+                node.ImageOffY = Pair(map, "off", 1, 0f);
+                if (HasKey(map, "slice"))
+                {
+                    var slice = Numbers(map, "slice");
+                    var border = HasKey(map, "bw") ? Numbers(map, "bw") : slice;
+                    if (slice.Length == 4 && border.Length == 4 && System.Array.TrueForAll(slice, v => v >= 0f)
+                        && System.Array.TrueForAll(border, v => v >= 0f))
+                    {
+                        node.ImageSlice = slice;
+                        node.ImageBorder = border;
+                        node.ImageMiddle = PropNumber(map, "mid", 1f) > 0.5f;
+                    }
+                    else
+                    {
+                        scene.Problem("IMG: slice and bw take four numbers, top right bottom left, none negative");
+                    }
+                }
+
+                if (HasKey(map, "tile"))
+                {
+                    node.ImageTileW = Pair(map, "tile", 0, 0f);
+                    node.ImageTileH = Pair(map, "tile", 1, 0f);
+                }
 
                 if (HasKey(map, "uv"))
                 {
@@ -1104,12 +1342,14 @@ internal static class SceneParser
         if (!string.IsNullOrEmpty(node.Id))
             node.SourceProps = map;
 
-        node.UsesTime = NodeUsesTime(node);
+        node.UsesTime = NodeUsesTime(node) || node.Visible is { UsesTime: true };
         node.UsesScroll = NodeUsesScroll(node);
+        node.Interactive = node.Clickable || node.Op is VecOp.Scroll or VecOp.Image;
         foreach (var child in node.Children)
         {
             node.UsesTime |= child.UsesTime;
             node.UsesScroll |= child.UsesScroll;
+            node.Interactive |= child.Interactive;
         }
 
         return node;
@@ -1126,6 +1366,10 @@ internal static class SceneParser
                || node.EdgeFeather is { UsesTime: true }
                || node.StrokeWidth.UsesTime || node.StrokeOpacity.UsesTime || node.DashOffset.UsesTime
                || node.FillGradientAt is { UsesTime: true } || node.StrokeGradientAt is { UsesTime: true }
+               || node.ImageAtX.UsesTime || node.ImageAtY.UsesTime
+               || node.ImageOffX.UsesTime || node.ImageOffY.UsesTime
+               || node.ImageTileW is { UsesTime: true } || node.ImageTileH is { UsesTime: true }
+               || node.TextOutlineWidth is { UsesTime: true }
                || (node.Filters != null && node.Filters.Exists(f => f.Amount.UsesTime));
     }
 
@@ -1139,7 +1383,11 @@ internal static class SceneParser
                || node.Opacity.UsesScroll || node.FillOpacity.UsesScroll || node.Feather.UsesScroll
                || node.EdgeFeather is { UsesScroll: true }
                || node.StrokeWidth.UsesScroll || node.StrokeOpacity.UsesScroll || node.DashOffset.UsesScroll
-               || node.FillGradientAt is { UsesScroll: true } || node.StrokeGradientAt is { UsesScroll: true };
+               || node.FillGradientAt is { UsesScroll: true } || node.StrokeGradientAt is { UsesScroll: true }
+               || node.ImageAtX.UsesScroll || node.ImageAtY.UsesScroll
+               || node.ImageOffX.UsesScroll || node.ImageOffY.UsesScroll
+               || node.ImageTileW is { UsesScroll: true } || node.ImageTileH is { UsesScroll: true }
+               || node.TextOutlineWidth is { UsesScroll: true };
     }
 
     private static void ParseFill(SS.UiProp[] map, VecNode node)
@@ -1260,6 +1508,11 @@ internal static class SceneParser
                     // Conic: the parameter is the angle around (cx, cy), from `a` degrees
                     // measured clockwise from twelve o'clock, as CSS conic-gradient.
                     var bboxConic = string.Equals(PropString(map, "units"), "bbox", StringComparison.OrdinalIgnoreCase);
+                    var conicSlots = new GradientSlots
+                    {
+                        Cx = Live(map, "cx"), Cy = Live(map, "cy"), Angle = Live(map, "a"),
+                    };
+
                     var conic = new Gradient
                     {
                         Conic = true,
@@ -1268,8 +1521,8 @@ internal static class SceneParser
                         Angle = PropNumber(map, "a", 0f),
                     };
 
-                    ReadStops(map, conic);
-                    scene.Gradients[id!] = conic;
+                    ReadStops(map, conic, conicSlots);
+                    Publish(scene, id!, conic, conicSlots);
                     break;
                 }
 
@@ -1281,6 +1534,13 @@ internal static class SceneParser
                     // moving geometry without any per-frame evaluation.
                     var bbox = string.Equals(PropString(map, "units"), "bbox", StringComparison.OrdinalIgnoreCase);
                     var gradient = new Gradient { Radial = op == "GR", BoundingBox = bbox };
+                    gradient.Spread = (PropString(map, "spread") ?? "pad").ToUpperInvariant() switch
+                    {
+                        "REPEAT" => 1,
+                        "REFLECT" => 2,
+                        _ => 0,
+                    };
+                    var slots = new GradientSlots();
 
                     if (gradient.Radial)
                     {
@@ -1289,25 +1549,56 @@ internal static class SceneParser
                         gradient.Radius = Mathf.Max(0.0001f, PropNumber(map, "r", 1f));
                         gradient.Start = new Vector2(cx, cy);
                         gradient.Focus = new Vector2(PropNumber(map, "fx", cx), PropNumber(map, "fy", cy));
+
+                        slots.Cx = Live(map, "cx");
+                        slots.Cy = Live(map, "cy");
+                        slots.Radius = Live(map, "r");
+
+                        // An unstated focus is the centre, and stays the centre when the
+                        // centre moves: it takes the same expression rather than a stale copy.
+                        slots.Fx = HasKey(map, "fx") ? Live(map, "fx") : slots.Cx;
+                        slots.Fy = HasKey(map, "fy") ? Live(map, "fy") : slots.Cy;
                     }
                     else
                     {
                         gradient.Start = new Vector2(PropNumber(map, "x1", 0f), PropNumber(map, "y1", 0f));
                         gradient.End = new Vector2(PropNumber(map, "x2", 0f), PropNumber(map, "y2", 1f));
+
+                        slots.X1 = Live(map, "x1");
+                        slots.Y1 = Live(map, "y1");
+                        slots.X2 = Live(map, "x2");
+                        slots.Y2 = Live(map, "y2");
                     }
 
-                    ReadStops(map, gradient);
-                    scene.Gradients[id!] = gradient;
+                    ReadStops(map, gradient, slots);
+                    Publish(scene, id!, gradient, slots);
                     break;
                 }
 
                 case "CP":
                 {
-                    var outline = ClipOutline(map);
-                    if (outline is { Count: >= 3 })
+                    var (shape, outline) = ClipOutline(map);
+
+                    // A clip written with expressions is re-cut every rebuild, so a masked
+                    // bar or a scrolling list can change size from the data payload alone,
+                    // with no new structure. Its shape here is meaningless -- there is no
+                    // payload yet, so a width of `$w` cuts nothing -- and rejecting it for
+                    // that would reject exactly the clips this exists for.
+                    if (shape != null && IsLiveShape(shape))
+                    {
+                        scene.Clips[id!] = outline ?? new List<Vector2>();
+                        scene.ClipNodes[id!] = shape;
+                        scene.LiveDefs = true;
+                        scene.DefsUseTime |= shape.UsesTime;
+                    }
+                    else if (outline is { Count: >= 3 })
+                    {
                         scene.Clips[id!] = outline;
+                    }
                     else
+                    {
                         scene.Problem($"clip \"{id}\" has no usable shape (must be an R, C, Y or P)");
+                    }
 
                     break;
                 }
@@ -1316,45 +1607,167 @@ internal static class SceneParser
     }
 
     /// <summary>
-    /// Stops are pairs: <c>stops = {{0, "#fff"}, {1, "#000"}}</c>.
+    /// Stops are pairs: <c>stops = {{0, "#fff"}, {1, "#000"}}</c>. A position may be an
+    /// expression and a colour may be a <c>$name</c> from the data payload; both are then
+    /// re-read every rebuild.
     /// </summary>
-    private static void ReadStops(SS.UiProp[] map, Gradient gradient)
+    private static void ReadStops(SS.UiProp[] map, Gradient gradient, GradientSlots slots)
     {
+        gradient.Slots = slots;
+
         var stops = PropValue(map, "stops");
         if (stops == null || stops.Value.Type != SS.UiValueType.Array || stops.Value.Array == null)
             return;
 
         var positions = new List<float>();
         var colours = new List<string>();
+        List<Expression?>? positionSlots = null;
+        List<string?>? colourSlots = null;
 
         foreach (var stop in stops.Value.Array)
         {
             if (stop.Type != SS.UiValueType.Array || stop.Array == null || stop.Array.Length < 2)
                 continue;
 
-            if (stop.Array[0].Type != SS.UiValueType.Number || stop.Array[1].Type != SS.UiValueType.String)
+            if (stop.Array[1].Type != SS.UiValueType.String)
                 continue;
 
-            positions.Add(stop.Array[0].Number);
-            colours.Add(stop.Array[1].String ?? string.Empty);
+            Expression? livePosition = null;
+
+            switch (stop.Array[0].Type)
+            {
+                case SS.UiValueType.Number:
+                    positions.Add(stop.Array[0].Number);
+                    break;
+
+                case SS.UiValueType.String when !string.IsNullOrEmpty(stop.Array[0].String):
+                    livePosition = Expression.Parse(stop.Array[0].String!, 0f);
+                    positions.Add(0f);
+                    break;
+
+                default:
+                    continue;
+            }
+
+            var colour = stop.Array[1].String ?? string.Empty;
+            string? liveColour = null;
+
+            // `$name` is a colour from the payload. The literal stands in until the first
+            // resolve, and has to parse or the stop would be dropped as unreadable.
+            if (colour.Length > 1 && colour[0] == '$')
+            {
+                liveColour = colour[1..];
+                colour = "#FF00FF";
+            }
+
+            colours.Add(colour);
+
+            if (livePosition != null)
+                positionSlots ??= Fill(positions.Count - 1);
+
+            if (liveColour != null)
+                colourSlots ??= FillNames(colours.Count - 1);
+
+            positionSlots?.Add(livePosition);
+            colourSlots?.Add(liveColour);
         }
 
-        GradientParser.ReadStops(positions.ToArray(), colours.ToArray(), gradient);
+        // A list that only started once a live stop appeared still has to describe every
+        // stop before it, or the arrays would not line up.
+        Pad(positionSlots, positions.Count);
+        Pad(colourSlots, positions.Count);
+
+        GradientParser.ReadStops(positions.ToArray(), colours.ToArray(), gradient,
+            positionSlots?.ToArray(), colourSlots?.ToArray());
+
+        static List<Expression?> Fill(int count)
+        {
+            var list = new List<Expression?>(count + 4);
+            for (var i = 0; i < count; i++)
+                list.Add(null);
+
+            return list;
+        }
+
+        static List<string?> FillNames(int count)
+        {
+            var list = new List<string?>(count + 4);
+            for (var i = 0; i < count; i++)
+                list.Add(null);
+
+            return list;
+        }
+
+        static void Pad<T>(List<T?>? list, int count) where T : class
+        {
+            while (list != null && list.Count < count)
+                list.Add(null);
+        }
+    }
+
+    /// <summary>
+    /// A gradient attribute written as a string: an expression, live from the payload.
+    /// </summary>
+    /// <remarks>
+    /// Numbers keep the path they always had — <c>PropNumber</c> resolves them once, and the
+    /// gradient carries no expressions at all, so a static declaration costs exactly what it
+    /// did before.
+    /// </remarks>
+    private static Expression? Live(SS.UiProp[] map, string key)
+    {
+        var value = PropValue(map, key);
+        if (value?.Type != SS.UiValueType.String || string.IsNullOrEmpty(value.Value.String))
+            return null;
+
+        return Expression.Parse(value.Value.String!, 0f);
+    }
+
+    private static void Publish(VecScene scene, string id, Gradient gradient, GradientSlots slots)
+    {
+        gradient.Slots = slots.Any ? slots : null;
+        scene.Gradients[id] = gradient;
+
+        if (gradient.Slots == null)
+            return;
+
+        slots.UsesTime = Time(slots.X1) || Time(slots.Y1) || Time(slots.X2) || Time(slots.Y2)
+                         || Time(slots.Cx) || Time(slots.Cy) || Time(slots.Radius)
+                         || Time(slots.Fx) || Time(slots.Fy) || Time(slots.Angle)
+                         || AnyTime(slots.StopPositions);
+
+        scene.LiveDefs = true;
+        scene.DefsUseTime |= slots.UsesTime;
+
+        static bool Time(Expression? expression) => expression is { UsesTime: true };
+
+        static bool AnyTime(Expression?[]? expressions)
+        {
+            if (expressions == null)
+                return false;
+
+            foreach (var expression in expressions)
+            {
+                if (expression is { UsesTime: true })
+                    return true;
+            }
+
+            return false;
+        }
     }
 
     /// <summary>
     /// Builds a clip outline in scene coordinates from a CP declaration's shape.
     /// </summary>
     /// <remarks>
-    /// Clip shapes are static geometry: they are evaluated once here with an empty context,
-    /// so an expression referencing <c>t</c> in a clip is silently constant. Spec §7 treats
-    /// clips as layout, not animation.
+    /// A clip of plain numbers is cut once, here. One written with expressions keeps its
+    /// node and is re-cut per rebuild (<see cref="VecScene.ResolveLiveDefs"/>), so a clip can
+    /// follow the data the way a shape does.
     /// </remarks>
-    private static List<Vector2>? ClipOutline(SS.UiProp[] map)
+    private static (VecNode? Shape, List<Vector2>? Outline) ClipOutline(SS.UiProp[] map)
     {
         var children = PropValue(map, "c");
         if (children == null || children.Value.Type != SS.UiValueType.Array || children.Value.Array == null)
-            return null;
+            return (null, null);
 
         foreach (var item in children.Value.Array)
         {
@@ -1363,10 +1776,18 @@ internal static class SceneParser
 
             var node = ParseNode(item.Map, new VecScene());
             if (node != null)
-                return Tessellator.Outline(node, new EvalContext());
+                return (node, Tessellator.Outline(node, new EvalContext()));
         }
 
-        return null;
+        return (null, null);
+    }
+
+    /// <summary>A clip shape whose geometry is expressions rather than numbers.</summary>
+    private static bool IsLiveShape(VecNode node)
+    {
+        return !node.X.IsConstant || !node.Y.IsConstant || !node.W.IsConstant || !node.H.IsConstant
+               || !node.Rx.IsConstant || !node.Ry.IsConstant
+               || (node.CornerRadii != null && System.Array.Exists(node.CornerRadii, r => !r.IsConstant));
     }
 
     private static void ParseStroke(SS.UiProp[] map, VecNode node)
@@ -1476,6 +1897,46 @@ internal static class SceneParser
     /// The index is parsed with the ordinary expression parser, so it is not limited to a
     /// bare `i` -- `$rows[n-1-i]` reverses a list, and `$cols[mod(i,4)]` cycles a palette.
     /// </remarks>
+    /// <summary>
+    /// Splits `"set {$press:%.1f} kPa, trip {$trip:%.0f}"` into literals and bindings, or returns
+    /// null when the text holds no `{$`. A placeholder without its own format takes the node's
+    /// `fmt`; one never closed stays literal text.
+    /// </summary>
+    internal static TextPart[]? TextTemplate(string body, string? fallbackFormat)
+    {
+        var open = body.IndexOf("{$", StringComparison.Ordinal);
+        if (open < 0)
+            return null;
+
+        var parts = new List<TextPart>();
+        var at = 0;
+
+        while (open >= 0)
+        {
+            var close = body.IndexOf('}', open);
+            if (close < 0)
+                break;
+
+            if (open > at)
+                parts.Add(TextPart.Text(body[at..open]));
+
+            // The format follows the last ':' after any index, so `$rows[i]` may hold anything.
+            var inner = body[(open + 2)..close];
+            var bracket = inner.LastIndexOf(']');
+            var colon = inner.IndexOf(':', Math.Max(bracket, 0));
+            var bound = SplitBinding(colon < 0 ? inner : inner[..colon]);
+            parts.Add(TextPart.Binding(bound.Name, bound.Index, colon < 0 ? fallbackFormat : inner[(colon + 1)..]));
+
+            at = close + 1;
+            open = body.IndexOf("{$", at, StringComparison.Ordinal);
+        }
+
+        if (at < body.Length)
+            parts.Add(TextPart.Text(body[at..]));
+
+        return parts.ToArray();
+    }
+
     private static (string Name, Expression? Index) SplitBinding(string body)
     {
         var open = body.IndexOf('[', StringComparison.Ordinal);

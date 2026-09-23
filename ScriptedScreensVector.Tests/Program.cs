@@ -166,6 +166,11 @@ internal static class Program
         RequirementTests.ForcedScrollOnce(run);
         RequirementTests.InsetField(run);
         RequirementTests.DataSnap(run);
+        RequirementTests.ImagePosition(run);
+        RequirementTests.LabelUnchanged(run);
+        RequirementTests.TextTemplate(run);
+        EasingTests.Curves(run);
+        EasingTests.Payload(run);
 
         var exit = run.Report();
 

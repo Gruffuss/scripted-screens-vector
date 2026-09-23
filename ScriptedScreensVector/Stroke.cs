@@ -62,8 +62,12 @@ internal static class Stroke
             Extend(path, half);
 
         var count = path.Count;
-        var left = new Vector2[count];
-        var right = new Vector2[count];
+
+        // Reused, not allocated: a stroked shape is emitted on every rebuild, and three
+        // buffers per shape per rebuild was measured at 717 B a shape -- 86 KB for a page of
+        // 120 bordered boxes, every frame it animates, against 5 B a shape unstroked.
+        var left = Buffer(ref _left, count);
+        var right = Buffer(ref _right, count);
 
         for (var i = 0; i < count; i++)
         {
@@ -94,8 +98,8 @@ internal static class Stroke
 
         if (feather > 0f)
         {
-            FeatherSide(vh, left, path, closed, feather, paint, matrix, maxVertices, outward: true);
-            FeatherSide(vh, right, path, closed, feather, paint, matrix, maxVertices, outward: false);
+            FeatherSide(vh, left, count, path, closed, feather, paint, matrix, maxVertices, outward: true);
+            FeatherSide(vh, right, count, path, closed, feather, paint, matrix, maxVertices, outward: false);
         }
 
         if (!closed && cap == CapStyle.Round)
@@ -270,9 +274,13 @@ internal static class Stroke
         return normal;
     }
 
-    private static void FeatherSide(MeshBuilder vh, Vector2[] side, List<Vector2> centre, bool closed, float width, Paint paint, Matrix4x4 matrix, int maxVertices, bool outward)
+    /// <summary>
+    /// Feathers one side of a stroke. <paramref name="count"/> is the number of points in
+    /// use, NOT <c>side.Length</c>: the buffers are pooled and a reused one is as long as the
+    /// longest stroke this thread has drawn.
+    /// </summary>
+    private static void FeatherSide(MeshBuilder vh, Vector2[] side, int count, List<Vector2> centre, bool closed, float width, Paint paint, Matrix4x4 matrix, int maxVertices, bool outward)
     {
-        var count = side.Length;
         if (vh.currentVertCount + count * 2 > maxVertices)
             return;
 
@@ -326,10 +334,49 @@ internal static class Stroke
             vh.AddTriangle(origin, origin + 1 + i, origin + 2 + i);
     }
 
+    /// <summary>
+    /// Scratch for one stroke, per thread because tessellation runs on workers.
+    /// </summary>
+    /// <remarks>
+    /// [ThreadStatic] fields cannot carry an initialiser -- only the thread that runs the
+    /// static constructor would get one -- so each is filled on first use, as the
+    /// tessellator's own scratch buffers are.
+    /// </remarks>
+    [System.ThreadStatic] private static List<Vector2>? _cleaned;
+
+    [System.ThreadStatic] private static Vector2[]? _left;
+
+    [System.ThreadStatic] private static Vector2[]? _right;
+
+    private static Vector2[] Buffer(ref Vector2[]? slot, int count)
+    {
+        // Managed arithmetic, deliberately: `Mathf.NextPowerOfTwo` is a native ECall, and a
+        // native call on the tessellation path is exactly what makes it un-threadable. The
+        // headless test harness threw SecurityException on it the moment it was written,
+        // which is the third time that trap has been caught by running the renderer outside
+        // the player.
+        if (slot == null || slot.Length < count)
+        {
+            var size = 64;
+            while (size < count)
+                size *= 2;
+
+            slot = new Vector2[size];
+        }
+
+        return slot;
+    }
+
     /// <summary>Drops duplicate points, which would otherwise produce zero-length normals.</summary>
+    /// <remarks>
+    /// The list is this thread's scratch and is valid until the next stroke on it. Every
+    /// caller consumes it within the same emit, and a dashed stroke emits its runs one after
+    /// another rather than holding them.
+    /// </remarks>
     private static List<Vector2> Clean(IReadOnlyList<Vector2> points, bool closed)
     {
-        var cleaned = new List<Vector2>(points.Count);
+        var cleaned = _cleaned ??= new List<Vector2>(64);
+        cleaned.Clear();
 
         foreach (var point in points)
         {

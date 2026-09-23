@@ -85,6 +85,9 @@ internal sealed class MeshBuilder
     /// <summary>Vertices emitted so far. Named to match the old call sites.</summary>
     internal int currentVertCount => _positions.Count;
 
+    /// <summary>One emitted vertex's position and first texture coordinate, for tests.</summary>
+    internal (Vector3 Position, Vector2 Uv) Vertex(int index) => (_positions[index], _uv0[index]);
+
     /// <summary>
     /// The first mesh is left empty and the geometry starts at the second, so a label can draw
     /// underneath the very first shape.
@@ -505,8 +508,10 @@ internal sealed class MeshBuilder
                 }
             }
 
-            // Does this shape need cutting at all, and over what area?
-            var needs = false;
+            // Does this shape need cutting at all, and over what area? A repeating or reflecting
+            // mask always does: its alpha is periodic, so seven samples a triangle can all land on
+            // the same value and read as flat.
+            var needs = mask.Gradient.Spread != 0;
             var min = new Vector2(float.MaxValue, float.MaxValue);
             var max = new Vector2(float.MinValue, float.MinValue);
             for (var q = 0; q + 2 < _pieces.Count; q += 3)

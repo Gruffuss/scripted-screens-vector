@@ -106,3 +106,15 @@ side changes what the distance field holds. The fixes are a smaller blur on the 
 with more padding: the fonts mod builds its atlases at padding 5 (`AtlasPadding`), which is
 *less* than LiberationSans, so raising it would cost atlas space the 272-character set nearly
 fills at 48pt. Not attempted.
+
+## One dark pixel inside a solid fill, in captures (seen 2026-09-23, not chased)
+
+`InGameTest-hidden.lua` on the 2x2 console: the control bar (`R x=8 y=13 w=84 h=14 rx=3
+f=#5FD9A8`) has exactly **one** off-colour pixel, at capture (166, 47), in both of two captures
+1.5 s apart. It is **(3, 3, 2, 255)**: opaque and near black. Not the page background showing
+through a crack (that reads (13, 13, 22)), and not a transparent hole (alpha 255), so something
+**drew** it. Nothing in the scene is declared at that point (scene ~(71, 18)).
+
+Not yet known whether it is capture-only or also on the console, or whether it appears on other
+fills. First checks: capture the same bar on another console; move the bar by a pixel and see
+whether the speck moves with it (geometry) or stays (capture or overlay).

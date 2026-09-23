@@ -32,6 +32,8 @@ internal struct TextPlacement
     internal bool Wrap;          // may run to more than one line
     internal float LineHeight;   // multiple of the font size; 0 means the font's own
     internal VecShadow? Shadow;  // first outset `sh` entry, in canvas units; see TextLayer
+    internal float OutlineWidth; // `ow` in canvas units, centred on the glyph edge; 0 for none
+    internal Color OutlineColour;
 
     /// <summary>Outset shadows after the first, each drawn by a copy of the label.</summary>
     internal VecShadow[]? ExtraShadows;
@@ -71,6 +73,61 @@ internal struct TextPlacement
 
     /// <summary>How many meshes draw before this label. Set by <see cref="TextOrder"/>.</summary>
     internal int SliceDepth;
+
+    /// <summary>
+    /// True when applying <paramref name="other"/> to a label already showing this placement
+    /// would change nothing about it.
+    /// </summary>
+    /// <remarks>
+    /// Every field the text layer writes onto the label, and nothing else: `ShapeIndex`,
+    /// `CutVertex` and `SliceDepth` decide where the label sits among the mesh slices, which is
+    /// ordered separately every rebuild. Text compares by value, so a changed number always
+    /// applies. The reference-typed fields compare by reference, which is deliberately
+    /// cautious: a clip polygon, tint, gradient or first-line style is built fresh on each
+    /// rebuild, so a label carrying one is never skipped rather than risking a stale one.
+    /// </remarks>
+    internal readonly bool SameAs(in TextPlacement other)
+    {
+        return string.Equals(Text, other.Text, System.StringComparison.Ordinal)
+               && Rect == other.Rect
+               && Size == other.Size
+               && Colour == other.Colour
+               && Align == other.Align
+               && VAlign == other.VAlign
+               && string.Equals(Font, other.Font, System.StringComparison.Ordinal)
+               && Bold == other.Bold
+               && CharSpacing == other.CharSpacing
+               && Fit == other.Fit
+               && MinSize == other.MinSize
+               && Rotation == other.Rotation
+               && ClipRect == other.ClipRect
+               && Wrap == other.Wrap
+               && LineHeight == other.LineHeight
+               && OutlineWidth == other.OutlineWidth
+               && OutlineColour == other.OutlineColour
+               && Same(Shadow, other.Shadow)
+               && Same(InsetShadow, other.InsetShadow)
+               && Shear == other.Shear
+               && ReferenceEquals(ExtraShadows, other.ExtraShadows)
+               && ReferenceEquals(ClipPolygon, other.ClipPolygon)
+               && ReferenceEquals(Tint, other.Tint)
+               && ReferenceEquals(Gradient, other.Gradient)
+               && ReferenceEquals(FirstLine, other.FirstLine);
+
+        static bool Same(VecShadow? a, VecShadow? b)
+        {
+            if (a.HasValue != b.HasValue)
+                return false;
+
+            if (!a.HasValue)
+                return true;
+
+            var x = a.Value;
+            var y = b!.Value;
+            return x.Dx == y.Dx && x.Dy == y.Dy && x.Blur == y.Blur && x.Spread == y.Spread
+                   && x.Colour == y.Colour && x.Inset == y.Inset;
+        }
+    }
 }
 
 /// <summary>Fit modes for <c>T</c>.</summary>
@@ -218,6 +275,40 @@ internal struct ScrollRegion
 /// this cannot read is returned unchanged, so it reaches <c>string.Format</c> and fails there
 /// as a caught FormatException rather than silently formatting the wrong thing.
 /// </remarks>
+/// <summary>One piece of a `T` text template: a literal, or a bound value with its own format.</summary>
+internal readonly struct TextPart
+{
+    /// <summary>The literal text; null for a binding.</summary>
+    internal readonly string? Literal;
+
+    internal readonly string? Name;
+    internal readonly Expression? Index;
+
+    /// <summary>The printf format translated for .NET; null prints "0.##".</summary>
+    internal readonly string? Net;
+
+    /// <summary>`Net` as one conversion between literals, when it is one.</summary>
+    internal readonly bool Split;
+    internal readonly string Prefix;
+    internal readonly string? Spec;
+    internal readonly string Suffix;
+
+    private TextPart(string? literal, string? name, Expression? index, string? format)
+    {
+        Literal = literal;
+        Name = name;
+        Index = index;
+        Net = format == null ? null : Printf.ToNet(format);
+        Prefix = Suffix = string.Empty;
+        Spec = "0.##";
+        Split = Net == null || Printf.TrySplit(Net, out Prefix, out Spec, out Suffix);
+    }
+
+    internal static TextPart Text(string literal) => new(literal, null, null, null);
+
+    internal static TextPart Binding(string name, Expression? index, string? format) => new(null, name, index, format);
+}
+
 internal static class Printf
 {
     private static readonly System.Collections.Generic.Dictionary<string, string> Cache =
@@ -245,6 +336,58 @@ internal static class Printf
 
         return result;
     }
+
+    /// <summary>
+    /// Splits a translated format into its literal prefix, its one conversion and its literal
+    /// suffix, so the number can be written into a buffer rather than through `string.Format`.
+    /// </summary>
+    /// <remarks>
+    /// Refuses anything that is not exactly one `{0:SPEC}` between braceless literals -- a
+    /// literal brace in the author's text, or a format with no conversion -- so those keep the
+    /// original formatter and cannot print differently than before.
+    /// </remarks>
+    internal static bool TrySplit(string composite, out string prefix, out string? spec, out string suffix)
+    {
+        // Cached like the translation itself: cutting three substrings on every call was 32 bytes
+        // a label per rebuild, the whole of what was left after the buffer took the formatting.
+        (bool Ok, string Prefix, string? Spec, string Suffix) split;
+        lock (Splits)
+        {
+            if (!Splits.TryGetValue(composite, out split))
+            {
+                split = Split(composite);
+                if (Splits.Count > 64)
+                    Splits.Clear();
+
+                Splits[composite] = split;
+            }
+        }
+
+        prefix = split.Prefix;
+        spec = split.Spec;
+        suffix = split.Suffix;
+        return split.Ok;
+    }
+
+    private static readonly System.Collections.Generic.Dictionary<string, (bool, string, string?, string)> Splits =
+        new(System.StringComparer.Ordinal);
+
+    private static (bool, string, string?, string) Split(string composite)
+    {
+        var open = composite.IndexOf("{0:", System.StringComparison.Ordinal);
+        var close = open < 0 ? -1 : composite.IndexOf('}', open);
+        if (close < 0)
+            return (false, string.Empty, null, string.Empty);
+
+        var prefix = composite[..open];
+        var spec = composite[(open + 3)..close];
+        var suffix = composite[(close + 1)..];
+
+        var ok = prefix.IndexOfAny(Braces) < 0 && suffix.IndexOfAny(Braces) < 0 && spec.Length > 0;
+        return (ok, prefix, spec, suffix);
+    }
+
+    private static readonly char[] Braces = { '{', '}' };
 
     private static string Translate(string spec)
     {

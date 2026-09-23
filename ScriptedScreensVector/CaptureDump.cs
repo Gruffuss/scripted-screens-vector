@@ -22,8 +22,15 @@ namespace ScriptedScreensVector;
 [HarmonyPatch(typeof(SS), "CaptureRootToPng")]
 internal static class CaptureDump
 {
+    /// <summary>
+    /// Objects this capture switched on, innermost first, to be switched off again after.
+    /// </summary>
+    private static readonly System.Collections.Generic.List<GameObject> Woken = new();
+
     private static void Prefix(GameObject sourceRoot)
     {
+        Wake(sourceRoot);
+
         if (!VectorConfig.Diagnostics || sourceRoot == null)
             return;
 
@@ -42,6 +49,88 @@ internal static class CaptureDump
         {
             ScriptedScreensVectorPlugin.Log?.LogWarning($"capture dump failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Switches on anything between the surface and the scene that is switched off, so the
+    /// capture has something to copy.
+    /// </summary>
+    /// <remarks>
+    /// A capture clones the surface root and renders the clone. An inactive object clones as
+    /// an inactive object, so the camera photographs the world behind it and the picture
+    /// comes back as terrain and sky — deterministically, for a console that looks perfectly
+    /// correct in game. What switches it off is not established; the log line above names the
+    /// object so the next capture answers it rather than another theory.
+    ///
+    /// It also has to be the **live** objects rather than the clone: an inactive Graphic gets
+    /// no canvas update, so its mesh and its labels do not exist yet to be copied. Waking the
+    /// chain and forcing one canvas update builds them, and <see cref="Restore"/> puts every
+    /// object back. No frame is drawn in between — the capture renders its own camera into
+    /// its own texture — so nothing of this reaches the player's screen.
+    /// </remarks>
+    private static void Wake(GameObject? sourceRoot)
+    {
+        Woken.Clear();
+        if (sourceRoot == null || sourceRoot.activeInHierarchy)
+            return;
+
+        for (var node = sourceRoot.transform; node != null; node = node.parent)
+        {
+            if (!node.gameObject.activeSelf)
+                Woken.Add(node.gameObject);
+        }
+
+        if (Woken.Count == 0)
+            return;
+
+        // Which ones were off, recorded BEFORE they are switched on -- afterwards there is
+        // nothing left to see, which is how the first version of this line managed to say
+        // "woke 1" without ever saying what.
+        var names = new StringBuilder();
+        foreach (var woken in Woken)
+        {
+            if (names.Length > 0)
+                names.Append(", ");
+
+            names.Append(woken.name);
+        }
+
+        // Outermost first: switching on a child of something still off does nothing useful.
+        for (var i = Woken.Count - 1; i >= 0; i--)
+            Woken[i].SetActive(true);
+
+        // The graphics under it are dirty from waking; this is what builds their meshes and
+        // labels, and the vector surfaces build inline because a capture is in progress.
+        Canvas.ForceUpdateCanvases();
+
+        if (!VectorConfig.Diagnostics)
+            return;
+
+        // The chain as well as the names: the surface root is always created active and
+        // parented to the console's screen object, so where the switched-off one sits says
+        // whose it is.
+        var chain = new StringBuilder();
+        for (var node = sourceRoot.transform; node != null; node = node.parent)
+        {
+            if (chain.Length > 0)
+                chain.Append(" < ");
+
+            chain.Append(node.gameObject.name);
+        }
+
+        ScriptedScreensVectorPlugin.Log?.LogInfo(
+            $"vector capture: woke {Woken.Count} switched-off object(s) ({names}); the capture would have been blank. Chain: {chain}");
+    }
+
+    private static void Finalizer()
+    {
+        for (var i = 0; i < Woken.Count; i++)
+        {
+            if (Woken[i] != null)
+                Woken[i].SetActive(false);
+        }
+
+        Woken.Clear();
     }
 
     private static void Walk(Transform node, int depth, StringBuilder into)

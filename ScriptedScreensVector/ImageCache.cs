@@ -64,6 +64,14 @@ internal static class ImageCache
         return Entries.TryGetValue(src, out var entry) && entry.Ready ? entry.Texture : null;
     }
 
+    /// <summary>Key prefix for a picture sampled point-filtered (`smp = point`).</summary>
+    /// <remarks>
+    /// Filtering belongs to the texture, and the texture is shared by every console showing that
+    /// source, so a pixelated picture is a texture of its own: fetched once more and cached under
+    /// this key, leaving the smooth one as it was.
+    /// </remarks>
+    internal const string PointPrefix = "point:";
+
     /// <summary>Main thread: starts fetching a source, once.</summary>
     internal static void Request(string src)
     {
@@ -71,10 +79,13 @@ internal static class ImageCache
         if (!Entries.TryAdd(src, entry))
             return;
 
+        var point = src.StartsWith(PointPrefix, System.StringComparison.Ordinal);
+        var url = point ? src.Substring(PointPrefix.Length) : src;
+
         UnityWebRequest request;
         try
         {
-            request = UnityWebRequestTexture.GetTexture(new System.Uri(src), nonReadable: true);
+            request = UnityWebRequestTexture.GetTexture(new System.Uri(url), nonReadable: true);
         }
         catch (System.Exception ex)
         {
@@ -94,7 +105,7 @@ internal static class ImageCache
 
                 var texture = DownloadHandlerTexture.GetContent(request);
                 texture.wrapMode = TextureWrapMode.Clamp;
-                texture.filterMode = FilterMode.Bilinear;
+                texture.filterMode = point ? FilterMode.Point : FilterMode.Bilinear;
 
                 entry.Texture = texture;
                 entry.Width = texture.width;

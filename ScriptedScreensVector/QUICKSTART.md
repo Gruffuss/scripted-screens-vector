@@ -141,7 +141,8 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
 - [ ] `YS`/`LS` have about 20 samples per wave period.
 - [ ] Rotation inside a repeat uses a `G` inside the `RP`.
 - [ ] Chip Lua: `string.format("%d", x)` only on integers (`math.floor` first). For numbers on
-      screen prefer `T text="$v" fmt="%.1f"` so the chip sends numbers.
+      screen prefer `T text="$v" fmt="%.1f"` so the chip sends numbers; several in one label
+      are `text="set {$p:%.1f} kPa, trip {$t:%.0f}"`.
 - [ ] An outline stroke meant to meet a clipped fill is inset by `sw/2`.
 - [ ] Two shapes sharing an edge set `fea_edge = 0` on it.
 

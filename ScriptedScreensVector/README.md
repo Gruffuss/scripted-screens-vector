@@ -395,6 +395,9 @@ Two things do cut real Lua work, though:
 
 -- a number formatted here, so the chip does no string work at all
 { op = "T", text = "$press", fmt = "%.1f", unit = " kPa", ... }
+
+-- several numbers in one line, each with its own format
+{ op = "T", text = "set {$press:%.1f} kPa, trip {$trip:%.0f}", ... }
 ```
 
 And on the data element, `keep = 1` makes a payload a patch rather than the whole truth, so a

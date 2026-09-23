@@ -41,6 +41,9 @@ internal sealed class TextLayer
     /// label reused for a placement with no shadow must not keep the previous occupant's.
     /// </remarks>
     private readonly HashSet<int> _shadowed = new();
+
+    /// <summary>Labels whose material instance carries an outline, so it can be taken off again.</summary>
+    private readonly HashSet<int> _outlined = new();
     private readonly List<RectTransform> _masks = new();
 
     /// <summary>
@@ -85,8 +88,24 @@ internal sealed class TextLayer
             // A hidden label keeps its material, and the pool may hand it to a placement with
             // no shadow later. Forget it now so that placement clears it.
             _shadowed.Remove(i);
+
+            // And forget what it showed, so the placement that reuses it is applied in full.
+            if (i < _applied.Count)
+                _applied[i] = null;
         }
     }
+
+    /// <summary>
+    /// The placement each pooled label was last given, so an unchanged one can be left alone.
+    /// </summary>
+    /// <remarks>
+    /// Every rebuild used to re-apply every label from scratch -- text, size, rect, anchors,
+    /// rotation, a dozen TextMeshPro properties -- even when nothing about it had changed since
+    /// the rebuild before. Measured in game at ~100-150 bytes a label per rebuild, which an
+    /// animating console pays for every label on every frame. A label whose placement is the
+    /// same as last time is now skipped whole.
+    /// </remarks>
+    private readonly List<TextPlacement?> _applied = new();
 
     private void Show(int index, TextPlacement placement)
     {
@@ -98,6 +117,24 @@ internal sealed class TextLayer
 
         if (label == null || mask == null)
             return;
+
+        while (_applied.Count <= index)
+            _applied.Add(null);
+
+        // Nothing about this label changed since the last rebuild, and it is in the state that
+        // rebuild left it: leave it alone. The two health checks are the repairs further down
+        // this method -- an empty glyph mesh after a capture, a renderer with no material --
+        // so skipping can never freeze a label that still needed one of them.
+        if (_applied[index] is { } last
+            && last.SameAs(placement)
+            && label.gameObject.activeSelf
+            && (label.mesh == null || label.mesh.vertexCount > 0 || string.IsNullOrEmpty(placement.Text))
+            && label.canvasRenderer != null && label.canvasRenderer.materialCount > 0)
+        {
+            return;
+        }
+
+        _applied[index] = placement;
 
         // The mask carries the clip; the label sits inside it at the placement's rect. With
         // no clip the mask is made to match the label exactly, so it never cuts anything.
@@ -253,7 +290,68 @@ internal sealed class TextLayer
         if (placement.Tint != null || placement.Gradient != null || placement.Shear != null || hadTint)
             label.ForceMeshUpdate();
 
+        ApplyOutline(label, index, placement);
         ApplyShadow(label, index, placement);
+    }
+
+    /// <summary>`ow`/`oc`: the SDF outline, centred on the glyph edge like CSS `-webkit-text-stroke`.</summary>
+    /// <remarks>
+    /// Same units as the underlay (see <see cref="ApplyShadow"/>): an outline width of 1 is the
+    /// font's whole SDF padding, so canvas units convert by
+    /// `canvas * samplingPointSize / (gradientScale * fontSize)`, and past 1 the padding cannot
+    /// hold it -- it is capped and said so rather than left to shrink the glyph invisibly.
+    /// </remarks>
+    private void ApplyOutline(TextMeshProUGUI label, int index, TextPlacement placement)
+    {
+        ShaderUtilities.GetShaderPropertyIDs();
+
+        if (placement.OutlineWidth <= 0f)
+        {
+            if (_outlined.Remove(index) && label.fontMaterial is { } plain)
+            {
+                plain.SetFloat(ShaderUtilities.ID_OutlineWidth, 0f);
+                plain.DisableKeyword(ShaderUtilities.Keyword_Outline);
+                label.UpdateMeshPadding();
+            }
+
+            return;
+        }
+
+        var font = label.font;
+        var shared = label.fontSharedMaterial;
+        if (shared == null || font == null || !shared.HasProperty(ShaderUtilities.ID_OutlineWidth))
+        {
+            Warn($"font \"{font?.name}\" has no outline in its shader; text outline not drawn");
+            return;
+        }
+
+        var gradient = shared.HasProperty(ShaderUtilities.ID_GradientScale) ? shared.GetFloat(ShaderUtilities.ID_GradientScale) : 0f;
+        var sampling = font.faceInfo.pointSize;
+        if (gradient <= 0.001f || sampling <= 0f)
+        {
+            Warn($"font \"{font.name}\" reports no usable SDF scale; text outline not drawn");
+            return;
+        }
+
+        var width = placement.OutlineWidth * sampling / (gradient * Mathf.Max(1f, placement.Size));
+        if (width > 1f)
+        {
+            Warn($"text outline is wider than the font's SDF padding allows; reduced to {100f / width:F0}%");
+            width = 1f;
+        }
+
+        var material = label.fontMaterial;
+        if (material == null)
+            return;
+
+        material.EnableKeyword(ShaderUtilities.Keyword_Outline);
+        material.SetFloat(ShaderUtilities.ID_OutlineWidth, width);
+        material.SetColor(ShaderUtilities.ID_OutlineColor, placement.OutlineColour);
+        _outlined.Add(index);
+
+        // As with the underlay, TMP pads each glyph quad only when asked; an outline reaching
+        // past the old padding would be cut off at every letter's edge.
+        label.UpdateMeshPadding();
     }
 
     /// <summary>Per placement: a skew or stretch applied to the glyph vertices.</summary>

@@ -51,8 +51,125 @@ internal sealed class Gradient
     internal readonly List<float> Positions = new();
     internal readonly List<Color> Colours = new();
 
+    /// <summary>
+    /// What happens past the ends of the ramp: 0 pad (hold the end colours), 1 repeat, 2 reflect
+    /// -- SVG `spreadMethod`, CSS `repeating-*-gradient`. Conic gradients already go all the way
+    /// round and ignore it.
+    /// </summary>
+    internal int Spread;
+
+    /// <summary>
+    /// The parts of the declaration that were written as expressions rather than numbers.
+    /// Null for a static gradient, which is every gradient that does not ask for otherwise.
+    /// </summary>
+    internal GradientSlots? Slots;
+
     /// <summary>Stop count, which drives how finely gradient-filled geometry is refined.</summary>
     internal int StopCount => Positions.Count;
+
+    /// <summary>
+    /// Re-reads the live parts of the declaration for this rebuild.
+    /// </summary>
+    /// <remarks>
+    /// Called once per rebuild, before the tree walk, not per vertex: the resolved numbers
+    /// land in the same fields a static gradient parses into, so everything downstream —
+    /// sampling, banding, refinement — is unchanged and costs nothing extra.
+    /// </remarks>
+    internal void Resolve(EvalContext context)
+    {
+        var slots = Slots;
+        if (slots == null)
+            return;
+
+        if (Conic)
+        {
+            Start = new Vector2(Value(slots.Cx, Start.x), Value(slots.Cy, Start.y));
+            Angle = Value(slots.Angle, Angle);
+        }
+        else if (Radial)
+        {
+            Start = new Vector2(Value(slots.Cx, Start.x), Value(slots.Cy, Start.y));
+            Focus = new Vector2(Value(slots.Fx, Focus.x), Value(slots.Fy, Focus.y));
+            Radius = Mathf.Max(0.0001f, Value(slots.Radius, Radius));
+        }
+        else
+        {
+            Start = new Vector2(Value(slots.X1, Start.x), Value(slots.Y1, Start.y));
+            End = new Vector2(Value(slots.X2, End.x), Value(slots.Y2, End.y));
+        }
+
+        var positions = slots.StopPositions;
+        var colours = slots.StopColours;
+
+        for (var i = 0; i < Positions.Count; i++)
+        {
+            if (positions != null && i < positions.Length && positions[i] != null)
+                Positions[i] = Mathf.Clamp01(positions[i]!.Evaluate(context));
+
+            if (colours == null || i >= colours.Length || colours[i] == null)
+                continue;
+
+            // A colour the payload never supplied reads as a fault rather than as a design
+            // decision, the same choice `f = "$name"` makes on a node.
+            Colours[i] = context.Colours.TryGetValue(colours[i]!, out var supplied)
+                ? supplied
+                : new Color(1f, 0f, 1f, 1f);
+        }
+
+        // Live positions can cross each other between ticks, and sampling walks the stops in
+        // order. Insertion sort, in place, carrying the slots with the values so the next
+        // rebuild still reads each stop's own expression.
+        if (positions != null)
+            SortLive(slots);
+
+        float Value(Expression? expression, float fallback)
+        {
+            return expression == null ? fallback : expression.Evaluate(context);
+        }
+    }
+
+    private void SortLive(GradientSlots slots)
+    {
+        for (var i = 1; i < Positions.Count; i++)
+        {
+            var position = Positions[i];
+            var colour = Colours[i];
+            var slotPosition = Slot(slots.StopPositions, i);
+            var slotColour = Slot(slots.StopColours, i);
+
+            var j = i - 1;
+            while (j >= 0 && Positions[j] > position)
+            {
+                Positions[j + 1] = Positions[j];
+                Colours[j + 1] = Colours[j];
+                Move(slots.StopPositions, j, j + 1);
+                Move(slots.StopColours, j, j + 1);
+                j--;
+            }
+
+            Positions[j + 1] = position;
+            Colours[j + 1] = colour;
+            Put(slots.StopPositions, j + 1, slotPosition);
+            Put(slots.StopColours, j + 1, slotColour);
+        }
+
+        static T? Slot<T>(T?[]? array, int index) where T : class
+        {
+            return array != null && index < array.Length ? array[index] : null;
+        }
+
+        static void Move<T>(T?[]? array, int from, int to) where T : class
+        {
+            if (array != null && from < array.Length && to < array.Length)
+                array[to] = array[from];
+        }
+
+        static void Put<T>(T?[]? array, int index, T? value) where T : class
+        {
+            if (array != null && index < array.Length)
+                array[index] = value;
+        }
+    }
 
     /// <summary>Gradient parameter at a point, in 0..1 before clamping.</summary>
     internal float Parameter(Vector2 point)
@@ -92,6 +209,22 @@ internal sealed class Gradient
     }
 
     internal Color Sample(float t)
+    {
+        return SampleWithin(Spread == 0 ? t : Wrap(t));
+    }
+
+    /// <summary>A parameter past the ramp's ends brought back into it by <see cref="Spread"/>.</summary>
+    internal float Wrap(float t)
+    {
+        if (Spread == 1)
+            return t - Mathf.Floor(t);
+
+        var m = t - 2f * Mathf.Floor(t * 0.5f);
+        return m > 1f ? 2f - m : m;
+    }
+
+    /// <summary>The ramp at a parameter, held at its end colours outside 0..1.</summary>
+    internal Color SampleWithin(float t)
     {
         if (Positions.Count == 0)
             return Color.white;
@@ -148,7 +281,9 @@ internal sealed class Gradient
 
         void Sample(Vector2 point)
         {
-            var t = Mathf.Clamp01(Parameter(point));
+            // Unclamped under a spread: past 1 the ramp keeps changing, and a triangle spanning
+            // several periods must read as spanning them.
+            var t = Spread == 0 ? Mathf.Clamp01(Parameter(point)) : Parameter(point);
             lowest = Mathf.Min(lowest, t);
             highest = Mathf.Max(highest, t);
         }
@@ -223,6 +358,14 @@ internal readonly struct Paint
             : point;
     }
 
+    /// <summary>The ramp's colour at a parameter already brought within 0..1, with this paint's alpha.</summary>
+    internal Color32 AtParameter(float t)
+    {
+        var colour = Gradient!.SampleWithin(t);
+        colour.a *= Alpha;
+        return colour;
+    }
+
     /// <summary>Colour at a point in the shape's own coordinate space.</summary>
     internal Color32 At(Vector2 point)
     {
@@ -241,12 +384,51 @@ internal readonly struct Paint
     }
 }
 
+/// <summary>
+/// The live parts of a gradient declaration: geometry or stops written as expressions.
+/// </summary>
+/// <remarks>
+/// A gradient is resolved once at parse time and stored in the scene, which is why a ramp
+/// could not follow a value the way <c>f = "$name"</c> on a node can. These are the
+/// declaration's expressions kept alongside the resolved numbers, re-read per rebuild by
+/// <see cref="Gradient.Resolve"/>. Null members are the ones that really were numbers.
+/// </remarks>
+internal sealed class GradientSlots
+{
+    internal Expression? X1;
+    internal Expression? Y1;
+    internal Expression? X2;
+    internal Expression? Y2;
+    internal Expression? Cx;
+    internal Expression? Cy;
+    internal Expression? Radius;
+    internal Expression? Fx;
+    internal Expression? Fy;
+    internal Expression? Angle;
+
+    /// <summary>Per stop: its position as an expression, or null when it is a number.</summary>
+    internal Expression?[]? StopPositions;
+
+    /// <summary>Per stop: the name a <c>$slot</c> colour reads, or null when it is a literal.</summary>
+    internal string?[]? StopColours;
+
+    internal bool UsesTime;
+
+    internal bool Any =>
+        X1 != null || Y1 != null || X2 != null || Y2 != null
+        || Cx != null || Cy != null || Radius != null || Fx != null || Fy != null
+        || Angle != null || StopPositions != null || StopColours != null;
+}
+
 /// <summary>Parses the <c>defs</c> array: gradient and clip-path declarations.</summary>
 internal static class GradientParser
 {
-    internal static void ReadStops(float[] flatPositions, string[] colours, Gradient into)
+    internal static void ReadStops(float[] flatPositions, string[] colours, Gradient into,
+        Expression?[]? positionSlots = null, string?[]? colourSlots = null)
     {
         var count = Mathf.Min(flatPositions.Length, colours.Length);
+        List<Expression?>? keptPositions = null;
+        List<string?>? keptColours = null;
 
         for (var i = 0; i < count; i++)
         {
@@ -255,10 +437,26 @@ internal static class GradientParser
 
             into.Positions.Add(Mathf.Clamp01(flatPositions[i]));
             into.Colours.Add(colour);
+
+            // Slots travel with the stops they belong to: a dropped stop takes its slot with
+            // it, so the two stay index for index however many are rejected.
+            if (positionSlots != null)
+                (keptPositions ??= new List<Expression?>(count)).Add(i < positionSlots.Length ? positionSlots[i] : null);
+
+            if (colourSlots != null)
+                (keptColours ??= new List<string?>(count)).Add(i < colourSlots.Length ? colourSlots[i] : null);
         }
 
-        // Sampling walks the stops in order and assumes they ascend.
-        for (var i = 1; i < into.Positions.Count; i++)
+        if (keptPositions != null || keptColours != null)
+        {
+            var slots = into.Slots ??= new GradientSlots();
+            slots.StopPositions = keptPositions?.ToArray();
+            slots.StopColours = keptColours?.ToArray();
+        }
+
+        // Sampling walks the stops in order and assumes they ascend. Live positions are
+        // sorted per rebuild instead, by the resolve that knows how to carry their slots.
+        for (var i = 1; into.Slots?.StopPositions == null && i < into.Positions.Count; i++)
         {
             if (into.Positions[i] >= into.Positions[i - 1])
                 continue;

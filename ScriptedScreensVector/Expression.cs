@@ -55,6 +55,27 @@ internal sealed class EvalContext
     /// </remarks>
     internal float Blend { get; set; } = 1f;
 
+    /// <summary>
+    /// How far along each name's own glide is, 0..1, for the names that have one.
+    /// </summary>
+    /// <remarks>
+    /// Written on the main thread at dispatch, like everything else clock-derived, and only
+    /// read on the worker. Empty unless a payload asked for per-name timing.
+    /// </remarks>
+    internal Dictionary<string, float> NameBlend { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Timing a payload asked for, by name: how long that value's glide should take, and the
+    /// curve it follows.
+    /// </summary>
+    /// <remarks>
+    /// Carried on the payload rather than on the scene because it describes a CHANGE, not a
+    /// value -- the same bar may glide over 0.6 s when a reading moves it and snap when the
+    /// console switches mode. A name no payload mentions glides over the measured gap to the
+    /// next payload, linearly, exactly as before.
+    /// </remarks>
+    internal Dictionary<string, (float Seconds, Easing Curve, float Delay)> Eased { get; } = new(StringComparer.Ordinal);
+
     /// <summary>Named arrays from the paired data element. Never null.</summary>
     internal Dictionary<string, float[]> Arrays { get; } = new(StringComparer.Ordinal);
 
@@ -151,8 +172,13 @@ internal sealed class EvalContext
 
         foreach (var pair in Scalars)
         {
-            Previous[pair.Key] = blend < 1f && Previous.TryGetValue(pair.Key, out var from)
-                ? from + (pair.Value - from) * blend
+            // Each name rebases from what IT is showing. A name half way through a 0.6 s glide
+            // of its own is not half way through the scene-wide one, and taking the scene's
+            // figure would start the next glide from a place nothing ever drew.
+            var own = NameBlend.Count > 0 && NameBlend.TryGetValue(pair.Key, out var named) ? named : blend;
+
+            Previous[pair.Key] = own < 1f && Previous.TryGetValue(pair.Key, out var showing)
+                ? showing + (pair.Value - showing) * own
                 : pair.Value;
         }
     }
@@ -165,8 +191,39 @@ internal sealed class EvalContext
     /// Needed wherever a payload waits -- behind a running rebuild, or before its scene exists.
     /// Keeping only the newest lost every value an earlier patch had carried.
     /// </remarks>
+    /// <summary>
+    /// Drops every name <paramref name="source"/> carries, from every kind, before its values are
+    /// merged in. Without it a `keep` payload that sent a name as a number after it had been a
+    /// string went on showing the string, since a string binding is looked up first.
+    /// </summary>
+    internal void Evict(EvalContext source)
+    {
+        EvictKeys(source.Scalars.Keys);
+        EvictKeys(source.Arrays.Keys);
+        EvictKeys(source.Colours.Keys);
+        EvictKeys(source.Strings.Keys);
+        EvictKeys(source.StringArrays.Keys);
+        EvictKeys(source.ColourArrays.Keys);
+    }
+
+    private void EvictKeys<T>(Dictionary<string, T>.KeyCollection names)
+    {
+        foreach (var name in names)
+        {
+            Scalars.Remove(name);
+            Arrays.Remove(name);
+            Colours.Remove(name);
+            Strings.Remove(name);
+            StringArrays.Remove(name);
+            ColourArrays.Remove(name);
+        }
+    }
+
     internal void MergeFrom(EvalContext later)
     {
+        if (later.KeepUnmentioned)
+            Evict(later);
+
         if (!later.KeepUnmentioned)
         {
             Scalars.Clear();
@@ -176,6 +233,7 @@ internal sealed class EvalContext
             StringArrays.Clear();
             ColourArrays.Clear();
             Snapped.Clear();
+            Eased.Clear();
             KeepUnmentioned = false;
         }
 
@@ -183,12 +241,14 @@ internal sealed class EvalContext
         {
             Scalars[pair.Key] = pair.Value;
             if (later.Snapped.Contains(pair.Key)) Snapped.Add(pair.Key); else Snapped.Remove(pair.Key);
+            Retime(later, pair.Key);
         }
 
         foreach (var pair in later.Arrays)
         {
             Arrays[pair.Key] = pair.Value;
             if (later.Snapped.Contains(pair.Key)) Snapped.Add(pair.Key); else Snapped.Remove(pair.Key);
+            Retime(later, pair.Key);
         }
 
         foreach (var pair in later.Colours)
@@ -199,6 +259,19 @@ internal sealed class EvalContext
             StringArrays[pair.Key] = pair.Value;
         foreach (var pair in later.ColourArrays)
             ColourArrays[pair.Key] = pair.Value;
+    }
+
+    /// <summary>
+    /// A name's timing follows the latest payload that carried the name, the way its snap does:
+    /// a later payload that restates the value without timing means "glide it as usual", not
+    /// "keep whatever the earlier one asked for".
+    /// </summary>
+    private void Retime(EvalContext later, string name)
+    {
+        if (later.Eased.TryGetValue(name, out var timing))
+            Eased[name] = timing;
+        else
+            Eased.Remove(name);
     }
 
     /// <summary>
@@ -247,10 +320,28 @@ internal sealed class EvalContext
             return 0f;
         }
 
-        if (Blend >= 1f || !Previous.TryGetValue(name, out var previous))
+        var blend = BlendFor(name);
+        if (blend >= 1f || !Previous.TryGetValue(name, out var previous))
             return value;
 
-        return previous + (value - previous) * Blend;
+        return previous + (value - previous) * blend;
+    }
+
+    /// <summary>
+    /// How far along a name's glide is: its own, when the payload gave it one, else the
+    /// scene-wide blend across the measured payload gap.
+    /// </summary>
+    /// <remarks>
+    /// The dictionary is empty for every scene that never asks for per-name timing, and the
+    /// count test keeps that case at one integer compare -- this is read once per data
+    /// reference per rebuild, which on a dense scene is thousands of calls.
+    /// </remarks>
+    internal float BlendFor(string name)
+    {
+        if (NameBlend.Count > 0 && NameBlend.TryGetValue(name, out var own))
+            return own;
+
+        return Blend;
     }
 
     /// <summary>One string from a data array, or null when there is nothing there.</summary>
@@ -297,8 +388,9 @@ internal sealed class EvalContext
             return 0f;
 
         var current = array[at];
+        var blend = BlendFor(name);
 
-        if (Blend >= 1f
+        if (blend >= 1f
             || !PreviousArrays.TryGetValue(name, out var previous)
             || previous == null
             || at >= previous.Length)
@@ -306,7 +398,7 @@ internal sealed class EvalContext
             return current;
         }
 
-        return previous[at] + (current - previous[at]) * Blend;
+        return previous[at] + (current - previous[at]) * blend;
     }
 }
 
