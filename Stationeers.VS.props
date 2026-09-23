@@ -71,7 +71,13 @@
 		<CopyItemsAssets Include="$(ProjectDir)\Assets\**\*.*" />
 	</ItemGroup>
 	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
-		<RemoveDir Directories="$(StationeersDocumentsDirectory)\mods\$(ModName)" ContinueOnError="true" />
+		<!-- Remove only what this build puts there. A whole-folder RemoveDir here deleted files added
+		     by hand to the deployed folder (a Preview.png, a player's font files). -->
+		<ItemGroup>
+			<_OwnedDeployFiles Include="$(StationeersDocumentsDirectory)\mods\$(ModName)\*.dll;$(StationeersDocumentsDirectory)\mods\$(ModName)\*.pdb;$(StationeersDocumentsDirectory)\mods\$(ModName)\*.md;$(StationeersDocumentsDirectory)\mods\$(ModName)\Patterns.lua" />
+		</ItemGroup>
+		<Delete Files="@(_OwnedDeployFiles)" ContinueOnError="true" />
+		<RemoveDir Directories="$(StationeersDocumentsDirectory)\mods\$(ModName)\examples" ContinueOnError="true" />
 		<Copy SourceFiles="$(TargetPath)" DestinationFolder="$(StationeersDocumentsDirectory)\mods\$(ModName)" ContinueOnError="true" Retries="0" RetryDelayMilliseconds="0" />
 		<ItemGroup Condition="'$(Configuration)' == 'Debug'">
 			<_ModDebugSymbols Include="$(TargetDir)*.pdb" />
