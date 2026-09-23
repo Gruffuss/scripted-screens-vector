@@ -26,24 +26,24 @@
              we care about against a stub logger (Stubs.cs) keeps the test runnable with
              plain `dotnet run` and, more importantly, tests the real code instead of a
              re-implementation of it. A ported copy would drift. -->
-        <Compile Include="..\ScriptedScreensVector\Triangulator.cs" />
-        <Compile Include="..\ScriptedScreensVector\Clip.cs" />
-        <Compile Include="..\ScriptedScreensVector\Gradient.cs" />
-        <Compile Include="..\ScriptedScreensVector\Easing.cs" />
-        <Compile Include="..\ScriptedScreensVector\Expression.cs" />
-        <Compile Include="..\ScriptedScreensVector\SceneText.cs" />
-        <Compile Include="..\ScriptedScreensVector\TextNode.cs" />
-        <Compile Include="..\ScriptedScreensVector\RadialFill.cs" />
-        <Compile Include="..\ScriptedScreensVector\MeshBuilder.cs" />
-        <Compile Include="..\ScriptedScreensVector\TextOrder.cs" />
-        <Compile Include="..\ScriptedScreensVector\SceneModel.cs" />
-        <Compile Include="..\ScriptedScreensVector\PathData.cs" />
-        <Compile Include="..\ScriptedScreensVector\Stroke.cs" />
-        <Compile Include="..\ScriptedScreensVector\Shadow.cs" />
-        <Compile Include="..\ScriptedScreensVector\Tessellator.cs" />
-        <Compile Include="..\ScriptedScreensVector\TessellationStats.cs" />
-        <Compile Include="..\ScriptedScreensVector\ColourFilter.cs" />
-        <Compile Include="..\ScriptedScreensVector\ConvexPartition.cs" />
+        <Compile Include="..\Triangulator.cs" />
+        <Compile Include="..\Clip.cs" />
+        <Compile Include="..\Gradient.cs" />
+        <Compile Include="..\Easing.cs" />
+        <Compile Include="..\Expression.cs" />
+        <Compile Include="..\SceneText.cs" />
+        <Compile Include="..\TextNode.cs" />
+        <Compile Include="..\RadialFill.cs" />
+        <Compile Include="..\MeshBuilder.cs" />
+        <Compile Include="..\TextOrder.cs" />
+        <Compile Include="..\SceneModel.cs" />
+        <Compile Include="..\PathData.cs" />
+        <Compile Include="..\Stroke.cs" />
+        <Compile Include="..\Shadow.cs" />
+        <Compile Include="..\Tessellator.cs" />
+        <Compile Include="..\TessellationStats.cs" />
+        <Compile Include="..\ColourFilter.cs" />
+        <Compile Include="..\ConvexPartition.cs" />
         <Compile Include="ImageCacheStub.cs" />
         <Compile Include="RequirementTests.cs" />
         <Compile Include="ScriptedScreensStubs.cs" />
