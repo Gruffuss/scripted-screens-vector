@@ -53,7 +53,8 @@ internal sealed class Gradient
 
     /// <summary>
     /// What happens past the ends of the ramp: 0 pad (hold the end colours), 1 repeat, 2 reflect
-    /// -- SVG `spreadMethod`, CSS `repeating-*-gradient`. Conic gradients already go all the way
+    /// -- SVG `spreadMethod`, CSS `repeating-*-gradient` -- or 3 none, transparent past the
+    /// ends, which is CSS `mask-repeat: no-repeat` on a sized gradient. Conic gradients already go all the way
     /// round and ignore it.
     /// </summary>
     internal int Spread;
@@ -233,7 +234,20 @@ internal sealed class Gradient
 
     internal Color Sample(float t)
     {
+        if (Spread == 3)
+            return t < 0f || t > 1f ? Beyond(t) : SampleWithin(t);
+
         return SampleWithin(Spread == 0 ? t : Wrap(t));
+    }
+
+    /// <summary>Past the ends under `spread = none`: the nearer end colour, fully transparent.</summary>
+    /// <remarks>Keeping the colour rather than going to clear black leaves no dark fringe where
+    /// vertex colours blend across the edge.</remarks>
+    internal Color Beyond(float t)
+    {
+        var colour = SampleWithin(t < 0f ? 0f : 1f);
+        colour.a = 0f;
+        return colour;
     }
 
     /// <summary>A parameter past the ramp's ends brought back into it by <see cref="Spread"/>.</summary>
@@ -306,7 +320,7 @@ internal sealed class Gradient
         {
             // Unclamped under a spread: past 1 the ramp keeps changing, and a triangle spanning
             // several periods must read as spanning them.
-            var t = Spread == 0 ? Mathf.Clamp01(Parameter(point)) : Parameter(point);
+            var t = Spread is 0 ? Mathf.Clamp01(Parameter(point)) : Parameter(point);
             lowest = Mathf.Min(lowest, t);
             highest = Mathf.Max(highest, t);
         }
@@ -382,9 +396,9 @@ internal readonly struct Paint
     }
 
     /// <summary>The ramp's colour at a parameter already brought within 0..1, with this paint's alpha.</summary>
-    internal Color32 AtParameter(float t)
+    internal Color32 AtParameter(float t, bool beyond = false)
     {
-        var colour = Gradient!.SampleWithin(t);
+        var colour = beyond ? Gradient!.Beyond(t) : Gradient!.SampleWithin(t);
         colour.a *= Alpha;
         return colour;
     }

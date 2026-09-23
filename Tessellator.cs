@@ -1275,6 +1275,7 @@ internal static class Tessellator
         // console showing that source and would repeat the whole texture rather than a `uv` crop.
         var tiles = 1;
         var across = 1;
+        var tileStep = Vector2.zero;
         Rect picture;
         var bounds = BoundsOf(box);
 
@@ -1286,26 +1287,23 @@ internal static class Tessellator
         }
         else if (node.ImageTileW != null)
         {
-            var tileW = node.ImageTileW.Evaluate(context);
-            var tileH = node.ImageTileH!.Evaluate(context);
-            if (tileW <= 0f) tileW = natW;
-            if (tileH <= 0f) tileH = natH;
+            var (tileW, tileH) = TileSize(node.ImageTileW.Evaluate(context), node.ImageTileH!.Evaluate(context),
+                natW, natH, w, h, node.ImageTileFit, node.ImageRepeatX, node.ImageRepeatY);
 
-            var anchor = new Rect(x + (w - tileW) * ax + ox, y + (h - tileH) * ay + oy, tileW, tileH);
-            var firstX = anchor.xMin + Mathf.Floor((bounds.xMin - anchor.xMin) / tileW) * tileW;
-            var firstY = anchor.yMin + Mathf.Floor((bounds.yMin - anchor.yMin) / tileH) * tileH;
-            across = Mathf.CeilToInt((bounds.xMax - firstX) / tileW);
-            var down = Mathf.CeilToInt((bounds.yMax - firstY) / tileH);
+            var (firstX, stepX, countX) = TileAxis(node.ImageRepeatX, x, w, bounds.xMin, bounds.xMax, tileW, ax, ox);
+            var (firstY, stepY, countY) = TileAxis(node.ImageRepeatY, y, h, bounds.yMin, bounds.yMax, tileH, ay, oy);
+            across = countX;
 
-            if ((long)across * down > MaxImageTiles)
+            if ((long)countX * countY > MaxImageTiles)
             {
-                scene.Problem($"IMG \"{src}\": tile makes {(long)across * down} tiles, more than {MaxImageTiles}; drawn untiled");
+                scene.Problem($"IMG \"{src}\": tile makes {(long)countX * countY} tiles, more than {MaxImageTiles}; drawn untiled");
                 picture = ImageRect(x, y, w, h, natW, natH, node.ImageFit, ax, ay, ox, oy);
             }
             else
             {
                 picture = new Rect(firstX, firstY, tileW, tileH);
-                tiles = across * down;
+                tileStep = new Vector2(stepX, stepY);
+                tiles = countX * countY;
                 if (tiles <= 0)
                     return;
             }
@@ -1339,20 +1337,45 @@ internal static class Tessellator
         var clipped = new List<Vector2>(box.Count + 8);
         var shapeIndex = -1;
 
-        for (var t = 0; t < tiles; t++)
+        // Every quad the picture is drawn as, with the part of the texture it shows.
+        var pieces = _imagePieces ??= new List<(Rect At, Rect Crop)>(16);
+        pieces.Clear();
+
+        if (node.ImageSlice != null)
         {
-            var at = picture;
-            var pieceCrop = crop;
-            if (node.ImageSlice != null)
+            for (var k = 0; k < 9; k++)
             {
-                if (!SlicePiece(node, t, picture, natW, natH, ref at, ref pieceCrop))
-                    continue;
+                var part = picture;
+                var partCrop = crop;
+                if (SlicePiece(node, k, picture, natW, natH, ref part, ref partCrop))
+                    SliceTiles(node, k, picture, part, partCrop, crop, natW, natH, texW, texH, pieces);
             }
-            else if (tiles > 1)
+
+            if (pieces.Count > MaxImageTiles)
             {
-                at = new Rect(picture.xMin + (t % across) * picture.width, picture.yMin + (t / across) * picture.height,
-                              picture.width, picture.height);
+                scene.Problem($"IMG \"{src}\": srep makes {pieces.Count} pieces, more than {MaxImageTiles}; edges stretched");
+                pieces.Clear();
+                for (var k = 0; k < 9; k++)
+                {
+                    var part = picture;
+                    var partCrop = crop;
+                    if (SlicePiece(node, k, picture, natW, natH, ref part, ref partCrop))
+                        pieces.Add((part, partCrop));
+                }
             }
+        }
+        else
+        {
+            for (var t = 0; t < tiles; t++)
+            {
+                pieces.Add((tiles == 1 ? picture
+                    : new Rect(picture.xMin + (t % across) * tileStep.x, picture.yMin + (t / across) * tileStep.y,
+                               picture.width, picture.height), crop));
+            }
+        }
+
+        foreach (var (at, pieceCrop) in pieces)
+        {
 
             List<Vector2> shape;
             if (at.xMin <= bounds.xMin + 0.001f && at.yMin <= bounds.yMin + 0.001f
@@ -1448,6 +1471,201 @@ internal static class Tessellator
         crop = new Rect(crop.xMin + u0 * crop.width, crop.yMin + v0 * crop.height,
                         (u1 - u0) * crop.width, (v1 - v0) * crop.height);
         return true;
+    }
+
+    /// <summary>
+    /// A tile's size: the `tile` numbers, the picture's own size where both are 0, its aspect kept
+    /// where one is (CSS `background-size: 50px auto`), or fitted to the box for contain/cover.
+    /// Then a `round` axis is stretched so a whole number of tiles fills the box.
+    /// </summary>
+    internal static (float W, float H) TileSize(float tileW, float tileH, int natW, int natH, float boxW, float boxH,
+                                                int fit, int repeatX, int repeatY)
+    {
+        var aspect = natH > 0 ? natW / (float)natH : 1f;
+        float tw, th;
+
+        if (fit != 0)
+        {
+            var scale = fit == 1 ? Mathf.Min(boxW / natW, boxH / natH) : Mathf.Max(boxW / natW, boxH / natH);
+            tw = natW * scale;
+            th = natH * scale;
+        }
+        else if (tileW <= 0f && tileH <= 0f)
+        {
+            tw = natW;
+            th = natH;
+        }
+        else if (tileW <= 0f)
+        {
+            th = tileH;
+            tw = th * aspect;
+        }
+        else if (tileH <= 0f)
+        {
+            tw = tileW;
+            th = tw / aspect;
+        }
+        else
+        {
+            tw = tileW;
+            th = tileH;
+        }
+
+        // `round` rescales so whole tiles fill the box. An axis whose size came from the aspect
+        // follows the rescale, as CSS keeps an `auto` axis in proportion.
+        var autoW = fit == 0 && tileW <= 0f && tileH > 0f;
+        var autoH = fit == 0 && tileH <= 0f && tileW > 0f;
+
+        if (repeatX == 2 && tw > 0f && boxW > 0f)
+        {
+            var rounded = boxW / Mathf.Max(1f, Mathf.Round(boxW / tw));
+            if (autoH && repeatY != 2)
+                th *= rounded / tw;
+            tw = rounded;
+        }
+
+        if (repeatY == 2 && th > 0f && boxH > 0f)
+        {
+            var rounded = boxH / Mathf.Max(1f, Mathf.Round(boxH / th));
+            if (autoW && repeatX != 2)
+                tw *= rounded / th;
+            th = rounded;
+        }
+
+        return (Mathf.Max(0.0001f, tw), Mathf.Max(0.0001f, th));
+    }
+
+    /// <summary>
+    /// Where the tiles along one axis start, how far apart they are and how many there are.
+    /// </summary>
+    /// <remarks>
+    /// `repeat` and `round` run from the anchored copy in both directions until the drawn area is
+    /// covered; `once` is the anchored copy alone; `space` fits as many whole tiles as the box
+    /// holds, first and last against its edges, and falls back to `once` when fewer than two fit.
+    /// </remarks>
+    internal static (float First, float Step, int Count) TileAxis(int mode, float boxStart, float boxLength,
+                                                                  float coverMin, float coverMax, float size, float at, float off)
+    {
+        var anchor = boxStart + (boxLength - size) * at + off;
+
+        if (mode == 3)
+        {
+            var fits = Mathf.FloorToInt(boxLength / size + 0.0001f);
+            if (fits >= 2)
+                return (boxStart, size + (boxLength - fits * size) / (fits - 1), fits);
+
+            mode = 1;
+        }
+
+        if (mode == 1)
+            return (anchor, size, 1);
+
+        var first = anchor + Mathf.Floor((coverMin - anchor) / size) * size;
+        return (first, size, Mathf.Max(0, Mathf.CeilToInt((coverMax - first) / size - 0.0001f)));
+    }
+
+    [ThreadStatic] private static List<(Rect At, Rect Crop)>? _imagePieces;
+
+    /// <summary>
+    /// One nine-slice region, split into tiles when its `srep` mode is not `stretch`.
+    /// </summary>
+    /// <remarks>
+    /// CSS `border-image-repeat`: an edge's tiles keep the source part's proportions at the
+    /// border's width -- the top and bottom edges scale by their own height, the left and right by
+    /// their own width, and the middle takes the top edge's scale across and the left edge's
+    /// down. `repeat` centres the tiles and cuts the ends, `round` resizes them so whole tiles fit,
+    /// `space` spreads whole tiles with even gaps. A tile cut by its region shows the matching
+    /// part of the texture, so nothing is squeezed.
+    /// </remarks>
+    private static void SliceTiles(VecNode node, int index, Rect box, Rect region, Rect regionCrop, Rect crop,
+                                   int natW, int natH, int texW, int texH, List<(Rect At, Rect Crop)> into)
+    {
+        var column = index % 3;
+        var row = index / 3;
+        var modeX = column == 1 ? node.ImageSliceRepeatX : 4;
+        var modeY = row == 1 ? node.ImageSliceRepeatY : 4;
+
+        var texelsW = regionCrop.width * texW;
+        var texelsH = regionCrop.height * texH;
+
+        // Scale from source texels to scene units: this piece's own for an edge, the top (or left)
+        // edge's for the middle.
+        var scaleX = row == 1 ? EdgeScale(node, 1, 7, box, natW, natH, texW, texH, crop, vertical: true)
+            : texelsH > 0f ? region.height / texelsH : 0f;
+        var scaleY = column == 1 ? EdgeScale(node, 3, 5, box, natW, natH, texW, texH, crop, vertical: false)
+            : texelsW > 0f ? region.width / texelsW : 0f;
+
+        if (scaleX <= 0f || texelsW <= 0f)
+            modeX = 4;
+        if (scaleY <= 0f || texelsH <= 0f)
+            modeY = 4;
+
+        if (modeX == 4 && modeY == 4)
+        {
+            into.Add((region, regionCrop));
+            return;
+        }
+
+        var (firstX, stepX, countX, sizeX) = SliceAxis(modeX, region.xMin, region.width, texelsW * scaleX);
+        var (firstY, stepY, countY, sizeY) = SliceAxis(modeY, region.yMin, region.height, texelsH * scaleY);
+
+        for (var j = 0; j < countY; j++)
+        {
+            for (var i = 0; i < countX; i++)
+            {
+                var tile = new Rect(firstX + i * stepX, firstY + j * stepY, sizeX, sizeY);
+                var x0 = Mathf.Max(tile.xMin, region.xMin);
+                var x1 = Mathf.Min(tile.xMax, region.xMax);
+                var y0 = Mathf.Max(tile.yMin, region.yMin);
+                var y1 = Mathf.Min(tile.yMax, region.yMax);
+                if (x1 - x0 <= 0.0001f || y1 - y0 <= 0.0001f)
+                    continue;
+
+                var u0 = (x0 - tile.xMin) / tile.width;
+                var u1 = (x1 - tile.xMin) / tile.width;
+                var v0 = (y0 - tile.yMin) / tile.height;
+                var v1 = (y1 - tile.yMin) / tile.height;
+                into.Add((Rect.MinMaxRect(x0, y0, x1, y1),
+                    new Rect(regionCrop.xMin + u0 * regionCrop.width, regionCrop.yMin + v0 * regionCrop.height,
+                             (u1 - u0) * regionCrop.width, (v1 - v0) * regionCrop.height)));
+            }
+        }
+    }
+
+    /// <summary>The scale of the first usable of two edge pieces, along the axis across the edge.</summary>
+    private static float EdgeScale(VecNode node, int first, int second, Rect box, int natW, int natH, int texW, int texH,
+                                   Rect crop, bool vertical)
+    {
+        foreach (var index in new[] { first, second })
+        {
+            var region = box;
+            var pieceCrop = crop;
+            if (!SlicePiece(node, index, box, natW, natH, ref region, ref pieceCrop))
+                continue;
+
+            var texels = vertical ? pieceCrop.height * texH : pieceCrop.width * texW;
+            var length = vertical ? region.height : region.width;
+            if (texels > 0f && length > 0f)
+                return length / texels;
+        }
+
+        return 0f;
+    }
+
+    /// <summary>Tiles along one axis of a nine-slice region: first, step, count and tile size.</summary>
+    internal static (float First, float Step, int Count, float Size) SliceAxis(int mode, float start, float length, float size)
+    {
+        if (mode == 4 || size <= 0f)
+            return (start, length, 1, length);
+
+        if (mode == 2)
+            size = length / Mathf.Max(1f, Mathf.Round(length / size));
+
+        // Repeat is centred on the region, as CSS centres border-image tiles. Round fills it with
+        // whole tiles, so they start at its edge; centring an even count would cut both ends.
+        var (first, step, count) = TileAxis(mode == 3 ? 3 : 0, start, length, start, start + length, size,
+                                            mode == 2 ? 0f : 0.5f, 0f);
+        return (first, step, count, size);
     }
 
     /// <summary>Tiles one `IMG` may draw; past it the picture is drawn once and a problem logged.</summary>
@@ -3154,8 +3372,16 @@ internal static class Tessellator
         // triangle covers plus each period's edge, where `repeat` jumps back to the first colour.
         var cuts = _bandCuts ??= new List<float>(16);
         cuts.Clear();
-        var spread = gradient.Spread != 0 && Mathf.Floor(high) - Mathf.Floor(low) < MaxSpreadPeriods;
-        if (spread)
+        var spread = gradient.Spread is 1 or 2 && Mathf.Floor(high) - Mathf.Floor(low) < MaxSpreadPeriods;
+        var clear = gradient.Spread == 3;
+        if (clear)
+        {
+            // `spread = none`: the ramp's ends are hard edges into transparency, so cut there too.
+            cuts.Add(0f);
+            cuts.AddRange(gradient.Positions);
+            cuts.Add(1f);
+        }
+        else if (spread)
         {
             for (var period = Mathf.Floor(low); period <= high; period++)
             {
@@ -3187,7 +3413,9 @@ internal static class Tessellator
             // Which period this band is in, so its vertices are coloured within it: the vertex
             // on a `repeat` seam belongs to the end of one period and the start of the next,
             // and sampling it by position alone would give both bands the first colour.
-            var period = spread ? Mathf.Floor((Mathf.Max(from, low) + Mathf.Min(to, high)) * 0.5f) : 0f;
+            var middle = (Mathf.Max(from, low) + Mathf.Min(to, high)) * 0.5f;
+            var period = spread ? Mathf.Floor(middle) : 0f;
+            var outside = clear && (middle < 0f || middle > 1f);
 
             input.Clear(); inputT.Clear();
             input.Add(a); input.Add(b); input.Add(c);
@@ -3204,7 +3432,10 @@ internal static class Tessellator
             var origin = vh.currentVertCount;
             for (var j = 0; j < input.Count; j++)
             {
-                var colour = spread ? paint.AtParameter(Local(inputT[j] - period, period)) : paint.At(input[j]);
+                var colour = spread ? paint.AtParameter(Local(inputT[j] - period, period))
+                    : outside ? paint.AtParameter(middle, beyond: true)
+                    : clear ? paint.AtParameter(inputT[j])
+                    : paint.At(input[j]);
                 vh.AddVert(matrix.MultiplyPoint3x4(input[j]), colour, Vector2.zero);
             }
             for (var j = 1; j + 1 < input.Count; j++)

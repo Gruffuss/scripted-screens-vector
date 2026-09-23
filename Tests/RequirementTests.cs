@@ -323,6 +323,13 @@ internal static class RequirementTests
             $"{tiledMesh.currentVertCount} verts, x {tMinX:0.##}..{tMaxX:0.##}");
         run.Check("tile: a cut tile shows the matching part of the picture", leftEdgeU, "");
 
+        // rep per axis: one column, repeated down: four quads.
+        var column = SceneParser.Parse(SceneText.ToProps("SCENE w=200 h=100 fit=stretch\nIMG x=0 y=0 w=200 h=100 src=test:pic tile=[50,25] at=[0,0] rep=[\"once\",\"repeat\"]", "rep")!)!;
+        var columnMesh = new MeshBuilder();
+        Tessellator.Emit(columnMesh, column, new EvalContext(), new Rect(0f, 0f, 200f, 100f), 1f, true, new TessellationStats());
+        run.Check("tile: rep once across, repeat down, is one column", columnMesh.currentVertCount == 16 && column.Problems.Count == 0,
+            $"{columnMesh.currentVertCount} verts, problems [{string.Join("; ", column.Problems)}]");
+
         // Nine-slice on the 64x32 picture: 8-texel insets drawn 10 units wide on a 200x100 box.
         MeshBuilder Sliced(string extra)
         {
@@ -348,6 +355,44 @@ internal static class RequirementTests
         run.Check("slice: mid=0 leaves the middle out", Sliced("bw=[10,10,10,10] mid=0").currentVertCount == 32, "");
         run.Check("slice: borders wider than the box are scaled down together, and the rows meet",
             Sliced("bw=[60,60,60,60]").currentVertCount == 24, $"{Sliced("bw=[60,60,60,60]").currentVertCount} verts");
+
+        // Tile sizes: a 64x32 picture. One axis at 0 keeps the aspect, CSS `50px auto`.
+        bool Near((float W, float H) got, float w, float h) => Mathf.Abs(got.W - w) < 0.01f && Mathf.Abs(got.H - h) < 0.01f;
+        var autoH = Tessellator.TileSize(50f, 0f, 64, 32, 200f, 100f, 0, 0, 0);
+        var autoW = Tessellator.TileSize(0f, 25f, 64, 32, 200f, 100f, 0, 0, 0);
+        run.Check("tile size: one axis at 0 keeps the picture's aspect", Near(autoH, 50f, 25f) && Near(autoW, 50f, 25f), $"{autoH} / {autoW}");
+
+        var contain = Tessellator.TileSize(0f, 0f, 64, 32, 200f, 50f, 1, 0, 0);
+        var cover = Tessellator.TileSize(0f, 0f, 64, 32, 200f, 50f, 2, 0, 0);
+        run.Check("tile size: contain and cover fit the box", Near(contain, 100f, 50f) && Near(cover, 200f, 100f), $"{contain} / {cover}");
+
+        // round: 200 wide holds 3.33 tiles of 60, so 3 of 66.67; an auto height follows.
+        var rounded = Tessellator.TileSize(60f, 30f, 64, 32, 200f, 100f, 0, 2, 0);
+        var roundedAuto = Tessellator.TileSize(60f, 0f, 64, 32, 200f, 100f, 0, 2, 0);
+        run.Check("tile size: round fits whole tiles, an auto axis in proportion",
+            Near(rounded, 66.667f, 30f) && Near(roundedAuto, 66.667f, 33.333f), $"{rounded} / {roundedAuto}");
+
+        // Axes: 200 wide, 60 per tile.
+        var spaced = Tessellator.TileAxis(3, 0f, 200f, 0f, 200f, 60f, 0.5f, 0f);
+        run.Check("tile axis: space puts whole tiles edge to edge with even gaps",
+            Mathf.Abs(spaced.First) < 0.001f && Mathf.Abs(spaced.Step - 70f) < 0.001f && spaced.Count == 3, $"{spaced}");
+        var once = Tessellator.TileAxis(1, 0f, 200f, 0f, 200f, 50f, 0.5f, 0f);
+        run.Check("tile axis: once is the anchored copy alone", Mathf.Abs(once.First - 75f) < 0.001f && once.Count == 1, $"{once}");
+        var lonely = Tessellator.TileAxis(3, 0f, 200f, 0f, 200f, 150f, 0f, 0f);
+        run.Check("tile axis: space with room for one falls back to once", lonely.Count == 1 && Mathf.Abs(lonely.First) < 0.001f, $"{lonely}");
+
+        // srep: 8-texel slices drawn 8 wide, so edge tiles are 48 long in a 180-long edge.
+        // repeat: 5 across (centred, both ends cut) on top, bottom and middle; left/right stretched.
+        run.Check("srep: stretch is nine pieces", Sliced("bw=[8,8,8,8]").currentVertCount == 36, "");
+        run.Check("srep: repeat centres whole tiles and cuts the ends",
+            Sliced("bw=[8,8,8,8] srep=[\"repeat\",\"stretch\"]").currentVertCount == 21 * 4,
+            $"{Sliced("bw=[8,8,8,8] srep=[\"repeat\",\"stretch\"]").currentVertCount / 4} pieces");
+        run.Check("srep: round resizes so whole tiles fit",
+            Sliced("bw=[8,8,8,8] srep=[\"round\",\"stretch\"]").currentVertCount == 18 * 4,
+            $"{Sliced("bw=[8,8,8,8] srep=[\"round\",\"stretch\"]").currentVertCount / 4} pieces");
+        run.Check("srep: space spreads whole tiles",
+            Sliced("bw=[8,8,8,8] srep=[\"space\",\"stretch\"]").currentVertCount == 15 * 4,
+            $"{Sliced("bw=[8,8,8,8] srep=[\"space\",\"stretch\"]").currentVertCount / 4} pieces");
 
         // smp=point asks the cache for a texture of its own, so the smooth one is untouched.
         var pixelated = SceneParser.Parse(SceneText.ToProps("SCENE w=200 h=100\nIMG w=200 h=100 src=test:pic smp=point", "px")!)!;

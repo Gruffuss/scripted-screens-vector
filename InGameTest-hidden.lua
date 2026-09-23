@@ -25,7 +25,7 @@ local size = ui:size()
 local W, H = 480, 480
 if size then W, H = size.w, size.h end
 
-local PICTURE = "https://raw.githubusercontent.com/Gruffuss/scripted-screens-vector/main/ScriptedScreensVector/About/thumb.png"
+local PICTURE = "https://raw.githubusercontent.com/Gruffuss/scripted-screens-vector/09be911193cecfd8cc5a624c6bb55febad26f921/ScriptedScreensVector/About/thumb.png"
 
 local data
 

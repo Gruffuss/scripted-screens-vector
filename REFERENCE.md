@@ -811,11 +811,13 @@ Catmull-Rom, so the curve passes **through** its points rather than being pulled
 | `uv` | `{u0, v0, u1, v1}`: the part of the picture shown, fractions of the texture, **v from the top**; default `{0, 0, 1, 1}` |
 | `at` | `{ax, ay}`: where the picture sits in the room `fit` leaves it, fractions of the free space; default `{0.5, 0.5}` (centred), CSS `object-position` |
 | `off` | `{ox, oy}`: scene units added after `at` has placed the picture, under every `fit`; default `{0, 0}` |
-| `tile` | `{tw, th}`: repeat the picture at that size across the box, from where `at`/`off` place one; `0` is its natural size (one scene unit per texel). `fit` does not apply |
+| `tile` | `{tw, th}`: repeat the picture at that size across the box, from where `at`/`off` place one. Both `0` is the natural size (one scene unit per texel); one `0` keeps the picture's aspect. `"contain"` or `"cover"` sizes it to the box. `fit` does not apply |
+| `rep` | with `tile`: `repeat` (default), `once`, `round` or `space`, one word for both axes or `{x, y}` -- CSS `background-repeat` |
 | `smp` | `point` for hard-edged pixels (CSS `image-rendering: pixelated`); default smooth |
 | `slice` | `{t, r, b, l}`: nine-slice insets in texels of the picture (of the `uv` crop, if any) |
 | `bw` | `{t, r, b, l}`: how wide those borders are drawn, in scene units; default the `slice` numbers |
 | `mid` | `0` leaves a nine-slice's middle undrawn; default `1` |
+| `srep` | how a nine-slice's edges and middle fill their length: `stretch` (default), `repeat`, `round` or `space`, one word or `{across, down}` -- CSS `border-image-repeat` |
 
 ```
 IMG x=10 y=10 w=80 h=45 src=https://example.com/map.png fit=cover rx=6
@@ -850,6 +852,13 @@ and the edge ones are cut by the box and its corner radii. With `uv` the cropped
 repeats. Each copy is a quad, so a box of small tiles costs vertices; past 4096 tiles the
 picture is drawn once and the scene reports why.
 
+**`rep` chooses how each axis repeats**, as CSS `background-repeat` does. `once` is the anchored
+copy alone, so `rep = { "repeat", "once" }` is a single row (`repeat-x`), and `tile` with `once`
+on both axes is simply a picture at an explicit size. `round` resizes the tiles so a whole number
+fills the box, a `0` axis following in proportion. `space` lays as many whole tiles as fit,
+first and last against the box's edges, with even gaps between; where fewer than two fit it
+behaves as `once`.
+
 **`smp = point`** keeps pixel art square at any size. The pixelated picture is loaded as a
 texture of its own, once per session, so the same source drawn smooth elsewhere is unaffected.
 
@@ -861,6 +870,13 @@ from its edges, the corners drawn `bw` wide, the edges stretched between them an
 stretched both ways. It covers the box itself, so `fit`, `at`, `off` and `tile` do not apply.
 Borders that add up to more than the box are scaled down together, as in CSS. CSS draws the
 middle only with `fill`; here it is drawn unless `mid = 0`.
+
+**`srep` tiles the edges instead of stretching them**, CSS `border-image-repeat`. An edge's
+tiles keep the source part's proportions at the border's width; the middle takes the top
+edge's scale across and the left edge's down. `repeat` centres the tiles and cuts the ones at
+the ends, `round` resizes them so whole tiles fit exactly, and `space` spreads whole tiles with
+even gaps. The first word is the top and bottom edges and the middle across; the second the
+left and right edges and the middle down.
 
 ```
 IMG x=10 y=10 w=180 h=60 src=file:///panel.png slice=[12,12,12,12] bw=[6,6,6,6]
@@ -1117,7 +1133,7 @@ Without feathering every edge is hard — UGUI applies no antialiasing of its ow
 | `x1`, `y1`, `x2`, `y2` | the ramp axis |
 | `units` | omitted for scene coordinates, `"bbox"` for shape-relative |
 | `stops` | array of `{ position, colour }`, position `0..1` |
-| `spread` | past the ends of the ramp: `pad` (default, hold the end colours), `repeat`, `reflect` |
+| `spread` | past the ends of the ramp: `pad` (default, hold the end colours), `repeat`, `reflect`, `none` (transparent) |
 
 ### `GR` — radial gradient
 
@@ -1154,6 +1170,10 @@ and forth. A linear one is exact, the seams of `repeat` included, because the sh
 every stop of every period; a radial one draws more rings the more periods it covers. Stripes
 cost vertices in proportion to how many fit in the shape. A `mask` takes it too. A conic
 gradient already goes all the way round and ignores it.
+
+**`spread = none`** is transparent past the ramp's ends, with a hard edge at each: a sized
+gradient that covers only part of the shape, CSS `mask-repeat: no-repeat`. It keeps the end
+colour at zero alpha rather than fading to black, so no dark fringe appears at the edge.
 
 Gradients are baked into vertex colours. A two-stop linear gradient is exact; multi-stop and
 radial are subdivided automatically, and radial fills as concentric bands so vertices land at

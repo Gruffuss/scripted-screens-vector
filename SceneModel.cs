@@ -110,11 +110,28 @@ internal sealed class VecNode
 
     internal Expression? ImageTileH;
 
+    /// <summary>`tile = "contain"` (1) or `"cover"` (2): the tile's size fitted to the box. 0 for a size.</summary>
+    internal int ImageTileFit;
+
+    /// <summary>`rep = { x, y }` per axis: 0 repeat, 1 once, 2 round, 3 space -- CSS background-repeat.</summary>
+    internal int ImageRepeatX;
+
+    internal int ImageRepeatY;
+
     /// <summary>`slice = { t, r, b, l }`: nine-slice insets in texels of the (cropped) picture. Null unsliced.</summary>
     internal float[]? ImageSlice;
 
     /// <summary>`bw = { t, r, b, l }`: the drawn border widths in scene units; defaults to the slice.</summary>
     internal float[]? ImageBorder;
+
+    /// <summary>
+    /// `srep = { h, v }`: how a nine-slice's edges and middle fill their length, CSS
+    /// `border-image-repeat` -- 4 stretch (default), 0 repeat, 2 round, 3 space. `h` is the top and
+    /// bottom edges and the middle across; `v` the left and right edges and the middle down.
+    /// </summary>
+    internal int ImageSliceRepeatX = 4;
+
+    internal int ImageSliceRepeatY = 4;
 
     /// <summary>`mid = 0` leaves a nine-slice's middle undrawn, CSS border-image without `fill`.</summary>
     internal bool ImageMiddle = true;
@@ -990,7 +1007,7 @@ internal static class SceneParser
         "grad", "at", "units", "spread", "stops", "fx", "fy",
         "text", "size", "align", "valign", "font", "weight", "cspace", "fit", "min_size",
         "fmt", "unit", "missing", "wrap", "lh",
-        "fat", "sat", "m", "bri", "con", "hue", "gray", "sep", "inv", "mask", "sov", "src", "fl", "uv", "v", "at", "off", "tile", "smp", "slice", "bw", "mid", "ow", "oc",
+        "fat", "sat", "m", "bri", "con", "hue", "gray", "sep", "inv", "mask", "sov", "src", "fl", "uv", "v", "at", "off", "tile", "rep", "srep", "smp", "slice", "bw", "mid", "ow", "oc",
     };
 
     private static void Validate(SS.UiProp[] map, VecScene scene, string? op, string? id)
@@ -1293,6 +1310,17 @@ internal static class SceneParser
                         node.ImageSlice = slice;
                         node.ImageBorder = border;
                         node.ImageMiddle = PropNumber(map, "mid", 1f) > 0.5f;
+
+                        var srep = PropValue(map, "srep");
+                        if (srep is { Type: SS.UiValueType.String })
+                        {
+                            node.ImageSliceRepeatX = node.ImageSliceRepeatY = RepeatMode(srep.Value.String, scene);
+                        }
+                        else if (srep is { Type: SS.UiValueType.Array, Array: { Length: 2 } modes })
+                        {
+                            node.ImageSliceRepeatX = RepeatMode(modes[0].String, scene);
+                            node.ImageSliceRepeatY = RepeatMode(modes[1].String, scene);
+                        }
                     }
                     else
                     {
@@ -1302,8 +1330,28 @@ internal static class SceneParser
 
                 if (HasKey(map, "tile"))
                 {
-                    node.ImageTileW = Pair(map, "tile", 0, 0f);
-                    node.ImageTileH = Pair(map, "tile", 1, 0f);
+                    var fit = PropString(map, "tile");
+                    node.ImageTileFit = fit?.ToUpperInvariant() switch
+                    {
+                        "CONTAIN" => 1,
+                        "COVER" => 2,
+                        _ => 0,
+                    };
+
+                    node.ImageTileW = node.ImageTileFit != 0 ? Expression.Constant(0f) : Pair(map, "tile", 0, 0f);
+                    node.ImageTileH = node.ImageTileFit != 0 ? Expression.Constant(0f) : Pair(map, "tile", 1, 0f);
+
+                    // One word for both axes, or one per axis.
+                    var rep = PropValue(map, "rep");
+                    if (rep is { Type: SS.UiValueType.String })
+                    {
+                        node.ImageRepeatX = node.ImageRepeatY = RepeatMode(rep.Value.String, scene);
+                    }
+                    else if (rep is { Type: SS.UiValueType.Array, Array: { Length: 2 } both })
+                    {
+                        node.ImageRepeatX = RepeatMode(both[0].String, scene);
+                        node.ImageRepeatY = RepeatMode(both[1].String, scene);
+                    }
                 }
 
                 if (HasKey(map, "uv"))
@@ -1579,6 +1627,7 @@ internal static class SceneParser
                     {
                         "REPEAT" => 1,
                         "REFLECT" => 2,
+                        "NONE" => 3,
                         _ => 0,
                     };
                     var slots = new GradientSlots();
@@ -1984,6 +2033,28 @@ internal static class SceneParser
             parts.Add(TextPart.Text(body[at..]));
 
         return parts.ToArray();
+    }
+
+    private static int RepeatMode(string? word, VecScene scene)
+    {
+        switch (word?.ToUpperInvariant())
+        {
+            case null:
+            case "REPEAT":
+                return 0;
+            case "ONCE":
+            case "NO-REPEAT":
+                return 1;
+            case "ROUND":
+                return 2;
+            case "SPACE":
+                return 3;
+            case "STRETCH":
+                return 4;
+            default:
+                scene.Problem($"IMG: \"{word}\" is not repeat, once, round, space or stretch");
+                return 0;
+        }
     }
 
     private static (string Name, Expression? Index) SplitBinding(string body)
