@@ -638,6 +638,24 @@ internal static class SceneParser
         return merged.ToArray();
     }
 
+    /// <summary>
+    /// A data string as a colour: anything Unity's parser takes, plus `transparent` and `none`,
+    /// which CSS writes constantly and which used to leave `f = "$name"` unresolved -- drawn
+    /// magenta -- rather than invisible.
+    /// </summary>
+    private static bool DataColour(string text, out Color colour)
+    {
+        if (string.Equals(text, "transparent", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(text, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            colour = new Color(0f, 0f, 0f, 0f);
+            return true;
+        }
+
+        colour = default;
+        return text.Length > 0 && ColorUtility.TryParseHtmlString(text, out colour);
+    }
+
     internal static void ReadData(SS.UiProp[] props, EvalContext into)
     {
         into.Scalars.Clear();
@@ -671,8 +689,7 @@ internal static class SceneParser
                     // clears a label -- where skipping it left the previous text showing.
                     into.Strings[entry.Key] = entry.Value.String;
 
-                    if (entry.Value.String.Length > 0
-                        && ColorUtility.TryParseHtmlString(entry.Value.String, out var dataColour))
+                    if (DataColour(entry.Value.String, out var dataColour))
                         into.Colours[entry.Key] = dataColour;
 
                     break;
@@ -697,7 +714,7 @@ internal static class SceneParser
 
                             // Stored as both, exactly as a scalar string is: a scene may want
                             // to paint with "#FF0000" and another to print it.
-                            if (ColorUtility.TryParseHtmlString(text[i], out var parsed))
+                            if (DataColour(text[i], out var parsed))
                             {
                                 colours[i] = parsed;
                                 anyColour = true;

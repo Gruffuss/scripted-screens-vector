@@ -65,6 +65,14 @@ internal static class VectorElementPatch
 
             ReportProbe(element);
 
+            // The fallback Image occupies the host's one Graphic slot. Make it invisible rather
+            // than destroying it -- ScriptedScreens re-adds it on every upsert. Done for every
+            // vector element: a data-only one used to keep ScriptedScreens' default grey, which
+            // showed as a grey square wherever the data element was placed on screen.
+            var fallback = host.GetComponent<Image>();
+            if (fallback != null)
+                fallback.color = Color.clear;
+
             var sceneId = ReadString(element.Props, "scene") ?? element.Id;
 
             // Keyed by BOARD as well as surface and scene. Every console names its
@@ -132,12 +140,6 @@ internal static class VectorElementPatch
         var scene = SceneParser.Parse(props);
         if (scene == null)
             return;
-
-        // The fallback Image occupies the host's one Graphic slot. Make it invisible
-        // rather than destroying it — ScriptedScreens re-adds it on every upsert.
-        var fallback = host.GetComponent<Image>();
-        if (fallback != null)
-            fallback.color = Color.clear;
 
         var graphic = EnsureSurface(host);
 

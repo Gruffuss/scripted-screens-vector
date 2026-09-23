@@ -2,6 +2,11 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.36
+
+- A data colour may be `transparent` or `none`. They used to be stored as text only, so a `f = "$name"` sent either was reported unresolved and drawn magenta.
+- Fixed: an element carrying only data kept ScriptedScreens' default grey background, which showed as a grey square wherever it was placed on screen.
+
 ## 0.11.35
 
 - A group whose only animation is its own `o` over `t` -- a blinking status dot -- is drawn once and faded by its renderer every frame, so it costs no redraws at all. It takes one extra draw call per such group. Groups that move, hold text, sit inside a repeat, or whose `o` reads data redraw as before.

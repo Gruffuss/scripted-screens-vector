@@ -202,6 +202,28 @@ internal static class RequirementTests
         run.Check("data: an empty string is a value", empty.Strings.TryGetValue("z", out var cleared) && cleared == "",
             string.Join(",", empty.Strings));
 
+        // CSS's `transparent` is a colour, not an unresolved name drawn magenta.
+        var clear = new EvalContext();
+        SceneParser.ReadData(new[]
+        {
+            new ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem.UiProp
+            {
+                Key = "data", Value = new()
+                {
+                    Type = ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem.UiValueType.Map,
+                    Map = new[]
+                    {
+                        new ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem.UiProp
+                        {
+                            Key = "f", Value = new() { Type = ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem.UiValueType.String, String = "transparent" },
+                        },
+                    },
+                },
+            },
+        }, clear);
+        run.Check("data: transparent is a colour with no alpha", clear.Colours.TryGetValue("f", out var none) && none.a == 0f,
+            string.Join(",", clear.Colours));
+
         // A name that changes kind under `keep` must lose its old kind: a string is looked up
         // before a number, so a stale string hid every later number.
         parked.MergeFrom(empty);
