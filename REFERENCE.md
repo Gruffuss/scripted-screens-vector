@@ -1049,8 +1049,8 @@ as one: ScriptedScreens drops repeats that close together.
 
 CSS `box-shadow` semantics and order: the shape offset by `dx`/`dy`, grown by `spread`,
 filled with the colour, blurred with a Gaussian whose sigma is **half** the blur radius,
-drawn beneath the shape. Several compose in declaration order. A single shadow may be
-written unwrapped.
+drawn beneath the shape. Several stack as CSS stacks them, **the first on top**. A single
+shadow may be written unwrapped.
 
 **Shadows fade with their shape**: the group's `o` and the shape's `fo` multiply into the shadow,
 as CSS `opacity` takes a box-shadow with its box. Before 0.11.21 they did not, and a faded card
@@ -1223,6 +1223,14 @@ colour at zero alpha rather than fading to black, so no dark fringe appears at t
 Gradients are baked into vertex colours. A two-stop linear gradient is exact; multi-stop and
 radial are subdivided automatically, and radial fills as concentric bands so vertices land at
 even gradient parameters.
+
+**Between vertices the colour blends in linear light**, because the game renders in linear
+colour space; the stops themselves are exact. So the middle of a two-stop ramp is lighter than a
+browser's, which blends the stored sRGB values: `#5FD9A8` to `#2E8B6E` measures `(75, 183, 142)`
+at its midpoint in game, where CSS gives `(70, 178, 139)`. To follow a CSS ramp closely, add
+intermediate stops sampled the CSS way: a stop every eighth of the ramp takes that example to
+within a tenth of a level, and even black to white needs a stop every sixteenth to come within
+about one level (every eighth leaves ~5).
 
 **A radial fill is the most expensive thing in the format**, so it is worth knowing what it
 costs. Band count follows the shape's on-screen radius, its stop count, and — since 0.10.3 —

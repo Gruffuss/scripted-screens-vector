@@ -4,6 +4,7 @@ ScriptedScreens Vector, newest first.
 
 ## 0.11.36
 
+- Fixed: several box shadows (`sh`) stacked in reverse, the last one on top. They now stack as CSS does and as text shadows here always did, the first on top. A scene that listed its shadows to suit the old order shows them the other way round.
 - `since($name)` in expressions: seconds since that data name last arrived, so motion started by an event -- a jump, a flash, a slide-in -- is one payload and the scene draws the rest.
 - Text placeholders may be expressions: `{=expr}` or `{=expr:%.1f}`, so a clock or a counter needs no payloads.
 - `hover` and `down` in expressions: 1 while the pointer is over, or held on, a clickable node in the nearest node with an `id` around the expression, for CSS-style `:hover` and `:active` with nothing sent.

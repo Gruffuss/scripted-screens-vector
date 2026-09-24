@@ -2094,8 +2094,11 @@ internal static class Tessellator
 
         var opacity = ShadowOpacity(node, context, frame);
 
-        foreach (var shadow in node.Shadows)
+        // CSS paints the first shadow on top, so the list is drawn last to first. It was drawn in
+        // list order, the reverse of CSS and of text shadows here.
+        for (var k = node.Shadows.Length - 1; k >= 0; k--)
         {
+            var shadow = node.Shadows[k];
             if (!shadow.Inset)
                 Shadow.Emit(vh, outline, Faded(shadow, opacity), frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
         }
@@ -2134,8 +2137,10 @@ internal static class Tessellator
 
         var opacity = ShadowOpacity(node, context, frame);
 
-        foreach (var shadow in node.Shadows)
+        // First on top, as for outset shadows.
+        for (var k = node.Shadows.Length - 1; k >= 0; k--)
         {
+            var shadow = node.Shadows[k];
             if (!shadow.Inset)
                 continue;
 
