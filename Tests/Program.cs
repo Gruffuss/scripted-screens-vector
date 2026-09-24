@@ -171,6 +171,8 @@ internal static class Program
         RequirementTests.TextTemplate(run);
         RequirementTests.AnimatedReached(run);
         RequirementTests.PressRegions(run);
+        RequirementTests.EventMotion(run);
+        RequirementTests.PointerScope(run);
         EasingTests.Curves(run);
         EasingTests.Payload(run);
 

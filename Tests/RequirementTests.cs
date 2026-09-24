@@ -462,6 +462,75 @@ internal static class RequirementTests
         run.Check("animated: a placeholder index reading t counts", Drew("T w=50 h=10 text=\"{$rows[mod(floor(t),4)]}\""), "");
     }
 
+    /// <summary>`since($name)`, `{=expr}` placeholders and eased colours.</summary>
+    internal static void EventMotion(TestRun run)
+    {
+        var context = new EvalContext { Clock = 12.5f, Time = 2.5f };
+        context.ArrivedAt["jump"] = 10f;
+        var since = Expression.Parse("=since($jump)", 0f);
+        var never = Expression.Parse("=since($other)", 0f);
+        run.Check("since: seconds since the name arrived", Mathf.Abs(since.Evaluate(context) - 2.5f) < 0.0001f,
+            $"{since.Evaluate(context)}");
+        run.Check("since: a name never sent reads as long ago", never.Evaluate(context) >= 1e5f, $"{never.Evaluate(context)}");
+        run.Check("since: it animates, and is not a pure clock", since.UsesTime && !since.ReadsOnlyTime(), "");
+
+        var node = new VecNode { TextMissing = "--" };
+        node.TextParts = SceneParser.TextTemplate("T+{=floor(t*60):%d} s, {=2.5*$k:%.1f}", null);
+        context.Scalars["k"] = 3f;
+        var printed = Tessellator.BindTemplate(node, context, new VecScene(), 0);
+        run.Check("text: {=expr} prints a computed value through its format", printed == "T+150 s, 7.5", printed);
+
+        var drawn = SceneParser.Parse(SceneText.ToProps("SCENE w=100 h=100\nT w=50 h=10 text=\"{=floor(t)}\"", "clock")!)!;
+        run.Check("text: a {=expr} over t makes the scene animated", drawn.UsesTime, "");
+
+        context.Colours["c"] = Color.white;
+        context.PreviousColours["c"] = Color.black;
+        context.NameBlend["c"] = 0.5f;
+        context.Colour("c", out var halfway);
+        context.Colours["d"] = Color.red;
+        context.Colour("d", out var plain);
+        run.Check("colour ease: an eased colour glides; others are exact",
+            Mathf.Abs(halfway.r - 0.5f) < 0.001f && plain == Color.red, $"{halfway} / {plain}");
+    }
+
+    /// <summary>`hover` and `down` answer to the nearest node with an id, the node itself or its group.</summary>
+    internal static void PointerScope(TestRun run)
+    {
+        const string Src = "SCENE w=200 h=100 fit=stretch\n"
+                           + "G id=btn {\n R id=box click=1 x=10 y=10 w=40 h=20\n T x==100+hover*50 y=10 w=30 h=10 text=label\n}\n"
+                           + "R id=other click=1 x==100+down*50 y=50 w=10 h=10";
+
+        (float Probe, float Other, TessellationStats Stats) Draw(string[]? hover, string[]? down)
+        {
+            var scene = SceneParser.Parse(SceneText.ToProps(Src, "ptr")!)!;
+            var context = new EvalContext { HoverScope = hover, DownScope = down };
+            var stats = new TessellationStats();
+            Tessellator.Emit(new MeshBuilder(), scene, context, new Rect(0f, 0f, 200f, 100f), 1f, true, stats);
+            // The label has no id of its own, so its scope is the button's group. Its box starts
+            // at x = 100 idle and 150 when the button is hovered (canvas = scene units here).
+            return (stats.Text[0].Rect.xMin, stats.Hits.Find(h => h.Id == "other").Rect.xMin, stats);
+        }
+
+        var idle = Draw(null, null);
+        var box = idle.Stats.Hits.Find(h => h.Id == "box");
+        run.Check("pointer: a hit region carries the ids above it",
+            box.Scope != null && string.Join("/", box.Scope) == "btn/box", box.Scope == null ? "null" : string.Join("/", box.Scope));
+
+        var over = Draw(box.Scope, null);
+        run.Check("pointer: hovering the button's box lights everything in the button's group",
+            Mathf.Abs(idle.Probe - 100f) < 0.01f && Mathf.Abs(over.Probe - 150f) < 0.01f, $"{idle.Probe} -> {over.Probe}");
+        run.Check("pointer: and nothing outside it", Mathf.Abs(over.Other - 100f) < 0.01f, $"{over.Other}");
+
+        var held = Draw(null, new[] { "other" });
+        run.Check("pointer: down answers to the node held", Mathf.Abs(held.Other - 150f) < 0.01f && Mathf.Abs(held.Probe - 100f) < 0.01f,
+            $"other {held.Other}, probe {held.Probe}");
+
+        var scene2 = SceneParser.Parse(SceneText.ToProps(Src, "ptr")!)!;
+        var plain = SceneParser.Parse(SceneText.ToProps("SCENE w=10 h=10\nR id=a click=1 w=5 h=5", "plain")!)!;
+        run.Check("pointer: only a scene that reads hover or down redraws on pointer moves",
+            scene2.UsesPointer && !plain.UsesPointer, "");
+    }
+
     /// <summary>`press = 1` makes a node clickable and marks its hit region for press events.</summary>
     internal static void PressRegions(TestRun run)
     {

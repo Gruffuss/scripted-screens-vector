@@ -351,6 +351,9 @@ internal sealed class VecScene
     internal List<VecNode> Root = new();
     internal bool UsesTime;
 
+    /// <summary>Some expression reads `hover` or `down`, so pointer movement over a clickable node redraws.</summary>
+    internal bool UsesPointer;
+
     internal bool UsesScroll;
 
     /// <summary>
@@ -510,6 +513,8 @@ internal static class SceneParser
         if (root == null || root.Value.Type != SS.UiValueType.Array)
             return null;
 
+        Expression.SawPointer = false;
+
         var scene = new VecScene
         {
             Id = PropString(props, "scene") ?? string.Empty,
@@ -539,6 +544,7 @@ internal static class SceneParser
         // A clip or gradient that animates is as much a reason to rebuild as a node that does.
         scene.UsesTime |= scene.DefsUseTime;
         scene.UsesScroll |= scene.DefsUseScroll;
+        scene.UsesPointer = Expression.SawPointer;
 
         Reindex(scene);
         Expression.Report = null;
@@ -561,6 +567,19 @@ internal static class SceneParser
     /// key by key: a partial apply would reset every key the patch did not mention.
     /// </remarks>
     internal static bool PatchNodes(SS.UiProp[] props, VecScene scene)
+    {
+        Expression.SawPointer = false;
+        try
+        {
+            return PatchNodesCore(props, scene);
+        }
+        finally
+        {
+            scene.UsesPointer |= Expression.SawPointer;
+        }
+    }
+
+    private static bool PatchNodesCore(SS.UiProp[] props, VecScene scene)
     {
         var patch = PropValue(props, "nodes");
         if (patch?.Type != SS.UiValueType.Map || patch.Value.Map == null)
@@ -1477,7 +1496,7 @@ internal static class SceneParser
                || node.MinSize is { UsesTime: true }
                || node.ScrollSet is { UsesTime: true } || node.ScrollSetVersion is { UsesTime: true }
                || (node.CornerRadii != null && System.Array.Exists(node.CornerRadii, e => e.UsesTime))
-               || (node.TextParts != null && System.Array.Exists(node.TextParts, p => p.Index is { UsesTime: true }))
+               || (node.TextParts != null && System.Array.Exists(node.TextParts, p => p.Index is { UsesTime: true } || p.Value is { UsesTime: true }))
                || (node.Filters != null && node.Filters.Exists(f => f.Amount.UsesTime));
     }
 
@@ -1501,7 +1520,7 @@ internal static class SceneParser
                || node.TextIndex is { UsesScroll: true } || node.TextSize is { UsesScroll: true }
                || node.MinSize is { UsesScroll: true }
                || (node.CornerRadii != null && System.Array.Exists(node.CornerRadii, e => e.UsesScroll))
-               || (node.TextParts != null && System.Array.Exists(node.TextParts, p => p.Index is { UsesScroll: true }));
+               || (node.TextParts != null && System.Array.Exists(node.TextParts, p => p.Index is { UsesScroll: true } || p.Value is { UsesScroll: true }));
     }
 
     private static void ParseFill(SS.UiProp[] map, VecNode node)
@@ -2027,7 +2046,7 @@ internal static class SceneParser
     /// </summary>
     internal static TextPart[]? TextTemplate(string body, string? fallbackFormat)
     {
-        var open = body.IndexOf("{$", StringComparison.Ordinal);
+        var open = NextPlaceholder(body, 0);
         if (open < 0)
             return null;
 
@@ -2043,15 +2062,26 @@ internal static class SceneParser
             if (open > at)
                 parts.Add(TextPart.Text(body[at..open]));
 
-            // The format follows the last ':' after any index, so `$rows[i]` may hold anything.
             var inner = body[(open + 2)..close];
-            var bracket = inner.LastIndexOf(']');
-            var colon = inner.IndexOf(':', Math.Max(bracket, 0));
-            var bound = SplitBinding(colon < 0 ? inner : inner[..colon]);
-            parts.Add(TextPart.Binding(bound.Name, bound.Index, colon < 0 ? fallbackFormat : inner[(colon + 1)..]));
+            if (body[open + 1] == '=')
+            {
+                // `{=expr}` or `{=expr:%.1f}`: the expression language has no ':', so the last one
+                // is the format.
+                var split = inner.LastIndexOf(':');
+                var expression = Expression.Parse("=" + (split < 0 ? inner : inner[..split]), 0f);
+                parts.Add(TextPart.Computed(expression, split < 0 ? fallbackFormat : inner[(split + 1)..]));
+            }
+            else
+            {
+                // The format follows the last ':' after any index, so `$rows[i]` may hold anything.
+                var bracket = inner.LastIndexOf(']');
+                var colon = inner.IndexOf(':', Math.Max(bracket, 0));
+                var bound = SplitBinding(colon < 0 ? inner : inner[..colon]);
+                parts.Add(TextPart.Binding(bound.Name, bound.Index, colon < 0 ? fallbackFormat : inner[(colon + 1)..]));
+            }
 
             at = close + 1;
-            open = body.IndexOf("{$", at, StringComparison.Ordinal);
+            open = NextPlaceholder(body, at);
         }
 
         if (at < body.Length)
@@ -2080,6 +2110,14 @@ internal static class SceneParser
                 scene.Problem($"IMG: \"{word}\" is not repeat, once, round, space or stretch");
                 return 0;
         }
+    }
+
+    /// <summary>The next `{$` or `{=` at or after <paramref name="from"/>, or -1.</summary>
+    private static int NextPlaceholder(string body, int from)
+    {
+        var bound = body.IndexOf("{$", from, StringComparison.Ordinal);
+        var computed = body.IndexOf("{=", from, StringComparison.Ordinal);
+        return bound < 0 ? computed : computed < 0 ? bound : Math.Min(bound, computed);
     }
 
     private static (string Name, Expression? Index) SplitBinding(string body)

@@ -4,6 +4,10 @@ ScriptedScreens Vector, newest first.
 
 ## 0.11.36
 
+- `since($name)` in expressions: seconds since that data name last arrived, so motion started by an event -- a jump, a flash, a slide-in -- is one payload and the scene draws the rest.
+- Text placeholders may be expressions: `{=expr}` or `{=expr:%.1f}`, so a clock or a counter needs no payloads.
+- `hover` and `down` in expressions: 1 while the pointer is over, or held on, a clickable node in the nearest node with an `id` around the expression, for CSS-style `:hover` and `:active` with nothing sent.
+- Colours sent as data glide when their name has an `ease` entry, as numbers do. Without one they still change at once.
 - `press = 1` on a node reports holding as well as clicking: the element's `on_click` also receives `down:id` when the pointer goes down on it, `up:id` when it comes up wherever it is, and `leave:id` when a held pointer moves off it. For press-and-hold buttons. Nodes without it are unchanged.
 - A data colour may be `transparent` or `none`. They used to be stored as text only, so a `f = "$name"` sent either was reported unresolved and drawn magenta.
 - Fixed: an element carrying only data kept ScriptedScreens' default grey background, which showed as a grey square wherever it was placed on screen.

@@ -291,6 +291,8 @@ internal static class Tessellator
         (ImagesFound ??= new List<ImagePlacement>(4)).Clear();
         (ScrollsFound ??= new List<ScrollRegion>(4)).Clear();
         (AlphaFound ??= new List<AlphaGroup>(4)).Clear();
+        _idPath?.Clear();
+        context.ScopeId = null;
 
         vh.TrackBounds(scene.TextInOrder);
 
@@ -529,7 +531,29 @@ internal static class Tessellator
     /// <summary>Set when the walk reaches a node whose own values read `t`.</summary>
     [ThreadStatic] private static bool DrewTime;
 
+    /// <summary>Ids from the root down to the node being walked, for hit regions' `hover` scope.</summary>
+    [ThreadStatic] private static List<string>? _idPath;
+
     private static void EmitNode(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
+    {
+        // A node with an id is the scope `hover` and `down` answer to, for itself and whatever
+        // it holds, until a nearer id takes over.
+        if (string.IsNullOrEmpty(node.Id))
+        {
+            EmitNodeCore(vh, scene, node, context, stack, ref emitted);
+            return;
+        }
+
+        var path = _idPath ??= new List<string>(8);
+        var saved = context.ScopeId;
+        context.ScopeId = node.Id;
+        path.Add(node.Id!);
+        EmitNodeCore(vh, scene, node, context, stack, ref emitted);
+        path.RemoveAt(path.Count - 1);
+        context.ScopeId = saved;
+    }
+
+    private static void EmitNodeCore(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
     {
         // Before any early-out: a group hidden by a `t`-driven `v` or `o` must still count,
         // since time is what will show it again. What it hides is never reached, and that is
@@ -2691,6 +2715,12 @@ internal static class Tessellator
                 continue;
             }
 
+            if (part.Value != null)
+            {
+                AppendNumber(part, part.Value.Evaluate(context), node, ref at);
+                continue;
+            }
+
             var name = part.Name!;
             if (part.Index != null)
             {
@@ -2921,6 +2951,8 @@ internal static class Tessellator
             Outline = canvas,
             Clip = clip?.ToArray(),
             Press = press,
+            Scope = _idPath?.ToArray(),
+            Index = context.RepeatDepth > 0 ? Mathf.RoundToInt(context.Index(0)) : -1,
         });
     }
 
@@ -3616,7 +3648,7 @@ internal static class Tessellator
                 return new Paint(Magenta, null, opacity);
             }
 
-            if (context.Colours.TryGetValue(bound!, out var supplied))
+            if (context.Colour(bound!, out var supplied))
                 return new Paint(supplied, null, opacity);
 
             // A colour the payload never supplied. Magenta rather than the default white,

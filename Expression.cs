@@ -102,6 +102,69 @@ internal sealed class EvalContext
     internal Dictionary<string, Color> Colours { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// What an eased colour showed when its new value arrived; the lookup glides from it to
+    /// <see cref="Colours"/> over the name's glide. Only names given an `ease` entry are here, so a
+    /// colour without one still changes at once, as it always did.
+    /// </summary>
+    internal Dictionary<string, Color> PreviousColours { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>When each data name last arrived on this client, in <see cref="Clock"/> seconds.</summary>
+    internal Dictionary<string, float> ArrivedAt { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The renderer's clock at this rebuild, in absolute seconds. `t` is this minus the scene's
+    /// start and restarts with every structure; `since()` needs a clock that does not.
+    /// </summary>
+    internal float Clock { get; set; }
+
+    /// <summary>The id of the nearest node with an `id` around what is being evaluated, set by the walk.</summary>
+    internal string? ScopeId { get; set; }
+
+    /// <summary>The ids from the scene root down to the clickable node under the pointer, or null.</summary>
+    internal string[]? HoverScope { get; set; }
+
+    /// <summary>That node's repeat index, or -1 outside a repeat.</summary>
+    internal int HoverIndex { get; set; } = -1;
+
+    /// <summary>The same for the clickable node a pointer is held down on.</summary>
+    internal string[]? DownScope { get; set; }
+
+    internal int DownIndex { get; set; } = -1;
+
+    /// <summary>
+    /// `hover` / `down`: 1 when the pointer is over (held on) a clickable node inside the nearest
+    /// node with an `id` around this expression -- the node itself or an enclosing group, so a
+    /// button's label can answer its button. Inside a repeat, the instance must match too.
+    /// </summary>
+    internal float Pointer(bool held)
+    {
+        var scope = held ? DownScope : HoverScope;
+        var index = held ? DownIndex : HoverIndex;
+        if (scope == null || ScopeId == null || System.Array.IndexOf(scope, ScopeId) < 0)
+            return 0f;
+
+        return index < 0 || RepeatDepth == 0 || Mathf.RoundToInt(Index(0)) == index ? 1f : 0f;
+    }
+
+    /// <summary>`since($name)`: seconds since `name` last arrived, or a long time for one never sent.</summary>
+    internal float Since(string name)
+    {
+        return ArrivedAt.TryGetValue(name, out var at) ? Mathf.Max(0f, Clock - at) : 1e6f;
+    }
+
+    /// <summary>A data colour, glided from its previous value when its payload eased it.</summary>
+    internal bool Colour(string name, out Color colour)
+    {
+        if (!Colours.TryGetValue(name, out colour))
+            return false;
+
+        if (PreviousColours.Count > 0 && PreviousColours.TryGetValue(name, out var previous))
+            colour = Color.Lerp(previous, colour, BlendFor(name));
+
+        return true;
+    }
+
+    /// <summary>
     /// Raw string values from the payload, for <c>text = "$name"</c>.
     /// </summary>
     /// <remarks>
@@ -425,6 +488,9 @@ internal sealed class Expression
         ViewportH,
         RepeatIndex,
         RepeatCount,
+        Since,
+        Hover,
+        Down,
         Scalar,
         Element,
         Negate,
@@ -482,6 +548,9 @@ internal sealed class Expression
             case Kind.ViewportH:
             case Kind.RepeatIndex:
             case Kind.RepeatCount:
+            case Kind.Since:
+            case Kind.Hover:
+            case Kind.Down:
             case Kind.Scalar:
             case Kind.Element:
                 return false;
@@ -516,6 +585,9 @@ internal sealed class Expression
     /// </summary>
     [ThreadStatic] internal static System.Action<string>? Report;
 
+    /// <summary>Set by the parser when an expression reads `hover` or `down`; the scene parser resets and reads it.</summary>
+    [ThreadStatic] internal static bool SawPointer;
+
     internal static Expression Parse(string source, float fallback)
     {
         try
@@ -544,6 +616,9 @@ internal sealed class Expression
             case Kind.RepeatIndex: return context.Index(_depth);
             case Kind.RepeatCount: return context.Count();
             case Kind.Scalar: return context.Scalar(_name);
+            case Kind.Since: return context.Since(_name);
+            case Kind.Hover: return context.Pointer(held: false);
+            case Kind.Down: return context.Pointer(held: true);
             case Kind.Element: return context.Element(_name, Arg(0, context));
 
             case Kind.Negate: return -Arg(0, context);
@@ -796,6 +871,22 @@ internal sealed class Expression
             if (!Match('('))
                 return Variable(name);
 
+            // `since($name)` takes a data NAME, not its value: seconds since that name last
+            // arrived. Time-dependent, so a scene using it animates.
+            if (name == "since")
+            {
+                SkipSpace();
+                if (!Match('$'))
+                    throw new FormatException("since() takes a data name, e.g. since($jump)");
+
+                var dataName = ReadName();
+                SkipSpace();
+                if (!Match(')'))
+                    throw new FormatException("expected ')' after since($name");
+
+                return new Expression { _kind = Kind.Since, _name = dataName, UsesTime = true };
+            }
+
             if (!Arity.TryGetValue(name, out var expected))
                 throw new FormatException($"unknown function '{name}'");
 
@@ -846,6 +937,14 @@ internal sealed class Expression
 
             if (name == "n")
                 return new Expression { _kind = Kind.RepeatCount };
+
+            // Pointer state, kept per client. Noted for the scene, which redraws on a change
+            // only when something reads it.
+            if (name == "hover" || name == "down")
+            {
+                SawPointer = true;
+                return new Expression { _kind = name == "hover" ? Kind.Hover : Kind.Down };
+            }
 
             if (name == "i")
                 return new Expression { _kind = Kind.RepeatIndex, _depth = 0 };

@@ -98,6 +98,24 @@ in the same payload.
 for 0.15 s and then glides for 0.3 s. Stagger a row of bars by giving each a delay of its
 own — `i * 0.05` — and they set off in sequence from one payload.
 
+**Colours glide too, when asked.** A colour sent as data (`f = "$state"`) changes at once by
+default. Give its name an `ease` entry and it glides from the colour on screen to the new one
+over that time and curve, exactly as a number would: `ease = { state = { 0.4, "ease-out" } }`.
+
+**Motion driven by an event costs one payload.** `since($name)` in an expression is the
+seconds since `name` last arrived on this client, so the chip sends a value once, at the event,
+and the scene draws the rest:
+
+```lua
+-- one send per jump; the arc is drawn here at the frame rate
+data:set_props({ keep = 1, snap = 1, data = { jump = 24 } })
+-- in the scene
+{ op = "G", t = { 0, "=-max(0, $jump*since($jump) - 45*since($jump)^2)" }, c = { ... } }
+```
+
+Resending the same value restarts the count, so every send is an event. Send such values with
+`snap = 1` so the value itself does not glide. A name never sent reads as a very long time ago.
+
 Timing describes a **change**, not a value: it applies to the glide that payload starts. Send
 it again with the next value if that one should glide the same way — a payload that restates a
 name without timing glides it the ordinary way, exactly as one that restates a name without
@@ -690,9 +708,13 @@ format; one without a format takes the node's `fmt`:
 
 Each placeholder resolves as `text = "$name"` would: a string as it is, a number through its
 format, and `missing` in its place when the name has no value, while the rest of the text still
-shows. `unit` still goes after the whole text. A `{` not followed by `$` is ordinary text, and a
-label whose printed characters did not change makes no new string, so a line of readouts costs
-the same as one.
+shows. `unit` still goes after the whole text. A `{` not followed by `$` or `=` is ordinary text,
+and a label whose printed characters did not change makes no new string, so a line of readouts
+costs the same as one.
+
+**A placeholder may be an expression:** `{=expr}` or `{=expr:%.1f}`, over `t`, data, `since()`
+or anything else an expression reads. A clock or a counter then needs no payload at all:
+`text = "uptime {=floor(t):%d} s"`.
 
 **`f` may be a gradient.** `f = "@name"` samples the gradient at every glyph's corners, so a
 linear ramp is exact within each glyph and continuous across the label; radial and conic are
@@ -1348,7 +1370,23 @@ Any numeric attribute may be a string beginning with `=`.
 | `$name[expr]` | array element, **0-based**; out of range yields `0` |
 | `sy` | scroll offset of the enclosing scroll view or `SC`, in scene units; `0` when there is none |
 | `vh` | viewport height of that scroll view or `SC`, in scene units; `0` when there is none |
+| `hover` | `1` while the pointer is over a clickable node inside the nearest node with an `id` around this expression (the node itself, or a group), else `0` |
+| `down` | the same, while a pointer is held down on it |
 
+**`hover` and `down` style a control from the pointer**, CSS `:hover` and `:active`, with nothing
+sent: each client tracks its own pointer, and a scene redraws on a change only if it reads them.
+They answer to the nearest node carrying an `id`, so a button written as a group lets its label
+answer too:
+
+```
+G id=save {
+  R click=1 id=save_box x=10 y=10 w=60 h=18 rx=4 f=#2E8B6E fo="=0.8+0.2*hover"
+  T x=10 y=13 w=60 h=12 text=SAVE align=center size=8 f=#EAF4F8 fo="=1-0.3*down"
+}
+```
+
+The label has no `id` of its own, so its scope is the group; a node with its own `id` answers
+only for itself. Inside a repeat the instance has to match as well.
 **Arrays are 0-based in expressions and 1-based in Lua.** `$history[0]` is the value your
 script stored at `history[1]`. A repeat's `i` runs `0..n-1`, so `$history[i]` lines up with a
 Lua array naturally; a hand-written index does not. When emitting per-item nodes from a Lua
@@ -1417,6 +1455,7 @@ rather than a visible glitch.
 | `and(a,b)` `or(a,b)` `not(a)` | logical, on `0`/non-zero |
 | `hash(x)` | deterministic pseudo-random `0..1` |
 | `hash2(x,y)` | two-argument variant |
+| `since($name)` | seconds since data `name` last arrived on this client; a name never sent reads as a very long time |
 | `pi()` `tau()` | constants |
 
 `hash` is an integer avalanche over fixed-point input, **not** `fract(sin(x)*k)` —
@@ -1446,4 +1485,4 @@ according to `fit`.
 | horizontal scrolling | `SC` is vertical only |
 | self-intersecting fills | ear clipping is undefined on them; detection costs more than the fill |
 | holes inside a clipped fill | needs boolean subtraction |
-| expressions in `d` or in gradient coordinates | both are static; use `units = "bbox"` |
+| expressions in a path's `d` | the command string is parsed once; move or scale the path with its group's `t`/`r`/`s`, or draw it as `YS`/`LS` samples |

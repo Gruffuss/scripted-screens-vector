@@ -135,7 +135,7 @@ internal sealed class Gradient
 
             // A colour the payload never supplied reads as a fault rather than as a design
             // decision, the same choice `f = "$name"` makes on a node.
-            Colours[i] = context.Colours.TryGetValue(colours[i]!, out var supplied)
+            Colours[i] = context.Colour(colours[i]!, out var supplied)
                 ? supplied
                 : new Color(1f, 0f, 1f, 1f);
         }

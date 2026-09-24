@@ -22,7 +22,7 @@ namespace ScriptedScreensVector;
 /// time-varying scenes mark themselves dirty in <see cref="Update"/>.
 /// </remarks>
 internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, IScrollHandler, IBeginDragHandler, IDragHandler,
-    IPointerDownHandler, IPointerUpHandler, IPointerExitHandler
+    IPointerDownHandler, IPointerUpHandler, IPointerExitHandler, IPointerMoveHandler
 {
     /// <summary>
     /// Per-surface rebuild cost, reported periodically.
@@ -521,6 +521,42 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     }
 
 
+    /// <summary>
+    /// The clickable node under the pointer and the one held down, for `hover` and `down`. Kept
+    /// here and copied into the context when a rebuild is dispatched, since a running rebuild owns
+    /// the context.
+    /// </summary>
+    private string[]? _hoverScope;
+
+    private int _hoverIndex = -1;
+
+    private string? _hoverId;
+
+    private string[]? _downScope;
+
+    private int _downIndex = -1;
+
+    /// <summary>The pointer moved: redraw only if a different clickable node is now under it.</summary>
+    public void OnPointerMove(PointerEventData eventData)
+    {
+        if (eventData == null || _scene is not { UsesPointer: true })
+            return;
+
+        var over = HitAt(eventData, out var region) ? region : default;
+        SetHover(over.Id, over.Scope, over.Index);
+    }
+
+    private void SetHover(string? id, string[]? scope, int index)
+    {
+        if (id == _hoverId && index == _hoverIndex)
+            return;
+
+        _hoverId = id;
+        _hoverScope = scope;
+        _hoverIndex = index;
+        _dataDirty = true;
+    }
+
     /// <summary>The node held down by a pointer on a `press = 1` node, and whether it is still over it.</summary>
     private string? _pressedId;
 
@@ -559,7 +595,15 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         if (transform.parent != null)
             ExecuteEvents.ExecuteHierarchy(transform.parent.gameObject, eventData, ExecuteEvents.pointerDownHandler);
 
-        if (_forwarder == null || !HitAt(eventData, out var region) || !region.Press)
+        var hit = HitAt(eventData, out var region);
+        if (hit && _scene is { UsesPointer: true })
+        {
+            _downScope = region.Scope;
+            _downIndex = region.Index;
+            _dataDirty = true;
+        }
+
+        if (_forwarder == null || !hit || !region.Press)
             return;
 
         _pressedId = region.Id;
@@ -574,6 +618,13 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// </summary>
     public void OnPointerUp(PointerEventData eventData)
     {
+        if (_downScope != null)
+        {
+            _downScope = null;
+            _downIndex = -1;
+            _dataDirty = true;
+        }
+
         if (_pressedId == null || eventData == null)
             return;
 
@@ -585,6 +636,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>Leaving the surface while held leaves the node too.</summary>
     public void OnPointerExit(PointerEventData eventData)
     {
+        SetHover(null, null, -1);
+
         if (_pressedId != null && _pressedInside && eventData != null)
         {
             _pressedInside = false;
@@ -799,6 +852,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             return;
 
         _context.Time = Now() - _startTime;
+        _context.Clock = Now();
+        CopyPointer();
         _context.Blend = 1f;
 
         // A capture shows where the values ARE going, not where a glide has got to, which is
@@ -927,6 +982,15 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
     /// <summary>A clock for the fades, never the rebuild's context: that one may be on a worker.</summary>
     private readonly EvalContext _fadeClock = new();
+
+    /// <summary>The pointer state into the context, at dispatch, when no rebuild holds it.</summary>
+    private void CopyPointer()
+    {
+        _context.HoverScope = _hoverScope;
+        _context.HoverIndex = _hoverIndex;
+        _context.DownScope = _downScope;
+        _context.DownIndex = _downIndex;
+    }
 
     /// <summary>After a rebuild: which slices each fading group landed in.</summary>
     private void MapFades()
@@ -1269,6 +1333,25 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 _context.PreviousArrays[pair.Key] = pair.Value;
         }
 
+        // An eased colour glides from what it shows right now, so that is read before anything
+        // below replaces or evicts it. Without an `ease` entry a colour changes at once, as it
+        // always has.
+        foreach (var pair in source.Colours)
+        {
+            if (source.Eased.ContainsKey(pair.Key) && _context.Colour(pair.Key, out var showing))
+                _context.PreviousColours[pair.Key] = showing;
+            else
+                _context.PreviousColours.Remove(pair.Key);
+        }
+
+        // `since($name)` counts from here, whatever kind the value is.
+        StampArrivals(source.Scalars.Keys, now);
+        StampArrivals(source.Arrays.Keys, now);
+        StampArrivals(source.Strings.Keys, now);
+        StampArrivals(source.Colours.Keys, now);
+        StampArrivals(source.StringArrays.Keys, now);
+        StampArrivals(source.ColourArrays.Keys, now);
+
         if (!keep)
             _context.Scalars.Clear();
         else
@@ -1358,6 +1441,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // hand-written console at 2 Hz could ever have revealed.
         _dataDirty = true;
         SetVerticesDirty();
+
+        void StampArrivals<T>(Dictionary<string, T>.KeyCollection names, float at)
+        {
+            foreach (var name in names)
+                _context.ArrivedAt[name] = at;
+        }
 
         void Forget(string name)
         {
@@ -1822,6 +1911,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         var now = Now();
         _context.Time = now - _startTime;
+        _context.Clock = now;
+        CopyPointer();
 
         // Blend across the gap the last two payloads were actually separated by, so this
         // self-tunes to whatever tick rate the script happens to use.

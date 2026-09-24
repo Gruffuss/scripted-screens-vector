@@ -194,6 +194,12 @@ internal struct HitRegion
     /// <summary>The node asked for press, release and leave as well as clicks (`press = 1`).</summary>
     internal bool Press;
 
+    /// <summary>Ids from the scene root down to this node, for `hover` / `down` scoping.</summary>
+    internal string[]? Scope;
+
+    /// <summary>The repeat index this region was drawn at, or -1 outside a repeat.</summary>
+    internal int Index;
+
     /// <summary>Bounds of <see cref="Outline"/>, for a cheap first test.</summary>
     internal Rect Rect;
 
@@ -287,6 +293,9 @@ internal readonly struct TextPart
     internal readonly string? Name;
     internal readonly Expression? Index;
 
+    /// <summary>`{=expr}`: a value computed here, from `t`, data or anything an expression reads.</summary>
+    internal readonly Expression? Value;
+
     /// <summary>The printf format translated for .NET; null prints "0.##".</summary>
     internal readonly string? Net;
 
@@ -296,11 +305,12 @@ internal readonly struct TextPart
     internal readonly string? Spec;
     internal readonly string Suffix;
 
-    private TextPart(string? literal, string? name, Expression? index, string? format)
+    private TextPart(string? literal, string? name, Expression? index, string? format, Expression? value = null)
     {
         Literal = literal;
         Name = name;
         Index = index;
+        Value = value;
         Net = format == null ? null : Printf.ToNet(format);
         Prefix = Suffix = string.Empty;
         Spec = "0.##";
@@ -310,6 +320,8 @@ internal readonly struct TextPart
     internal static TextPart Text(string literal) => new(literal, null, null, null);
 
     internal static TextPart Binding(string name, Expression? index, string? format) => new(null, name, index, format);
+
+    internal static TextPart Computed(Expression value, string? format) => new(null, null, null, format, value);
 }
 
 internal static class Printf
