@@ -191,6 +191,9 @@ internal struct HitRegion
 {
     internal string Id;
 
+    /// <summary>The node asked for press, release and leave as well as clicks (`press = 1`).</summary>
+    internal bool Press;
+
     /// <summary>Bounds of <see cref="Outline"/>, for a cheap first test.</summary>
     internal Rect Rect;
 

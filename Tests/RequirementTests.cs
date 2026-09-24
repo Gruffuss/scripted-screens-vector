@@ -462,6 +462,20 @@ internal static class RequirementTests
         run.Check("animated: a placeholder index reading t counts", Drew("T w=50 h=10 text=\"{$rows[mod(floor(t),4)]}\""), "");
     }
 
+    /// <summary>`press = 1` makes a node clickable and marks its hit region for press events.</summary>
+    internal static void PressRegions(TestRun run)
+    {
+        var scene = SceneParser.Parse(SceneText.ToProps(
+            "SCENE w=100 h=100 fit=stretch\nR id=hold press=1 x=10 y=10 w=20 h=20\nR id=tap click=1 x=50 y=10 w=20 h=20\nR id=none x=10 y=50 w=20 h=20", "press")!)!;
+        var stats = new TessellationStats();
+        Tessellator.Emit(new MeshBuilder(), scene, new EvalContext(), new Rect(0f, 0f, 100f, 100f), 1f, true, stats);
+
+        var hold = stats.Hits.Find(h => h.Id == "hold");
+        var tap = stats.Hits.Find(h => h.Id == "tap");
+        run.Check("press: press=1 is clickable and marked for press events",
+            stats.Hits.Count == 2 && hold.Press && !tap.Press, $"{stats.Hits.Count} hit regions, hold {hold.Press}, tap {tap.Press}");
+    }
+
     /// <summary>A text with several bound values, each printed through its own format.</summary>
     internal static void TextTemplate(TestRun run)
     {

@@ -4,6 +4,7 @@ ScriptedScreens Vector, newest first.
 
 ## 0.11.36
 
+- `press = 1` on a node reports holding as well as clicking: the element's `on_click` also receives `down:id` when the pointer goes down on it, `up:id` when it comes up wherever it is, and `leave:id` when a held pointer moves off it. For press-and-hold buttons. Nodes without it are unchanged.
 - A data colour may be `transparent` or `none`. They used to be stored as text only, so a `f = "$name"` sent either was reported unresolved and drawn magenta.
 - Fixed: an element carrying only data kept ScriptedScreens' default grey background, which showed as a grey square wherever it was placed on screen.
 

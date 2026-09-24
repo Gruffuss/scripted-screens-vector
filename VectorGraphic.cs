@@ -21,7 +21,8 @@ namespace ScriptedScreensVector;
 /// reference <c>t</c> is tessellated once and then costs nothing per frame. Only
 /// time-varying scenes mark themselves dirty in <see cref="Update"/>.
 /// </remarks>
-internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, IScrollHandler, IBeginDragHandler, IDragHandler
+internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, IScrollHandler, IBeginDragHandler, IDragHandler,
+    IPointerDownHandler, IPointerUpHandler, IPointerExitHandler
 {
     /// <summary>
     /// Per-surface rebuild cost, reported periodically.
@@ -520,6 +521,141 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     }
 
 
+    /// <summary>The node held down by a pointer on a `press = 1` node, and whether it is still over it.</summary>
+    private string? _pressedId;
+
+    private HitRegion _pressedRegion;
+
+    private bool _pressedInside;
+
+    /// <summary>
+    /// One forwarder per kind of press event. ScriptedScreens' forwarder drops a second event
+    /// from the same pointer within 0.25 s, so a quick press and release through one of them
+    /// would lose the release.
+    /// </summary>
+    private SS.UiPointerDownForwarder? _downForwarder;
+
+    private SS.UiPointerDownForwarder? _upForwarder;
+
+    private SS.UiPointerDownForwarder? _leaveForwarder;
+
+    /// <summary>
+    /// A pointer going down on a `press = 1` node: `down:id` to the element's `on_click`.
+    /// </summary>
+    /// <remarks>
+    /// Press, release and leave travel as click events with a prefixed value because the click
+    /// is the one channel ScriptedScreens already carries from any player to the chip:
+    /// its Lua handlers take a fixed list of event names, and a new one would never reach them.
+    /// Only `press = 1` nodes send these, so every other scene sees exactly the clicks it did.
+    /// </remarks>
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        if (eventData == null)
+            return;
+
+        // Handling pointer-down here stops Unity offering it to anything above this surface. A
+        // ScriptedScreens button or text field holding a vector element fired on that event, so
+        // it is passed on unchanged: this handler only ever adds.
+        if (transform.parent != null)
+            ExecuteEvents.ExecuteHierarchy(transform.parent.gameObject, eventData, ExecuteEvents.pointerDownHandler);
+
+        if (_forwarder == null || !HitAt(eventData, out var region) || !region.Press)
+            return;
+
+        _pressedId = region.Id;
+        _pressedRegion = region;
+        _pressedInside = true;
+        SendPress(ref _downForwarder, "VecPressDown", "down:" + region.Id, eventData);
+    }
+
+    /// <summary>
+    /// The pointer that went down on a `press = 1` node comes up: `up:id`, wherever it is. Unity
+    /// delivers the release to the object the press landed on, as a browser's pointerup does.
+    /// </summary>
+    public void OnPointerUp(PointerEventData eventData)
+    {
+        if (_pressedId == null || eventData == null)
+            return;
+
+        var id = _pressedId;
+        _pressedId = null;
+        SendPress(ref _upForwarder, "VecPressUp", "up:" + id, eventData);
+    }
+
+    /// <summary>Leaving the surface while held leaves the node too.</summary>
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        if (_pressedId != null && _pressedInside && eventData != null)
+        {
+            _pressedInside = false;
+            SendPress(ref _leaveForwarder, "VecPressLeave", "leave:" + _pressedId, eventData);
+        }
+    }
+
+    /// <summary>A held pointer that has moved off its node: `leave:id`, once per press.</summary>
+    private void CheckLeave(PointerEventData eventData)
+    {
+        if (_pressedId == null || !_pressedInside)
+            return;
+
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                rectTransform, eventData.position, eventData.pressEventCamera, out var local)
+            && _pressedRegion.Contains(local))
+        {
+            return;
+        }
+
+        _pressedInside = false;
+        SendPress(ref _leaveForwarder, "VecPressLeave", "leave:" + _pressedId, eventData);
+    }
+
+    /// <summary>The topmost hit region under the pointer; last match wins, as for clicks.</summary>
+    private bool HitAt(PointerEventData eventData, out HitRegion region)
+    {
+        region = default;
+        if (_hits.Count == 0 || !RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                rectTransform, eventData.position, eventData.pressEventCamera, out var local))
+        {
+            return false;
+        }
+
+        var found = false;
+        for (var i = 0; i < _hits.Count; i++)
+        {
+            if (_hits[i].Contains(local))
+            {
+                region = _hits[i];
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>Sends one press event through a forwarder of its own, made beside the click one.</summary>
+    private void SendPress(ref SS.UiPointerDownForwarder? forwarder, string name, string value, PointerEventData eventData)
+    {
+        var clicks = _forwarder;
+        if (clicks == null)
+            return;
+
+        if (forwarder == null)
+        {
+            var carrier = new GameObject(name, typeof(RectTransform));
+            carrier.transform.SetParent(clicks.transform.parent, worldPositionStays: false);
+            forwarder = carrier.AddComponent<SS.UiPointerDownForwarder>();
+        }
+
+        forwarder.Board = clicks.Board;
+        forwarder.Cartridge = clicks.Cartridge;
+        forwarder.Visor = clicks.Visor;
+        forwarder.Surface = clicks.Surface;
+        forwarder.Id = _elementId;
+        forwarder.EventName = "click";
+        forwarder.Value = value;
+        forwarder.OnPointerClick(eventData);
+    }
+
     /// <summary>Wheel over an <c>SC</c> container scrolls it.</summary>
     /// <remarks>
     /// **Nothing is sent anywhere.** The offset is client-side state, so a wheel notch costs
@@ -546,6 +682,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>Dragging inside a container moves the content with the pointer.</summary>
     public void OnDrag(PointerEventData eventData)
     {
+        if (eventData != null)
+            CheckLeave(eventData);
+
         if (eventData == null || !Locate(eventData.position, eventData.pressEventCamera, out var region))
             return;
 

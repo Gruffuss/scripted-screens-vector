@@ -976,7 +976,7 @@ patch targets are common; making all of them swallow clicks would be a surprise.
 no clickable node stays transparent to the pointer exactly as before.
 
 **A click lands on what is drawn:** inside the node's own outline and inside any clip it is
-drawn through. Before 0.11.21 it was the outline's bounding rectangle, so a circle took clicks
+drawn through. Where regions overlap, the one drawn last wins. Before 0.11.21 it was the outline's bounding rectangle, so a circle took clicks
 in its corners, a turned shape across its upright bounds, and a clipped one where the clip had
 cut it away -- including list rows scrolled out of sight.
 
@@ -992,9 +992,32 @@ end
 
 Outside a repeat it is the bare id, unchanged.
 
-**Hit testing is against the node's bounding box**, in draw order, last match wins. For a row,
-a tile or a button — what carries `click` — the bounds are the shape. A thin diagonal or a
-ring will claim more than it draws.
+**`press = 1` reports holding as well as clicking**, for a press-and-hold button or a
+hold-to-act control. The node is clickable as with `click = 1`, and the same `on_click` also
+receives:
+
+| value | when |
+|---|---|
+| `down:id` | the pointer goes down on the node |
+| `up:id` | that pointer comes up, **wherever it is** by then, as a browser's `pointerup` does |
+| `leave:id` | that pointer, still held, moves off the node (once per press) |
+
+A full press and release on the node therefore arrives as `down:id`, `up:id`, then `id` (the
+click). Inside a repeat the id carries its index as above: `down:row:3`. Split on the first
+colon:
+
+```lua
+on_click = function(value, player)
+    local kind, id = value:match("^(%a+):(.+)$")
+    if kind == "down" then ... elseif kind == "up" then ... elseif kind == "leave" then ...
+    else --[[ a plain click on `value` ]] end
+end
+```
+
+Nodes without `press` never send these, so an existing handler sees exactly the clicks it did.
+They travel as clicks because the click is the one event ScriptedScreens carries from every
+player to the chip. Two presses of the same kind less than a quarter of a second apart arrive
+as one: ScriptedScreens drops repeats that close together.
 
 ### Shadows
 

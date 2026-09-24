@@ -1860,7 +1860,7 @@ internal static class Tessellator
     private static void FillAndStroke(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame, List<Vector2> outline, bool closed)
     {
         if (node.Clickable && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
-            RecordHit(node.Id!, outline, frame.Matrix, frame.CanvasClip, context);
+            RecordHit(node.Id!, outline, frame.Matrix, frame.CanvasClip, context, node.Pressable);
 
         // Shadows first: they sit beneath the shape, and in declaration order like CSS.
         if (closed)
@@ -2891,7 +2891,7 @@ internal static class Tessellator
         return made;
     }
 
-    private static void RecordHit(string id, List<Vector2> outline, Matrix4x4 matrix, List<Vector2>? clip, EvalContext context)
+    private static void RecordHit(string id, List<Vector2> outline, Matrix4x4 matrix, List<Vector2>? clip, EvalContext context, bool press = false)
     {
         if (HitsFound == null || outline.Count == 0)
             return;
@@ -2920,6 +2920,7 @@ internal static class Tessellator
             Rect = Rect.MinMaxRect(min.x, min.y, max.x, max.y),
             Outline = canvas,
             Clip = clip?.ToArray(),
+            Press = press,
         });
     }
 

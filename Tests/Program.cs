@@ -170,6 +170,7 @@ internal static class Program
         RequirementTests.LabelUnchanged(run);
         RequirementTests.TextTemplate(run);
         RequirementTests.AnimatedReached(run);
+        RequirementTests.PressRegions(run);
         EasingTests.Curves(run);
         EasingTests.Payload(run);
 

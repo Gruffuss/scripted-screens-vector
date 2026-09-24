@@ -311,6 +311,13 @@ internal sealed class VecNode
     internal bool Clickable;
 
     /// <summary>
+    /// `press = 1`: besides its click, the node reports the pointer going down (`down:id`),
+    /// coming up wherever it is released (`up:id`), and leaving it while held (`leave:id`),
+    /// all through the element's `on_click`. Implies `click = 1`.
+    /// </summary>
+    internal bool Pressable;
+
+    /// <summary>
     /// `v` on a group: 0 takes the whole subtree out of the drawing, hit regions and all.
     /// Null when the group never said, which is every group that does not ask for it.
     /// </summary>
@@ -1016,7 +1023,7 @@ internal static class SceneParser
     /// </remarks>
     private static readonly HashSet<string> KnownKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "op", "id", "c", "style", "click", "lod",
+        "op", "id", "c", "style", "click", "press", "lod",
         "x", "y", "w", "h", "cx", "cy", "rx", "ry", "x1", "y1", "x2", "y2", "y2",
         "n", "p", "d", "seg", "t", "r", "s", "s_", "a", "o", "clip", "ref", "params", "ch",
         "f", "fo", "fo2", "fr", "fea", "fea_edge", "sh",
@@ -1421,7 +1428,8 @@ internal static class SceneParser
         }
 
         node.Id = PropString(map, "id");
-        node.Clickable = PropNumber(map, "click", 0f) > 0.5f;
+        node.Pressable = PropNumber(map, "press", 0f) > 0.5f;
+        node.Clickable = PropNumber(map, "click", 0f) > 0.5f || node.Pressable;
         if (!string.IsNullOrEmpty(node.Id))
             node.SourceProps = map;
 
