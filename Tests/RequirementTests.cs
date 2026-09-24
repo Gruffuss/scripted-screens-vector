@@ -531,6 +531,39 @@ internal static class RequirementTests
             scene2.UsesPointer && !plain.UsesPointer, "");
     }
 
+    /// <summary>`xy = 1` reports where in the node; `hoverev = 1` marks a region for enter/exit.</summary>
+    internal static void PositionAndHover(TestRun run)
+    {
+        var scene = SceneParser.Parse(SceneText.ToProps(
+            "SCENE w=200 h=200 fit=stretch\nG t=[100,100] r=30 s=[1.5,1.5] {\n R id=slider xy=1 x=-50 y=-5 w=100 h=10\n}\nR id=tip hoverev=1 x=10 y=10 w=20 h=20", "xy")!)!;
+        var stats = new TessellationStats();
+        Tessellator.Emit(new MeshBuilder(), scene, new EvalContext(), new Rect(0f, 0f, 200f, 200f), 1f, true, stats);
+
+        var slider = stats.Hits.Find(h => h.Id == "slider");
+        var toCanvas = Tessellator.AffineInverse(slider.CanvasToLocal);
+        Vector2 At(float lx, float ly) => toCanvas.MultiplyPoint3x4(new Vector3(lx, ly, 0f));
+
+        var quarter = slider.Fraction(At(-25f, 0f));
+        var end = slider.Fraction(At(80f, 5f));
+        run.Check("xy: a turned, scaled slider reads along its own axis",
+            quarter is { } q && Mathf.Abs(q.x - 0.25f) < 0.001f && Mathf.Abs(q.y - 0.5f) < 0.001f,
+            quarter.HasValue ? quarter.Value.ToString("F3") : "null");
+        run.Check("xy: past its end it reads as the edge", end is { } e && Mathf.Abs(e.x - 1f) < 0.001f, end.HasValue ? end.Value.ToString("F3") : "null");
+
+        var tip = stats.Hits.Find(h => h.Id == "tip");
+        run.Check("hoverev: the region is clickable and marked for enter/exit, without positions",
+            tip.HoverEvents && !tip.Xy && tip.Fraction(Vector2.zero) == null, "");
+
+        var dnd = SceneParser.Parse(SceneText.ToProps(
+            "SCENE w=100 h=100\nR id=card drag=1 x=10 y=10 w=20 h=20\nR id=bin drop=1 x=60 y=10 w=30 h=30", "dnd")!)!;
+        var dndStats = new TessellationStats();
+        Tessellator.Emit(new MeshBuilder(), dnd, new EvalContext(), new Rect(0f, 0f, 100f, 100f), 1f, true, dndStats);
+        var card = dndStats.Hits.Find(h => h.Id == "card");
+        var bin = dndStats.Hits.Find(h => h.Id == "bin");
+        run.Check("drag: drag=1 and drop=1 make hit regions marked source and target",
+            dndStats.Hits.Count == 2 && card.Drag && !card.Drop && bin.Drop && !bin.Drag, $"{dndStats.Hits.Count} regions");
+    }
+
     /// <summary>`press = 1` makes a node clickable and marks its hit region for press events.</summary>
     internal static void PressRegions(TestRun run)
     {

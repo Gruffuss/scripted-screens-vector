@@ -200,6 +200,38 @@ internal struct HitRegion
     /// <summary>The repeat index this region was drawn at, or -1 outside a repeat.</summary>
     internal int Index;
 
+    /// <summary>`xy = 1`: clicks report where in the node, through <see cref="CanvasToLocal"/> and <see cref="LocalBounds"/>.</summary>
+    internal bool Xy;
+
+    /// <summary>`hoverev = 1`: entering and leaving are sent.</summary>
+    internal bool HoverEvents;
+
+    /// <summary>`drag = 1` / `drop = 1`: a drag source, a drop target.</summary>
+    internal bool Drag;
+
+    internal bool Drop;
+
+    /// <summary>Canvas space back to the node's own space, for positions within it.</summary>
+    internal Matrix4x4 CanvasToLocal;
+
+    /// <summary>The node's outline bounds in its own space.</summary>
+    internal Rect LocalBounds;
+
+    /// <summary>
+    /// Where a canvas point falls across the node's own box, 0..1 each way from its top left, or
+    /// null when the region does not report positions. Clamped, so a release off the node reads
+    /// as its nearest edge.
+    /// </summary>
+    internal readonly Vector2? Fraction(Vector2 canvas)
+    {
+        if (!Xy || LocalBounds.width <= 0f || LocalBounds.height <= 0f)
+            return null;
+
+        var local = (Vector2)CanvasToLocal.MultiplyPoint3x4(canvas);
+        return new Vector2(Mathf.Clamp01((local.x - LocalBounds.xMin) / LocalBounds.width),
+                           Mathf.Clamp01((local.y - LocalBounds.yMin) / LocalBounds.height));
+    }
+
     /// <summary>Bounds of <see cref="Outline"/>, for a cheap first test.</summary>
     internal Rect Rect;
 

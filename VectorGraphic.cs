@@ -21,7 +21,7 @@ namespace ScriptedScreensVector;
 /// reference <c>t</c> is tessellated once and then costs nothing per frame. Only
 /// time-varying scenes mark themselves dirty in <see cref="Update"/>.
 /// </remarks>
-internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, IScrollHandler, IBeginDragHandler, IDragHandler,
+internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, IScrollHandler, IBeginDragHandler, IDragHandler, IEndDragHandler,
     IPointerDownHandler, IPointerUpHandler, IPointerExitHandler, IPointerMoveHandler
 {
     /// <summary>
@@ -504,17 +504,17 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             return;
         }
 
-        string? hit = null;
+        HitRegion? hit = null;
         for (var i = 0; i < _hits.Count; i++)
         {
             if (_hits[i].Contains(local))
-                hit = _hits[i].Id;
+                hit = _hits[i];
         }
 
         if (hit == null)
             return;
 
-        _forwarder.Value = hit;
+        _forwarder.Value = Tagged(hit.Value, local);
         _forwarder.Id = _elementId;
         _forwarder.EventName = "click";
         _forwarder.OnPointerClick(eventData);
@@ -539,10 +539,17 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>The pointer moved: redraw only if a different clickable node is now under it.</summary>
     public void OnPointerMove(PointerEventData eventData)
     {
-        if (eventData == null || _scene is not { UsesPointer: true })
+        if (eventData == null || _scene == null || (!_scene.UsesPointer && !_anyHoverEvents))
             return;
 
-        var over = HitAt(eventData, out var region) ? region : default;
+        var found = HitAt(eventData, out var region);
+        if (_anyHoverEvents)
+            TrackHoverEvents(found ? region : null);
+
+        if (!_scene.UsesPointer)
+            return;
+
+        var over = found ? region : default;
         SetHover(over.Id, over.Scope, over.Index);
     }
 
@@ -564,16 +571,21 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
     private bool _pressedInside;
 
+    /// <summary>The forwarder every press, hover and drag event is sent through.</summary>
+    private SS.UiPointerDownForwarder? _eventForwarder;
+
     /// <summary>
-    /// One forwarder per kind of press event. ScriptedScreens' forwarder drops a second event
-    /// from the same pointer within 0.25 s, so a quick press and release through one of them
-    /// would lose the release.
+    /// A fresh pointer id per event sent. ScriptedScreens' forwarder drops a second event from
+    /// the same pointer id within 0.25 s, which merged quick presses and would drop an `enter`
+    /// right after an `exit`; it reads nothing else from the event.
     /// </summary>
-    private SS.UiPointerDownForwarder? _downForwarder;
+    private int _syntheticPointer = int.MinValue / 2;
 
-    private SS.UiPointerDownForwarder? _upForwarder;
+    /// <summary>The hovered region that reports `enter`/`exit`, by its id (with any repeat index).</summary>
+    private string? _hoverEventId;
 
-    private SS.UiPointerDownForwarder? _leaveForwarder;
+    /// <summary>Whether any region on this surface reports `enter`/`exit`, so moves are worth tracking.</summary>
+    private bool _anyHoverEvents;
 
     /// <summary>
     /// A pointer going down on a `press = 1` node: `down:id` to the element's `on_click`.
@@ -609,7 +621,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         _pressedId = region.Id;
         _pressedRegion = region;
         _pressedInside = true;
-        SendPress(ref _downForwarder, "VecPressDown", "down:" + region.Id, eventData);
+        Send("down:" + Tagged(region, LocalPoint(eventData)));
     }
 
     /// <summary>
@@ -628,20 +640,20 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         if (_pressedId == null || eventData == null)
             return;
 
-        var id = _pressedId;
         _pressedId = null;
-        SendPress(ref _upForwarder, "VecPressUp", "up:" + id, eventData);
+        Send("up:" + Tagged(_pressedRegion, LocalPoint(eventData)));
     }
 
     /// <summary>Leaving the surface while held leaves the node too.</summary>
     public void OnPointerExit(PointerEventData eventData)
     {
         SetHover(null, null, -1);
+        TrackHoverEvents(null);
 
         if (_pressedId != null && _pressedInside && eventData != null)
         {
             _pressedInside = false;
-            SendPress(ref _leaveForwarder, "VecPressLeave", "leave:" + _pressedId, eventData);
+            Send("leave:" + _pressedId);
         }
     }
 
@@ -659,15 +671,20 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         }
 
         _pressedInside = false;
-        SendPress(ref _leaveForwarder, "VecPressLeave", "leave:" + _pressedId, eventData);
+        Send("leave:" + _pressedId);
     }
 
     /// <summary>The topmost hit region under the pointer; last match wins, as for clicks.</summary>
     private bool HitAt(PointerEventData eventData, out HitRegion region)
     {
+        return HitAt(eventData.position, eventData.pressEventCamera, out region);
+    }
+
+    private bool HitAt(Vector2 screen, Camera? eventCamera, out HitRegion region)
+    {
         region = default;
         if (_hits.Count == 0 || !RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                rectTransform, eventData.position, eventData.pressEventCamera, out var local))
+                rectTransform, screen, eventCamera, out var local))
         {
             return false;
         }
@@ -685,20 +702,42 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         return found;
     }
 
-    /// <summary>Sends one press event through a forwarder of its own, made beside the click one.</summary>
-    private void SendPress(ref SS.UiPointerDownForwarder? forwarder, string name, string value, PointerEventData eventData)
+    /// <summary>A pointer's position in this surface's canvas space.</summary>
+    private Vector2 LocalPoint(PointerEventData eventData)
+    {
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            rectTransform, eventData.position, eventData.pressEventCamera, out var local);
+        return local;
+    }
+
+    /// <summary>A region's id, with `@fx,fy` when it reports positions (`xy = 1`).</summary>
+    private static string Tagged(HitRegion region, Vector2 canvas)
+    {
+        var at = region.Fraction(canvas);
+        return at is { } f
+            ? region.Id + "@" + f.x.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)
+              + "," + f.y.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)
+            : region.Id;
+    }
+
+    /// <summary>
+    /// Sends one event through the element's `on_click`, as `kind:id` values. The click channel is
+    /// the one ScriptedScreens carries from every player to the chip.
+    /// </summary>
+    private void Send(string value)
     {
         var clicks = _forwarder;
         if (clicks == null)
             return;
 
-        if (forwarder == null)
+        if (_eventForwarder == null)
         {
-            var carrier = new GameObject(name, typeof(RectTransform));
+            var carrier = new GameObject("VecEvents", typeof(RectTransform));
             carrier.transform.SetParent(clicks.transform.parent, worldPositionStays: false);
-            forwarder = carrier.AddComponent<SS.UiPointerDownForwarder>();
+            _eventForwarder = carrier.AddComponent<SS.UiPointerDownForwarder>();
         }
 
+        var forwarder = _eventForwarder;
         forwarder.Board = clicks.Board;
         forwarder.Cartridge = clicks.Cartridge;
         forwarder.Visor = clicks.Visor;
@@ -706,7 +745,26 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         forwarder.Id = _elementId;
         forwarder.EventName = "click";
         forwarder.Value = value;
-        forwarder.OnPointerClick(eventData);
+        forwarder.OnPointerClick(new PointerEventData(EventSystem.current)
+        {
+            button = PointerEventData.InputButton.Left,
+            pointerId = _syntheticPointer++,
+        });
+    }
+
+    /// <summary>`enter:id` / `exit:id` for a `hoverev = 1` region, once per change.</summary>
+    private void TrackHoverEvents(HitRegion? over)
+    {
+        var id = over is { HoverEvents: true } region ? region.Id : null;
+        if (id == _hoverEventId)
+            return;
+
+        if (_hoverEventId != null)
+            Send("exit:" + _hoverEventId);
+
+        _hoverEventId = id;
+        if (id != null)
+            Send("enter:" + id);
     }
 
     /// <summary>Wheel over an <c>SC</c> container scrolls it.</summary>
@@ -728,8 +786,39 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
     public void OnBeginDrag(PointerEventData eventData)
     {
-        if (eventData != null)
-            _dragLast = eventData.position;
+        if (eventData == null)
+            return;
+
+        _dragLast = eventData.position;
+
+        // A drag that starts on a `drag = 1` node is that node's. Tested where the press landed,
+        // not where the pointer is now: Unity starts a drag only after it has moved a little.
+        _draggedId = HitAt(eventData.pressPosition, eventData.pressEventCamera, out var region) && region.Drag
+            ? region.Id
+            : null;
+
+        if (_draggedId != null)
+            Send("dragstart:" + _draggedId);
+    }
+
+    /// <summary>The node a drag started on, while it lasts, or null.</summary>
+    private string? _draggedId;
+
+    /// <summary>
+    /// A drag ending: `drop:src>dst` when released over a `drop = 1` node, then `dragend:src`, in
+    /// the order a browser fires them. Nothing is sent while the drag moves.
+    /// </summary>
+    public void OnEndDrag(PointerEventData eventData)
+    {
+        var source = _draggedId;
+        _draggedId = null;
+        if (source == null || eventData == null)
+            return;
+
+        if (HitAt(eventData.position, eventData.pressEventCamera, out var target) && target.Drop)
+            Send("drop:" + source + ">" + target.Id);
+
+        Send("dragend:" + source);
     }
 
     /// <summary>Dragging inside a container moves the content with the pointer.</summary>
@@ -738,7 +827,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         if (eventData != null)
             CheckLeave(eventData);
 
-        if (eventData == null || !Locate(eventData.position, eventData.pressEventCamera, out var region))
+        // Dragging a `drag = 1` node moves that node, as the scene draws it, not the list it sits in.
+        if (eventData == null || _draggedId != null || !Locate(eventData.position, eventData.pressEventCamera, out var region))
             return;
 
         // Screen pixels, not canvas: the delta is only ever compared against itself and
@@ -2132,6 +2222,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         _hits.Clear();
         _hits.AddRange(_stats.Hits);
+        _anyHoverEvents = _hits.Exists(h => h.HoverEvents);
 
         _scrolls.Clear();
         _scrolls.AddRange(_stats.Scrolls);

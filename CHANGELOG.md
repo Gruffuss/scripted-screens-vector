@@ -2,6 +2,17 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.37
+
+- `xy = 1` on a clickable node reports where it was hit: the value becomes `id@fx,fy`, fractions of the node's box from its top-left, in its own space. For sliders, colour pickers and maps.
+- `hoverev = 1` sends `enter:id` and `exit:id` as the pointer moves onto and off a node, once per change.
+- `drag = 1` and `drop = 1`: `dragstart:id`, then `drop:src>dst` when released over a drop node, then `dragend:src`. A drag that starts on a drag node no longer scrolls the list it is in.
+- `blur` on `G`: CSS `filter: blur()` for flat fills, each drawn as its exact Gaussian-blurred silhouette. Strokes, gradients, pictures and text under it stay sharp.
+- `IMG` reads `data:` URLs (base64 or percent-encoded), uncompressed BMP, and the first frame of a GIF, as well as PNG and JPEG. The format is read from the bytes.
+- Fixed: `down`, `up`, `leave` (and the new events) two of a kind within a quarter of a second arrived as one; each now arrives. A plain click is unchanged.
+- Fixed: an outer box shadow (`sh`) on a shape with sharp corners -- any `R` without round corners, a triangle -- came out about 1.4 times too sharp along its whole edge, because its rings were moved along the corner bisectors without mitring. **Changed:** such shadows are now as soft as CSS draws them, which is visibly softer. Round shapes and inset shadows are unchanged.
+- Fixed: every rebuild allocated a new traversal stack. A still label now costs nothing per rebuild.
+
 ## 0.11.36
 
 - Fixed: several box shadows (`sh`) stacked in reverse, the last one on top. They now stack as CSS does and as text shadows here always did, the first on top. A scene that listed its shadows to suit the old order shows them the other way round.

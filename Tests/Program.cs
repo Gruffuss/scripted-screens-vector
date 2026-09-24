@@ -69,6 +69,20 @@ internal static class Program
 {
     private static int Main()
     {
+        // `--gif <in> <out>`: the decoder's first frame as "w h" then "r g b a" per pixel, to be
+        // compared against an independent decoder.
+        var args = Environment.GetCommandLineArgs();
+        var gifAt = Array.IndexOf(args, "--gif");
+        if (gifAt >= 0 && gifAt + 2 < args.Length)
+        {
+            var pixels = ImageDecode.Gif(System.IO.File.ReadAllBytes(args[gifAt + 1]), out var w, out var h);
+            using var output = new System.IO.StreamWriter(args[gifAt + 2]);
+            output.WriteLine($"{w} {h}");
+            foreach (var p in pixels)
+                output.WriteLine($"{p.r} {p.g} {p.b} {p.a}");
+            return 0;
+        }
+
         Console.WriteLine("Triangulator regression tests");
         Console.WriteLine("(area is the assertion: a clipping stall always loses area)");
         Console.WriteLine();
@@ -173,6 +187,8 @@ internal static class Program
         RequirementTests.PressRegions(run);
         RequirementTests.EventMotion(run);
         RequirementTests.PointerScope(run);
+        RequirementTests.PositionAndHover(run);
+        ImageDecodeTests.Run(run);
         EasingTests.Curves(run);
         EasingTests.Payload(run);
 

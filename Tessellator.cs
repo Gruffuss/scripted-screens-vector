@@ -192,6 +192,12 @@ internal static class Tessellator
         internal ClipRegion? Clip;
 
         /// <summary>
+        /// The Gaussian blur this frame's content takes, as a standard deviation in its own local
+        /// units: an enclosing group's `blur` carried down, divided by any scale in between.
+        /// </summary>
+        internal float Blur;
+
+        /// <summary>
         /// Scene space to this frame's local space, for placing a declared clip.
         /// </summary>
         /// <remarks>
@@ -316,7 +322,10 @@ internal static class Tessellator
         _viewboxScaleX = Mathf.Max(0.0001f, Mathf.Abs(scale.x));
         _viewboxRatio = Mathf.Abs(scale.y) / _viewboxScaleX;
 
-        var stack = new Stack<Frame>();
+        // Reused per thread: a fresh stack each rebuild was an allocation per rebuild that grew
+        // with every field Frame gained.
+        var stack = _frames ??= new Stack<Frame>(16);
+        stack.Clear();
         stack.Push(new Frame
         {
             Matrix = viewbox,
@@ -522,6 +531,8 @@ internal static class Tessellator
 
     [ThreadStatic] internal static List<AlphaGroup>? AlphaFound;
 
+    [ThreadStatic] private static Stack<Frame>? _frames;
+
     /// <summary>Whether this group is faded by its renderer on this visit rather than rebuilt.</summary>
     private static bool Fades(VecNode node, EvalContext context)
     {
@@ -669,6 +680,7 @@ internal static class Tessellator
                 {
                     Matrix = parent.Matrix * local,
                     Opacity = alpha,
+                    Blur = GroupBlur(node, context, parent.Blur, Mathf.Abs(sx) * matrixScale),
                     Clip = clip,
                     Pieces = pieces,
                     CanvasClip = canvasClip,
@@ -1884,20 +1896,48 @@ internal static class Tessellator
     private static void FillAndStroke(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame, List<Vector2> outline, bool closed)
     {
         if (node.Clickable && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
-            RecordHit(node.Id!, outline, frame.Matrix, frame.CanvasClip, context, node.Pressable);
+            RecordHit(node.Id!, outline, frame.Matrix, frame.CanvasClip, context, node);
 
         // Shadows first: they sit beneath the shape, and in declaration order like CSS.
         if (closed)
             EmitShadows(vh, node, context, outline, frame);
 
         if (node.HasFill)
-            FillContour(vh, node, context, frame, outline, null, ResolvePaint(scene, node, context, frame, stroke: false));
+        {
+            var paint = ResolvePaint(scene, node, context, frame, stroke: false);
+
+            // Under a `blur`, a flat fill is drawn as its own blurred silhouette: the shadow
+            // geometry with no offset, in the fill's colour. That is exactly a Gaussian blur of
+            // one flat shape. CSS's blur radius is the standard deviation, a shadow's is twice it.
+            if (frame.Blur > 0.0001f && closed && !paint.IsGradient)
+            {
+                var colour = paint.Colour;
+                colour.a *= paint.Alpha;
+                Shadow.Emit(vh, outline, new VecShadow(0f, 0f, 2f * frame.Blur, 0f, colour, false),
+                    frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+            }
+            else
+            {
+                FillContour(vh, node, context, frame, outline, null, paint);
+            }
+        }
 
         // Inset shadows sit over the fill and under the stroke, as CSS paints them.
         if (closed)
             EmitInsetShadows(vh, scene, node, context, outline, frame);
 
         StrokeOutline(vh, scene, node, context, frame, outline, closed);
+    }
+
+    /// <summary>
+    /// The blur a group's content takes: its parent's, expressed in this group's units (divided by
+    /// the group's scale), combined with its own as Gaussians combine.
+    /// </summary>
+    private static float GroupBlur(VecNode node, EvalContext context, float inherited, float scale)
+    {
+        var carried = scale > 0.0001f ? inherited / scale : inherited;
+        var own = node.Blur == null ? 0f : Mathf.Max(0f, node.Blur.Evaluate(context));
+        return own <= 0f ? carried : carried <= 0f ? own : Mathf.Sqrt(carried * carried + own * own);
     }
 
     private static void EmitBand(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame)
@@ -2926,7 +2966,7 @@ internal static class Tessellator
         return made;
     }
 
-    private static void RecordHit(string id, List<Vector2> outline, Matrix4x4 matrix, List<Vector2>? clip, EvalContext context, bool press = false)
+    private static void RecordHit(string id, List<Vector2> outline, Matrix4x4 matrix, List<Vector2>? clip, EvalContext context, VecNode? node = null)
     {
         if (HitsFound == null || outline.Count == 0)
             return;
@@ -2955,7 +2995,13 @@ internal static class Tessellator
             Rect = Rect.MinMaxRect(min.x, min.y, max.x, max.y),
             Outline = canvas,
             Clip = clip?.ToArray(),
-            Press = press,
+            Press = node?.Pressable ?? false,
+            Xy = node?.ReportsPosition ?? false,
+            HoverEvents = node?.HoverEvents ?? false,
+            Drag = node?.Draggable ?? false,
+            Drop = node?.DropTarget ?? false,
+            CanvasToLocal = node is { ReportsPosition: true } ? AffineInverse(matrix) : Matrix4x4.identity,
+            LocalBounds = node is { ReportsPosition: true } ? BoundsOf(outline) : default,
             Scope = _idPath?.ToArray(),
             Index = context.RepeatDepth > 0 ? Mathf.RoundToInt(context.Index(0)) : -1,
         });

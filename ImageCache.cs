@@ -82,10 +82,28 @@ internal static class ImageCache
         var point = src.StartsWith(PointPrefix, System.StringComparison.Ordinal);
         var url = point ? src.Substring(PointPrefix.Length) : src;
 
+        // A `data:` URL carries its own bytes: nothing to fetch, decoded here and now.
+        if (url.StartsWith("data:", System.StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var bytes = ImageDecode.DataUrl(url) ?? throw new System.FormatException("unreadable data: URL");
+                Ready(entry, Build(bytes, point));
+            }
+            catch (System.Exception ex)
+            {
+                Fail(entry, src, ex.Message);
+            }
+
+            return;
+        }
+
+        // Fetched as bytes and decoded here rather than by UnityWebRequestTexture, so BMP and GIF
+        // go through the same path as PNG and JPEG.
         UnityWebRequest request;
         try
         {
-            request = UnityWebRequestTexture.GetTexture(new System.Uri(url), nonReadable: true);
+            request = UnityWebRequest.Get(new System.Uri(url));
         }
         catch (System.Exception ex)
         {
@@ -103,15 +121,7 @@ internal static class ImageCache
                     return;
                 }
 
-                var texture = DownloadHandlerTexture.GetContent(request);
-                texture.wrapMode = TextureWrapMode.Clamp;
-                texture.filterMode = point ? FilterMode.Point : FilterMode.Bilinear;
-
-                entry.Texture = texture;
-                entry.Width = texture.width;
-                entry.Height = texture.height;
-                entry.Ready = true;
-                System.Threading.Interlocked.Increment(ref _version);
+                Ready(entry, Build(request.downloadHandler.data, point));
             }
             catch (System.Exception ex)
             {
@@ -122,6 +132,58 @@ internal static class ImageCache
                 request.Dispose();
             }
         };
+    }
+
+    private static void Ready(Entry entry, Texture2D texture)
+    {
+        entry.Texture = texture;
+        entry.Width = texture.width;
+        entry.Height = texture.height;
+        entry.Ready = true;
+        System.Threading.Interlocked.Increment(ref _version);
+    }
+
+    /// <summary>A texture from image bytes: PNG and JPEG by Unity, BMP and GIF (first frame) here.</summary>
+    private static Texture2D Build(byte[] bytes, bool point)
+    {
+        Texture2D texture;
+        switch (ImageDecode.Sniff(bytes))
+        {
+            case ImageDecode.Format.Png:
+            case ImageDecode.Format.Jpeg:
+                texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                if (!texture.LoadImage(bytes, markNonReadable: true))
+                    throw new System.FormatException("the image could not be decoded");
+                break;
+
+            case ImageDecode.Format.Bmp:
+                texture = FromPixels(ImageDecode.Bmp(bytes, out var bw, out var bh), bw, bh);
+                break;
+
+            case ImageDecode.Format.Gif:
+                texture = FromPixels(ImageDecode.Gif(bytes, out var gw, out var gh), gw, gh);
+                break;
+
+            default:
+                throw new System.FormatException("not a PNG, JPEG, BMP or GIF");
+        }
+
+        texture.wrapMode = TextureWrapMode.Clamp;
+        texture.filterMode = point ? FilterMode.Point : FilterMode.Bilinear;
+        return texture;
+    }
+
+    /// <summary>A texture from top-row-first pixels; Unity stores the bottom row first.</summary>
+    private static Texture2D FromPixels(Color32[] pixels, int width, int height)
+    {
+        var flipped = new Color32[pixels.Length];
+        for (var y = 0; y < height; y++)
+            System.Array.Copy(pixels, y * width, flipped, (height - 1 - y) * width, width);
+
+        var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+        texture.SetPixels32(flipped);
+        texture.Apply(false, makeNoLongerReadable: true);
+        return texture;
     }
 
     private static void Fail(Entry entry, string src, string? error)

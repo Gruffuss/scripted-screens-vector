@@ -77,6 +77,12 @@ internal sealed class VecNode
     /// <summary>`bri con sat hue gray sep inv` on a group, in the order written.</summary>
     internal List<(int Op, Expression Amount)>? Filters;
 
+    /// <summary>
+    /// `blur = r` on a group: CSS `filter: blur(r)`, r the Gaussian's standard deviation in the
+    /// group's units. Flat fills under it draw as their blurred silhouette; see Tessellator.
+    /// </summary>
+    internal Expression? Blur;
+
     /// <summary>`mask=@gradient` on a group: every colour under it takes the gradient's alpha.</summary>
     internal string? MaskGradient;
 
@@ -316,6 +322,18 @@ internal sealed class VecNode
     /// all through the element's `on_click`. Implies `click = 1`.
     /// </summary>
     internal bool Pressable;
+
+    /// <summary>`xy = 1`: click and press values carry where in the node, `id@fx,fy` (0..1 across its own box).</summary>
+    internal bool ReportsPosition;
+
+    /// <summary>`hoverev = 1`: the pointer entering and leaving the node is sent, `enter:id` / `exit:id`.</summary>
+    internal bool HoverEvents;
+
+    /// <summary>`drag = 1`: a drag starting on the node sends `dragstart:id`, and `dragend:id` when it ends.</summary>
+    internal bool Draggable;
+
+    /// <summary>`drop = 1`: a drag released over the node sends `drop:src>dst`.</summary>
+    internal bool DropTarget;
 
     /// <summary>
     /// `v` on a group: 0 takes the whole subtree out of the drawing, hit regions and all.
@@ -1042,7 +1060,7 @@ internal static class SceneParser
     /// </remarks>
     private static readonly HashSet<string> KnownKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "op", "id", "c", "style", "click", "press", "lod",
+        "op", "id", "c", "style", "click", "press", "xy", "hoverev", "drag", "drop", "blur", "lod",
         "x", "y", "w", "h", "cx", "cy", "rx", "ry", "x1", "y1", "x2", "y2", "y2",
         "n", "p", "d", "seg", "t", "r", "s", "s_", "a", "o", "clip", "ref", "params", "ch",
         "f", "fo", "fo2", "fr", "fea", "fea_edge", "sh",
@@ -1152,6 +1170,9 @@ internal static class SceneParser
                 var mask = PropString(map, "mask");
                 if (!string.IsNullOrEmpty(mask) && mask![0] == '@')
                     node.MaskGradient = mask[1..];
+
+                if (HasKey(map, "blur"))
+                    node.Blur = Attr(map, "blur", 0f);
                 break;
 
             case "RP":
@@ -1448,7 +1469,12 @@ internal static class SceneParser
 
         node.Id = PropString(map, "id");
         node.Pressable = PropNumber(map, "press", 0f) > 0.5f;
-        node.Clickable = PropNumber(map, "click", 0f) > 0.5f || node.Pressable;
+        node.ReportsPosition = PropNumber(map, "xy", 0f) > 0.5f;
+        node.HoverEvents = PropNumber(map, "hoverev", 0f) > 0.5f;
+        node.Draggable = PropNumber(map, "drag", 0f) > 0.5f;
+        node.DropTarget = PropNumber(map, "drop", 0f) > 0.5f;
+        node.Clickable = PropNumber(map, "click", 0f) > 0.5f || node.Pressable || node.HoverEvents || node.ReportsPosition
+                         || node.Draggable || node.DropTarget;
         if (!string.IsNullOrEmpty(node.Id))
             node.SourceProps = map;
 
@@ -1489,7 +1515,7 @@ internal static class SceneParser
                || node.ImageAtX.UsesTime || node.ImageAtY.UsesTime
                || node.ImageOffX.UsesTime || node.ImageOffY.UsesTime
                || node.ImageTileW is { UsesTime: true } || node.ImageTileH is { UsesTime: true }
-               || node.TextOutlineWidth is { UsesTime: true }
+               || node.TextOutlineWidth is { UsesTime: true } || node.Blur is { UsesTime: true }
                || node.EdgeOpacity is { UsesTime: true } || node.ContentH.UsesTime
                || node.FillIndex is { UsesTime: true } || node.StrokeIndex is { UsesTime: true }
                || node.TextIndex is { UsesTime: true } || node.TextSize is { UsesTime: true }

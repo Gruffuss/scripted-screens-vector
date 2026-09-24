@@ -30,6 +30,8 @@
         <Compile Include="..\Clip.cs" />
         <Compile Include="..\Gradient.cs" />
         <Compile Include="..\Easing.cs" />
+        <Compile Include="..\ImageDecode.cs" />
+        <Compile Include="ImageDecodeTests.cs" />
         <Compile Include="..\Expression.cs" />
         <Compile Include="..\SceneText.cs" />
         <Compile Include="..\TextNode.cs" />

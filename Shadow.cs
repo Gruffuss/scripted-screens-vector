@@ -70,30 +70,6 @@ internal static class Shadow
         return 0.5f * (1f + Erf(d / (sigma * 1.41421356f)));
     }
 
-    /// <summary>
-    /// Offsets a closed contour along its own vertex normals. Positive grows it.
-    /// </summary>
-    private static void Offset(List<Vector2> source, List<Vector2> into, Vector2 shift, float amount, float winding)
-    {
-        into.Clear();
-        var count = source.Count;
-
-        for (var i = 0; i < count; i++)
-        {
-            var previous = source[(i - 1 + count) % count];
-            var next = source[(i + 1) % count];
-
-            var incoming = (source[i] - previous).normalized;
-            var outgoing = (next - source[i]).normalized;
-
-            var normal = new Vector2(incoming.y + outgoing.y, -(incoming.x + outgoing.x)).normalized * winding;
-            if (normal.sqrMagnitude < 0.0001f)
-                normal = Vector2.up;
-
-            into.Add(source[i] + shift + normal * amount);
-        }
-    }
-
     [System.ThreadStatic] private static List<Vector2>? _inner;
     [System.ThreadStatic] private static List<Vector2>? _outer;
 
@@ -135,11 +111,14 @@ internal static class Shadow
         // each other, and the fan over that fold covered parts of the core twice: visible as
         // light wedges under a translucent card (`G o=0.5` over a blur 12 glow, 2026-09-15). Past
         // the limit the core simply stays at the deepest valid contour, at the coverage there.
-        var start = Mathf.Min(reach, shadow.Spread + InwardLimit(outline, winding, miter: false));
+        // Mitred, as the inset path always was: a vertex moved `d` along its bisector moves the
+        // edges beside it by only d*cos(half the corner), so on a plain rectangle every ring sat
+        // 1/sqrt2 as far out as its coverage said and the blur came out sqrt2 too sharp.
+        var start = Mathf.Min(reach, shadow.Spread + InwardLimit(outline, winding, miter: true));
         start = Mathf.Max(start, -reach);
 
         // Innermost contour: covered to `start`, so it is filled solid rather than ramped.
-        Offset(outline, inner, shift, shadow.Spread - start, winding);
+        MiterOffset(outline, inner, shift, shadow.Spread - start, winding);
 
         var core = shadow.Colour;
         core.a *= Coverage(start, sigma);
@@ -159,7 +138,7 @@ internal static class Shadow
             var dInner = start - r * ((start + reach) / rings);
             var dOuter = start - (r + 1) * ((start + reach) / rings);
 
-            Offset(outline, outer, shift, shadow.Spread - dOuter, winding);
+            MiterOffset(outline, outer, shift, shadow.Spread - dOuter, winding);
 
             var aInner = shadow.Colour.a * Coverage(dInner, sigma);
             var aOuter = shadow.Colour.a * Coverage(dOuter, sigma);

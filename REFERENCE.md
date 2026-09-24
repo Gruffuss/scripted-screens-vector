@@ -379,9 +379,17 @@ ignored, so annotations are harmless.
 | `m` | `{a, b, c, d, e, f}` | CSS `matrix()`, applied after `t r s` (innermost) |
 | `bri` `con` `sat` `hue` `gray` `sep` `inv` | number/expr | colour filters, CSS `filter()` semantics |
 | `mask` | `"@gradient"` | multiplies every colour under the group by the gradient's alpha |
+| `blur` | number/expr | CSS `filter: blur()`: the Gaussian's standard deviation, in the group's units. Flat closed fills under it draw blurred; see below |
 | `c` | array | child nodes |
 
 Applied scale → rotate → translate, about `a`. Nests without limit.
+
+**`blur` blurs flat fills only.** Each flat, closed fill under the group (`R`, `C`, a closed `Y`,
+`SP` or `P`) is drawn as its own blurred silhouette, the same geometry a shadow uses, which is
+exactly a Gaussian blur of that one shape. Strokes, gradient fills, pictures and text are drawn
+sharp. Two overlapping shapes are each blurred on their own and then composited, which a browser
+does the other way round; for soft glows, blobs and out-of-focus backdrops the difference does
+not show. Nested blurs combine as Gaussians do, `sqrt(a² + b²)`.
 
 **`o = 0` is free, not merely cheap.** A group at zero opacity is skipped whole rather than
 node by node, so keeping an alternative layout in the scene and showing it with `o` costs
@@ -826,7 +834,7 @@ Catmull-Rom, so the curve passes **through** its points rather than being pulled
 | Key | Meaning |
 |-----|---------|
 | `x`, `y`, `w`, `h` | the box |
-| `src` | URL (`https://`, `file://`) |
+| `src` | URL (`https://`, `file://`, `data:`); PNG, JPEG, BMP, or the first frame of a GIF |
 | `fit` | `fill` (default, stretch), `contain`, `cover`, `none` (one scene unit per texel), `scale-down` (`contain` if the picture is larger than the box, else `none`) — CSS `object-fit` |
 | `rx` / `ry` | corner radii, as `R` |
 | `o` | opacity `0..1`, multiplied by the enclosing group's |
@@ -844,6 +852,10 @@ Catmull-Rom, so the curve passes **through** its points rather than being pulled
 ```
 IMG x=10 y=10 w=80 h=45 src=https://example.com/map.png fit=cover rx=6
 ```
+
+A `data:` URL (`data:image/gif;base64,...`, or percent-encoded) is decoded in place, with no
+download. The format is read from the bytes, not from the URL or the MIME type. BMP is read when
+uncompressed (8, 24 or 32 bits); a GIF shows its first frame, with its transparency.
 
 **Nothing is drawn until the picture has loaded**, then the surface rebuilds once. Each source is
 fetched once per session and shared by every console that uses it. A failed load is a scene
@@ -1038,8 +1050,40 @@ end
 
 Nodes without `press` never send these, so an existing handler sees exactly the clicks it did.
 They travel as clicks because the click is the one event ScriptedScreens carries from every
-player to the chip. Two presses of the same kind less than a quarter of a second apart arrive
-as one: ScriptedScreens drops repeats that close together.
+player to the chip. Since 0.11.37 each arrives on its own, however close together; before, two of
+the same kind within a quarter of a second arrived as one.
+
+**`xy = 1` reports where the node was hit**, as fractions of its box from its top-left corner:
+`id@fx,fy`, three decimals each, `0,0` top-left and `1,1` bottom-right, measured in the node's
+own space (a turned slider still reads along its own length). Every value the node sends carries
+it -- the click, and `down`/`up` with `press = 1`; a release off the node reads as its nearest
+edge. For a slider or a colour picker:
+
+```lua
+on_click = function(value, player)
+    local id, fx, fy = value:match("^(.-)@([%d.]+),([%d.]+)$")
+    if id == "volume" then level = tonumber(fx) end
+end
+```
+
+**`hoverev = 1` reports the pointer entering and leaving**: `enter:id` when it moves onto the
+node, `exit:id` when it moves off (or onto another such node, `exit` first). One of each per
+change, nothing while it moves inside. Hover styling needs no events at all -- see `hover` in
+the expressions -- so use this only when the chip itself has to know, such as a tooltip filled
+from device data.
+
+**`drag = 1` and `drop = 1` report drag and drop**:
+
+| value | when |
+|---|---|
+| `dragstart:id` | a drag begins on a `drag = 1` node |
+| `drop:src>dst` | it is released over a `drop = 1` node |
+| `dragend:src` | it is released anywhere, after any `drop` |
+
+Nothing is sent while the drag moves, and the scene does not move the dragged node: the chip
+answers `drop` with whatever the scene should now show. A drag that starts on a `drag = 1` node
+inside a scroll container does not scroll it. Any of `xy`, `hoverev`, `drag` and `drop` makes a
+node clickable as `click = 1` does, and inside a repeat the ids carry their index as above.
 
 ### Shadows
 
