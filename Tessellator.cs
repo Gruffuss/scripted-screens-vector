@@ -848,16 +848,17 @@ internal static class Tessellator
     /// </summary>
     /// <remarks>
     /// Built by hand rather than through <c>Quaternion.Euler</c>, which is a native call: that
-    /// kept every rotated group out of the headless tests. The rotation matches what
-    /// <c>Matrix4x4.Rotate(Quaternion.Euler(0, 0, -r))</c> produced -- counter-clockwise in the
-    /// flipped canvas, clockwise on screen, as scenes are written.
+    /// kept every rotated group out of the headless tests. The matrix acts in scene space, +Y
+    /// down, so a positive angle with the textbook matrix is clockwise on screen, as CSS
+    /// `rotate()` and the `m` branch below. Before 0.11.38 the angle was negated here, which
+    /// turned every `r` the other way.
     ///
     /// CSS reads `transform: translate rotate scale matrix` left to right as matrices multiplied
     /// in that order, so the matrix is the innermost factor and acts on points first.
     /// </remarks>
     internal static Matrix4x4 GroupMatrix(float tx, float ty, float ax, float ay, float rotateDegrees, float sx, float sy, float[]? m)
     {
-        var radians = -rotateDegrees * Mathf.Deg2Rad;
+        var radians = rotateDegrees * Mathf.Deg2Rad;
         var cos = Mathf.Cos(radians);
         var sin = Mathf.Sin(radians);
 
@@ -1811,7 +1812,9 @@ internal static class Tessellator
         if (w <= 0f || h <= 0f)
             return outline;
 
-        var rx = Mathf.Clamp(node.Rx.Evaluate(context), 0f, w * 0.5f);
+        // One radius for every corner: CSS's corner-sum rule reduces to half the shorter side.
+        // Clamped to half the width alone, a wide, short box drew arcs that crossed.
+        var rx = Mathf.Clamp(node.Rx.Evaluate(context), 0f, Mathf.Min(w, h) * 0.5f);
         var ry = Mathf.Clamp(node.Ry.Evaluate(context), 0f, h * 0.5f);
 
         if (rx < 0.01f || ry < 0.01f)
@@ -1833,11 +1836,18 @@ internal static class Tessellator
 
         if (node.CornerRadii != null)
         {
-            var half = Mathf.Min(w, h) * 0.5f;
-            tl = Mathf.Clamp(node.CornerRadii[0].Evaluate(context), 0f, half);
-            tr = Mathf.Clamp(node.CornerRadii[1].Evaluate(context), 0f, half);
-            br = Mathf.Clamp(node.CornerRadii[2].Evaluate(context), 0f, half);
-            bl = Mathf.Clamp(node.CornerRadii[3].Evaluate(context), 0f, half);
+            tl = Mathf.Max(0f, node.CornerRadii[0].Evaluate(context));
+            tr = Mathf.Max(0f, node.CornerRadii[1].Evaluate(context));
+            br = Mathf.Max(0f, node.CornerRadii[2].Evaluate(context));
+            bl = Mathf.Max(0f, node.CornerRadii[3].Evaluate(context));
+
+            // CSS's rule: where the two radii along a side add up to more than the side, every
+            // radius shrinks by the same factor, so the shape keeps its proportions.
+            var f = Mathf.Min(1f, Mathf.Min(Mathf.Min(Fit(w, tl + tr), Fit(w, bl + br)), Mathf.Min(Fit(h, tl + bl), Fit(h, tr + br))));
+            tl *= f;
+            tr *= f;
+            br *= f;
+            bl *= f;
         }
 
         var segments = CornerSegments(Mathf.Max(Mathf.Max(tl, tr), Mathf.Max(br, bl)), scale);
@@ -1848,6 +1858,8 @@ internal static class Tessellator
         Corner(outline, new Vector2(x + tl, y + tl), tl, 180f, 270f, segments);
         return outline;
     }
+
+    private static float Fit(float side, float radii) => radii > side ? side / radii : 1f;
 
     private static List<Vector2> EllipseOutline(VecNode node, EvalContext context)
     {

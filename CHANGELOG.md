@@ -2,6 +2,14 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.38
+
+- Fixed: `r` on a group turned counter-clockwise, although it is documented as degrees clockwise and CSS `rotate()` (and `m` here) turn clockwise. **Changed:** every `r` now turns the other way. A scene written to the docs -- a gauge needle sweeping from `-120` to `+120` -- now sweeps left to right as intended; one tuned by eye to the old direction needs its angle negated.
+- Fixed: a single `rx` was limited to half the box's width only, so on a wide, short box the corners overran each other and the outline crossed itself. Radii now shrink by CSS's rule: one `rx` to half the shorter side, per-corner radii all by one factor where two along a side exceed it. **Changed:** a per-corner radius may now reach the full side where its neighbours leave room, as in CSS; it was cut to half the shorter side.
+- Fixed: capturing a console restarted its animations: the rebuilt surface started its clock, and every `since($name)`, from zero. They carry on now.
+- Fixed: turning the view off a held `press = 1` node sent no `leave:id`; only the pointer moving did. A held press is now re-tested every frame.
+- Fixed: a capture of a distant console came out blurred, with coarse curves and shadow rings, because it was built for the console's small size on screen rather than for the capture's resolution.
+
 ## 0.11.37
 
 - `xy = 1` on a clickable node reports where it was hit: the value becomes `id@fx,fy`, fractions of the node's box from its top-left, in its own space. For sliders, colour pickers and maps.

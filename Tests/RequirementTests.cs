@@ -62,7 +62,8 @@ internal static class RequirementTests
         // The matrix is innermost: scale x2 first, then rotate, then translate.
         var m = Tessellator.GroupMatrix(100f, 0f, 0f, 0f, 90f, 1f, 1f, new[] { 2f, 0f, 0f, 1f, 0f, 0f });
         var p = m.MultiplyPoint3x4(new Vector3(10f, 0f, 0f));
-        run.Check("matrix: m acts before t r s", Mathf.Abs(p.x - 100f) < 0.001f && Mathf.Abs(p.y + 20f) < 0.001f, $"{p}");
+        // Scene space is +Y down, so r=90 clockwise on screen takes +x to +y, as CSS rotate(90deg).
+        run.Check("matrix: m acts before t r s, and r turns clockwise", Mathf.Abs(p.x - 100f) < 0.001f && Mathf.Abs(p.y - 20f) < 0.001f, $"{p}");
 
         var back = Tessellator.AffineInverse(m).MultiplyPoint3x4(p);
         run.Check("matrix: managed inverse round-trips", (back - new Vector3(10f, 0f, 0f)).magnitude < 0.001f, $"{back}");

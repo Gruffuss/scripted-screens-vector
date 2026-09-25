@@ -472,7 +472,9 @@ enclosing index is `i1`, the next out `i2`.
 ### `R` — rectangle
 
 `x`, `y`, `w`, `h`, plus optional `rx` / `ry` corner radii. `rx` alone gives circular
-corners. Radii clamp to half the shorter side. Corners are true arcs.
+corners. Radii too large for the box shrink as CSS shrinks them: one `rx` to half the
+shorter side, and per-corner radii all by the same factor wherever the two along one side add
+up to more than that side. Corners are true arcs.
 
 **Per-corner radii:** `rx = { tl, tr, br, bl }`, CSS order. A zero corner is a sharp point.
 

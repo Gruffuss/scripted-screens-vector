@@ -464,6 +464,18 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         SetVerticesDirty();
     }
 
+    /// <summary>
+    /// Takes over another graphic's scene clock, for a surface ScriptedScreens rebuilt with the
+    /// same structure: `t` carries on rather than starting again, and so does every
+    /// `since($name)`, which the replayed data would otherwise stamp as arriving now.
+    /// </summary>
+    internal void ContinueClockFrom(VectorGraphic previous)
+    {
+        _startTime = previous._startTime;
+        foreach (var pair in previous._context.ArrivedAt)
+            _context.ArrivedAt[pair.Key] = pair.Value;
+    }
+
     /// <summary>Replaces the data bindings referenced as <c>$name</c>. Cheap; called per tick.</summary>
     /// <summary>
     /// Gives the graphic what it needs to dispatch a click through ScriptedScreens.
@@ -571,6 +583,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
     private bool _pressedInside;
 
+    /// <summary>
+    /// The held press's pointer, re-tested every frame: turning the view moves the console under
+    /// a still pointer, and no pointer event reports that.
+    /// </summary>
+    private PointerEventData? _pressEvent;
+
     /// <summary>The forwarder every press, hover and drag event is sent through.</summary>
     private SS.UiPointerDownForwarder? _eventForwarder;
 
@@ -621,6 +639,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         _pressedId = region.Id;
         _pressedRegion = region;
         _pressedInside = true;
+        _pressEvent = eventData;
         Send("down:" + Tagged(region, LocalPoint(eventData)));
     }
 
@@ -641,6 +660,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             return;
 
         _pressedId = null;
+        _pressEvent = null;
         Send("up:" + Tagged(_pressedRegion, LocalPoint(eventData)));
     }
 
@@ -958,10 +978,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         foreach (var pair in _offsets)
             _context.ScrollOffsets[pair.Key] = pair.Value;
 
-        var screenScale = ScreenPixelsPerCanvasUnit();
-        var known = screenScale > 0f;
-
-        Tessellator.Emit(_builder, _scene, _context, rect, known ? screenScale : 1f, known, _stats);
+        // Built for the capture, not for the screen: ScriptedScreens renders the clone at one
+        // pixel per canvas unit. The live on-screen scale made a distant console's capture
+        // feathered for a few pixels -- blurred -- with coarse curves and shadow rings.
+        Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats);
 
         if (_scene.TextInOrder)
             TextOrder.Assign(_stats.Text, _builder);
@@ -973,7 +993,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         _lastShapeCount = _stats.Shapes;
         _lastVertices = _builder.currentVertCount;
         _builtForBucket = ScaleBucket();
-        _needsRebuild = false;
+
+        // Built for the capture's resolution, so the screen gets its own build next frame.
+        _needsRebuild = true;
         _dataDirty = false;
 
         EnsureMesh();
@@ -1775,6 +1797,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         LandJob();
         ApplyDeferred();
         ApplyFades();
+
+        if (_pressEvent != null && _pressedInside)
+            CheckLeave(_pressEvent);
 
         // The entire per-frame cost of a static scene is this one boolean.
         // A scene with no `t` still has to redraw while data is easing to a new value.

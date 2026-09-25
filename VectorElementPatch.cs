@@ -174,7 +174,13 @@ internal static class VectorElementPatch
             // rebuilt from scratch -- and the old values then landed in the wrong slots: a
             // capture showed stale text in other fonts, and dark blocks.
             if (string.Equals(previous.StructureText, source, StringComparison.Ordinal))
+            {
                 graphic.SetData(previous.Snapshot());
+
+                // And the same clock: the rebuilt graphic is the live console from now on, and
+                // starting its `t` afresh made every capture restart every animation on screen.
+                graphic.ContinueClockFrom(previous);
+            }
 
             // The old host is only destroyed at the end of the frame, and a capture copies the
             // surface before that: both pages were drawn, the old one's labels over the new,
