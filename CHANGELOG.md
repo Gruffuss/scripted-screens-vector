@@ -2,6 +2,12 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.39
+
+- Fixed: two stops at the same offset -- a hard stop, which is what every CSS stripe is made of -- drew as a smooth ramp from the cut to the next stop instead of a step. The band either side of the cut was coloured from the stop position itself, which reads as the colour *before* it. Nudging one stop by a thousandth was the workaround and is no longer needed.
+- Fixed: a capture drew a group faded by its `o` at full opacity -- a pulsing dot came out solid however faint it was on screen. A renderer fade is live state that the clone ScriptedScreens photographs does not carry, so a capture now multiplies the group's `o` into its colours instead.
+- Fixed: `hover`, `down` and the `hoverev` events only noticed a change when the pointer itself moved. Turning the view moves the console under a still crosshair, so a card stayed lit and `enter`/`exit` did not arrive until the mouse was nudged. What is under the pointer is re-tested every frame now, for as long as the pointer is over the surface.
+
 ## 0.11.38
 
 - Fixed: `r` on a group turned counter-clockwise, although it is documented as degrees clockwise and CSS `rotate()` (and `m` here) turn clockwise. **Changed:** every `r` now turns the other way. A scene written to the docs -- a gauge needle sweeping from `-120` to `+120` -- now sweeps left to right as intended; one tuned by eye to the old direction needs its angle negated.

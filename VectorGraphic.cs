@@ -554,15 +554,53 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         if (eventData == null || _scene == null || (!_scene.UsesPointer && !_anyHoverEvents))
             return;
 
+        _pointer = eventData;
+        PollPointer(eventData);
+    }
+
+    /// <summary>
+    /// What the pointer is over, and the `enter`/`exit` that follow from a change.
+    /// </summary>
+    /// <remarks>
+    /// Also run every frame from <c>Update</c> while the pointer is over this surface, because
+    /// turning the view moves the console under a still crosshair and Unity reports nothing:
+    /// a card stayed lit for as long as the player looked at the next one without moving the
+    /// mouse, and the chip was never told it had been left.
+    /// </remarks>
+    private void PollPointer(PointerEventData eventData)
+    {
         var found = HitAt(eventData, out var region);
         if (_anyHoverEvents)
             TrackHoverEvents(found ? region : null);
 
-        if (!_scene.UsesPointer)
+        if (_scene is not { UsesPointer: true })
             return;
 
         var over = found ? region : default;
         SetHover(over.Id, over.Scope, over.Index);
+    }
+
+    /// <summary>
+    /// The pointer over this surface, or null. Kept so the hit test can be repeated on a frame
+    /// with no pointer event; dropped once nothing is under it, so a surface the player has
+    /// turned away from stops polling.
+    /// </summary>
+    private PointerEventData? _pointer;
+
+    private void PollHover()
+    {
+        if (_pointer == null || _scene == null || _hits.Count == 0)
+            return;
+
+        if (!_scene.UsesPointer && !_anyHoverEvents)
+        {
+            _pointer = null;
+            return;
+        }
+
+        PollPointer(_pointer);
+        if (_hoverId == null && _hoverEventId == null)
+            _pointer = null;
     }
 
     private void SetHover(string? id, string[]? scope, int index)
@@ -667,6 +705,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>Leaving the surface while held leaves the node too.</summary>
     public void OnPointerExit(PointerEventData eventData)
     {
+        _pointer = null;
         SetHover(null, null, -1);
         TrackHoverEvents(null);
 
@@ -981,7 +1020,17 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // Built for the capture, not for the screen: ScriptedScreens renders the clone at one
         // pixel per canvas unit. The live on-screen scale made a distant console's capture
         // feathered for a few pixels -- blurred -- with coarse curves and shadow rings.
-        Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats);
+        // The capture's clone has no renderer alpha of its own, so a fading group's `o` goes
+        // into its colours here instead.
+        Tessellator.BakeFades = true;
+        try
+        {
+            Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats);
+        }
+        finally
+        {
+            Tessellator.BakeFades = false;
+        }
 
         if (_scene.TextInOrder)
             TextOrder.Assign(_stats.Text, _builder);
@@ -1800,6 +1849,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         if (_pressEvent != null && _pressedInside)
             CheckLeave(_pressEvent);
+
+        PollHover();
 
         // The entire per-frame cost of a static scene is this one boolean.
         // A scene with no `t` still has to redraw while data is easing to a new value.

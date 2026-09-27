@@ -283,6 +283,10 @@ the capture rebuilds the surface and renders a clone inside one call, so the geo
 tessellated **inline on the main thread** rather than on a worker. A capture of a dense
 console costs a frame; ordinary rendering is unaffected.
 
+A capture is built at the picture's own resolution rather than the console's size on screen, so
+a console across the room captures as sharply as one you are standing at, and a group faded by
+its `o` is captured at the opacity it shows.
+
 The capture rebuilds the scene from its elements, so a `keep = 1` scene keeps the values it was
 sent only if its structure is unchanged; a scene that sends a different structure on rebuild
 must send its values with it. With Diagnostics on, every capture writes what it copied (each
@@ -1236,6 +1240,15 @@ Without feathering every edge is hard — UGUI applies no antialiasing of its ow
 | `units` | as above |
 | `stops` | as above |
 | `spread` | as above |
+
+**Two stops at the same position are a hard edge**, as in CSS. The colour steps there instead
+of ramping, and with `spread = "repeat"` that is a stripe or a grid:
+
+```lua
+{ op = "GL", id = "stripes", units = "bbox", x1 = 0, y1 = 0, x2 = 0.2, y2 = 0,
+  spread = "repeat",
+  stops = { { 0, "#1E3247" }, { 0.35, "#1E3247" }, { 0.35, "#0B1622" }, { 1, "#0B1622" } } }
+```
 
 **`units = "bbox"`** spans the referencing shape's own bounding box, `0..1`. Prefer it: no
 coordinates to get wrong, and it tracks a shape that moves or resizes. Without it,

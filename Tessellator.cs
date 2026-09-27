@@ -533,10 +533,21 @@ internal static class Tessellator
 
     [ThreadStatic] private static Stack<Frame>? _frames;
 
+    /// <summary>
+    /// Set for a build whose mesh is read on its own, with no renderer to carry a fade: a
+    /// capture. Every group's `o` is then multiplied into its colours as any other opacity is.
+    /// </summary>
+    /// <remarks>
+    /// A renderer fade is <c>CanvasRenderer.SetAlpha</c>, which is live state and not part of
+    /// the object, so the clone ScriptedScreens photographs starts at full opacity: a pulsing
+    /// disc was captured solid however faint it was on screen.
+    /// </remarks>
+    [ThreadStatic] internal static bool BakeFades;
+
     /// <summary>Whether this group is faded by its renderer on this visit rather than rebuilt.</summary>
     private static bool Fades(VecNode node, EvalContext context)
     {
-        return node.AlphaOnly && context.RepeatDepth == 0 && AlphaFound != null && !_repeatPiece;
+        return !BakeFades && node.AlphaOnly && context.RepeatDepth == 0 && AlphaFound != null && !_repeatPiece;
     }
 
     /// <summary>Set when the walk reaches a node whose own values read `t`.</summary>
@@ -3509,8 +3520,16 @@ internal static class Tessellator
             // Which period this band is in, so its vertices are coloured within it: the vertex
             // on a `repeat` seam belongs to the end of one period and the start of the next,
             // and sampling it by position alone would give both bands the first colour.
-            var middle = (Mathf.Max(from, low) + Mathf.Min(to, high)) * 0.5f;
+            var bandLow = Mathf.Max(from, low);
+            var bandHigh = Mathf.Min(to, high);
+            var middle = (bandLow + bandHigh) * 0.5f;
             var period = spread ? Mathf.Floor(middle) : 0f;
+
+            // A vertex sitting exactly on a cut is read just inside this band. Two stops at one
+            // offset -- a hard stop, every CSS stripe -- are a step, and sampling the vertex at
+            // the offset itself gave the colour from the band BEFORE it, so the band ramped from
+            // the old colour to the next stop instead of starting at the new one.
+            var edge = (bandHigh - bandLow) * 0.0001f;
             var outside = clear && (middle < 0f || middle > 1f);
 
             input.Clear(); inputT.Clear();
@@ -3528,10 +3547,11 @@ internal static class Tessellator
             var origin = vh.currentVertCount;
             for (var j = 0; j < input.Count; j++)
             {
-                var colour = spread ? paint.AtParameter(Local(inputT[j] - period, period))
+                var t = edge > 0f ? Mathf.Clamp(inputT[j], bandLow + edge, bandHigh - edge) : inputT[j];
+                var colour = spread ? paint.AtParameter(Local(t - period, period))
                     : outside ? paint.AtParameter(middle, beyond: true)
-                    : clear ? paint.AtParameter(inputT[j])
-                    : paint.At(input[j]);
+                    : clear ? paint.AtParameter(t)
+                    : paint.AtParameter(gradient.Spread == 0 ? t : gradient.Wrap(t));
                 vh.AddVert(matrix.MultiplyPoint3x4(input[j]), colour, Vector2.zero);
             }
             for (var j = 1; j + 1 < input.Count; j++)
