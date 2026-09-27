@@ -103,10 +103,10 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
 | liquid surface, filled wave, area chart | `YS` (sampled band: `n`, `x`, `y`, `y2` per sample `i`) |
 | line chart, waveform | `LS` (sampled line) |
 | many copies: ticks, rows, motes | `RP` (`n`, children use `i`) |
-| move, rotate, scale, fade, clip, filter a subtree | `G` (`t r s a o clip m`, filters, `mask`) |
+| move, rotate, scale, fade, clip, filter a subtree | `G` (`t r s a o clip m`, filters, `mask`, `blur`) |
 | text, live numbers | `T` (`text`, `fmt`, `size`, `font`, `align`) |
 | scrolling list | `SC` (`id`, `ch` = content height) |
-| picture from a URL | `IMG` (`src`, `fit`) |
+| picture from a URL or `data:` | `IMG` (`src`, `fit`; PNG, JPEG, BMP, GIF first frame) |
 | gradient, clip shape, reusable part | `defs`: `GL` `GR` `GC`, `CP`, `SYM` + `USE` |
 
 ## Syntax essentials
@@ -114,16 +114,24 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
 - Coordinates are viewbox units, **origin top-left, +Y down**.
 - Paint: `f` fill, `s` stroke, `sw` stroke width, `fo`/`so` opacity 0..1, colours `#RRGGBB` or
   `#RRGGBBAA`, `"none"`, `@id` for a gradient, `$name` for a colour from data. `sh` shadows,
-  `fea` edge feather, `click = 1` with an `id` for a hit region.
+  `fea` edge feather, `click = 1` with an `id` for a hit region. `r` on a `G` is degrees
+  **clockwise**, as CSS `rotate()`.
+- Two gradient stops at the same position are a hard edge, and with `spread = "repeat"` that
+  tiles into stripes or a grid.
 - Any number can be an expression: a string starting with `=`.
   - Variables: `t` seconds, `i` repeat index from 0, `n` repeat count, `i1 i2` outer repeat
     indices, `$name` data value, `$arr[k]` array element (0-based), `sy`/`vh` scroll offset
     and viewport height.
+  - Also `hover` and `down`, `1` while the pointer is over or held on a clickable node inside
+    the nearest node with an `id`, and `since($name)`, seconds since that value last arrived.
   - Functions: `sin cos tan atan2 abs sign sqrt floor ceil round min max clamp lerp mod saw
     tri pulse step smoothstep if eq lt gt lte gte and or not hash hash2 pi tau`. `^` is power;
     there is no `pow`. Unknown functions fail the scene.
+- A `T` may hold several values and expressions: `text = "set {$press:%.1f} of {=t*2:%.0f}"`,
+  and `missing = "..."` says what to show before a value arrives.
 - Data values ease between ticks by themselves; do not interpolate in Lua. For a value that
-  must change at once (a mode, a selection), send it in a payload with `snap = 1`.
+  must change at once (a mode, a selection), send it in a payload with `snap = 1`. Per value,
+  `ease = { bar = { 0.6, "ease-out" } }` gives its own duration, CSS curve and optional delay.
 
 ## Rules that fail silently: check every one
 
@@ -162,7 +170,13 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
 ## Events
 
 - Clicks: `on_click = function(nodeId, player)` on the **structure element**. Inside a repeat
-  the id is `"id:i"`: `local id, k = nodeId:match("^(.-):(%d+)$")`.
+  the id is `"id:i"`: `local id, k = nodeId:match("^(.-):(%d+)$")`. A click lands on what is
+  drawn, inside the outline and any clip, last drawn wins.
+- More pointer detail, all opt-in flags beside an `id`, all arriving through the same
+  `on_click`: `press = 1` sends `down:id` / `up:id` / `leave:id`; `xy = 1` appends `@fx,fy`
+  (where in the node, `0..1` from its top-left); `hoverev = 1` sends `enter:id` / `exit:id`;
+  `drag = 1` and `drop = 1` send `dragstart:id`, `drop:src>dst`, `dragend:src`. For hover
+  *styling* send nothing and use the `hover` / `down` expression variables instead.
 - Scroll: `SC` scrolls on wheel and drag on the client; the chip is not told. Jump from the
   script with `so = "=$to", sov = "=$version"` (applied once per new version).
 - Patch one node without resending the scene: `data:set_props({ nodes = { id = { w = 42 } } })`.

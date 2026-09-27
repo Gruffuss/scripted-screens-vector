@@ -196,10 +196,32 @@ The renderer eases `$name` values across the gap between payloads, measuring tha
 so it adapts to any tick rate. You get this for free.
 
 The cost: **a value that should snap will not.** A discrete mode flip arrives over roughly one
-tick. `Renderer.SmoothData = false` restores snapping.
+tick. Send that payload with `snap = 1` for a value that must land at once, and
+`Renderer.SmoothData = false` turns easing off altogether.
+
+Per value, `ease` gives a name its own glide time and CSS curve instead of gliding straight
+across the gap to the next payload, with an optional delay so a row of bars sets off in
+sequence from one payload:
+
+```lua
+data:set_props({ data = values, ease = { bar = { 0.6, "ease-out" }, tail = { 0.4, "ease-in", 0.15 } } })
+```
 
 Arrays are smoothed too, which matters most for history charts — see the rolling-window
 idiom in [`05-curves.lua`](examples/05-curves.lua).
+
+### Motion started by an event — `since()`
+
+`since($name)` is the seconds since that data name last arrived, so a flash, a slide-in or a
+bar that jumps and settles is **one payload** and the scene draws the rest:
+
+```lua
+-- flash white for a third of a second whenever `alarm` is sent again
+fo = "=clamp(1-since($alarm)*3,0,1)"
+```
+
+Resending the same value counts as an arrival, which is the point: the chip says *when*, the
+client draws the shape of it, and nothing is sent per frame.
 
 ### `RP` versus `YS`
 
@@ -265,6 +287,35 @@ the glow is baked into the font's distance field, which only reaches so far past
 On the game's LiberationSans that is about `fontSize / 8.65` canvas units of blur-plus-spread,
 so a `0 0 6` glow on 14-point text draws at about half size. `vector_stats` lists any such
 reduction under `TEXT`; the fix is a smaller blur. `examples/10-text.lua` shows both cases.
+
+### Soft glows — `blur` on a group
+
+`blur = r` on a `G` is CSS `filter: blur(r)`, `r` being the Gaussian's standard deviation in
+the group's units. Each flat, closed fill under it is drawn as its own blurred silhouette:
+
+```
+G blur=6 { C cx=40 cy=40 rx=14 ry=14 f=#5FD9A8 }
+```
+
+Only flat fills blur — strokes, gradient fills, pictures and text under the group stay sharp —
+and two overlapping shapes are each blurred on their own and then composited, where a browser
+blurs the pair together. For glows, blobs and an out-of-focus backdrop the difference does not
+show. Nested blurs combine as Gaussians do, `sqrt(a^2 + b^2)`.
+
+### Pictures — `IMG`
+
+`IMG` draws a picture in a box: `src` plus `fit` (`fill`, `contain`, `cover`, `none`,
+`scale-down`, as CSS `object-fit`), with `at`/`off` placing it, `uv` cropping it, `tile`/`rep`
+repeating it, `slice`/`bw` making a nine-slice frame, and `smp = "point"` for hard pixels.
+
+```
+IMG x=10 y=10 w=80 h=45 src=https://example.com/map.png fit=cover rx=6
+```
+
+PNG, JPEG, uncompressed BMP and a GIF's first frame all load, from `https://`, `file://` or a
+`data:` URL decoded in place with no download. The format is read from the bytes, not the
+name. Each source is fetched once per session and shared by every console using it; nothing is
+drawn until it has loaded, and a failure is a scene problem naming the error.
 
 ### Scrolling a list — `SC`
 
@@ -360,6 +411,19 @@ stops = {
 Keep the window small but non-zero. At exactly zero a value crossing the boundary pops; a
 0.001 window plus the renderer's own easing between payloads turns it into a quick transition
 with no per-frame work.
+
+**For a stripe, though, put both stops at exactly the same position.** That is a hard edge,
+as in CSS, and with `spread = "repeat"` it tiles into stripes or a grid:
+
+```lua
+{ op = "GL", id = "stripes", units = "bbox", x1 = 0, y1 = 0, x2 = 0.2, y2 = 0,
+  spread = "repeat",
+  stops = { { 0, "#1E3247" }, { 0.35, "#1E3247" }, { 0.35, "#0B1622" }, { 1, "#0B1622" } } }
+```
+
+The difference from the bands above: a band is a *value* crossing a threshold, where a tiny
+window keeps the change from popping, while a stripe is a *place*, where the edge should be
+exactly hard.
 
 ### Text in the scene — `T`
 
@@ -500,10 +564,40 @@ node is not an element. One handler serves the whole scene.
 A scene with no clickable node stays transparent to the pointer exactly as before, so
 decoration never steals a click from a button underneath it.
 
-Hit testing is against the node's **bounding box**, in draw order, last match wins. For the
-rows and tiles that carry `click` the bounds are the shape; a thin diagonal or a ring will
-claim more than it draws. An invisible `R` with `fo = 0` and `click = 1` makes a hit area of
-any size and costs no geometry.
+A click lands on what is **drawn**: inside the node's own outline and inside any clip it is
+drawn through, in draw order, last match wins. A circle does not take clicks in its corners,
+a turned shape answers along its own edges, and a list row scrolled out of sight takes
+nothing. An invisible `R` with `fo = 0` and `click = 1` makes a hit area of any size and costs
+no geometry.
+
+**Holding, hovering, dragging.** `click` reports the completed click; four more flags report
+the rest, all through the same `on_click`, and all opt-in so a scene without them behaves
+exactly as before:
+
+| flag | what arrives |
+|------|--------------|
+| `press = 1` | `down:id` on press, `up:id` on release wherever it is, `leave:id` if a held pointer moves off |
+| `xy = 1` | every value gains `@fx,fy`, where in the node it was hit, `0..1` from its top-left |
+| `hoverev = 1` | `enter:id` and `exit:id` as the pointer moves onto and off it |
+| `drag = 1` / `drop = 1` | `dragstart:id`, then `drop:src>dst` over a drop target, then `dragend:src` |
+
+```lua
+on_click = function(value, player)
+    local kind, id = value:match("^(%a+):(.+)$")
+    if kind == "down" then ... elseif kind == nil then --[[ a plain click on `value` ]] end
+end
+```
+
+**Hover styling needs no events at all.** `hover` and `down` are expression variables, `1`
+while the pointer is over or held on a clickable node inside the nearest node with an `id`, so
+CSS's `:hover` and `:active` cost one redraw on this client and nothing on the network:
+
+```
+G id=save {
+  R click=1 x=10 y=10 w=60 h=18 rx=4 f=#2E8B6E fo="=0.8+0.2*hover"
+  T x=10 y=13 w=60 h=12 text=SAVE align=center size=8 f=#EAF4F8 fo="=1-0.3*down"
+}
+```
 
 ### Varying size convincingly
 
