@@ -1335,8 +1335,15 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                         + $"{VectorStatsTool.N(up)} ms upload on-thread");
 
         var size = _screenPixels < 0f ? "size unknown" : VectorStatsTool.N(_screenPixels, 0) + " px";
-        into.AppendLine($"  on screen {size}, animated {_scene.UsesTime && _stats.DrewTime}"
-                        + (_scene.UsesTime && !_stats.DrewTime ? " (its `t` is all under hidden groups)" : "")
+        // A scene whose only motion is a renderer fade animates without redrawing, so reporting
+        // the redraw gate alone said `animated False` about a dot that was visibly pulsing.
+        var fading = _fades.Count > 0;
+        var why = _stats.DrewTime ? string.Empty
+            : fading ? $" (a fade in {_fades.Count} group(s), which its renderer does without redraws)"
+            : _scene.UsesTime ? " (its `t` is all under hidden groups)"
+            : string.Empty;
+
+        into.AppendLine($"  on screen {size}, animated {(_scene.UsesTime && _stats.DrewTime) || fading}{why}"
                         + $", scroll-driven {_scene.UsesScroll}");
 
         if (_stats.Starved != null)
@@ -1351,7 +1358,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         if (_stats.Missing.Count > 0)
         {
-            into.AppendLine("  UNRESOLVED DATA NAMES (drawn magenta)");
+            into.AppendLine("  UNRESOLVED DATA NAMES (a colour draws magenta; a label with no `missing` draws \"--\")");
             foreach (var name in _stats.Missing)
                 into.AppendLine($"    ${name}");
         }

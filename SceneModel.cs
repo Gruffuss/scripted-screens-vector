@@ -287,6 +287,12 @@ internal sealed class VecNode
     /// <summary>What to render when the bound value is absent. Defaults to "--".</summary>
     internal string TextMissing = "--";
 
+    /// <summary>
+    /// Whether the scene said what to show when the value is absent (`missing = "..."`), which
+    /// means absence is expected here and is not reported as an unresolved name.
+    /// </summary>
+    internal bool TextMissingDeclared;
+
     /// <summary>`wrap = 1`: let the text run to more than one line inside its box.</summary>
     internal bool Wrap;
 
@@ -1304,7 +1310,10 @@ internal static class SceneParser
 
                 var missing = PropString(map, "missing");
                 if (missing != null)
+                {
                     node.TextMissing = missing;
+                    node.TextMissingDeclared = true;
+                }
 
                 node.FontFamily = PropString(map, "font");
                 node.Align = TextAlign.Horizontal(PropString(map, "align"));

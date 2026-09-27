@@ -2743,7 +2743,9 @@ internal static class Tessellator
             if (context.Arrays.ContainsKey(name))
                 return Format(node, context.Element(name, at), scene, ordinal);
 
-            context.Missing.Add(name);
+            if (!node.TextMissingDeclared)
+                context.Missing.Add(name);
+
             return node.TextMissing;
         }
 
@@ -2756,7 +2758,9 @@ internal static class Tessellator
         // Neither a string nor a number under that name. Reported once per rebuild, and the
         // node renders its placeholder rather than vanishing: an empty box on a console is
         // indistinguishable from a layout mistake.
-        context.Missing.Add(name);
+        if (!node.TextMissingDeclared)
+            context.Missing.Add(name);
+
         return node.TextMissing;
     }
 
@@ -2804,7 +2808,9 @@ internal static class Tessellator
                 }
                 else
                 {
-                    context.Missing.Add(name);
+                    if (!node.TextMissingDeclared)
+                        context.Missing.Add(name);
+
                     Append(node.TextMissing, ref at);
                 }
             }
@@ -2818,7 +2824,9 @@ internal static class Tessellator
             }
             else
             {
-                context.Missing.Add(name);
+                if (!node.TextMissingDeclared)
+                    context.Missing.Add(name);
+
                 Append(node.TextMissing, ref at);
             }
         }

@@ -6,6 +6,8 @@ ScriptedScreens Vector, newest first.
 
 - Fixed: two stops at the same offset -- a hard stop, which is what every CSS stripe is made of -- drew as a smooth ramp from the cut to the next stop instead of a step. The band either side of the cut was coloured from the stop position itself, which reads as the colour *before* it. Nudging one stop by a thousandth was the workaround and is no longer needed.
 - Fixed: a capture drew a group faded by its `o` at full opacity -- a pulsing dot came out solid however faint it was on screen. A renderer fade is live state that the clone ScriptedScreens photographs does not carry, so a capture now multiplies the group's `o` into its colours instead.
+- Fixed: the diagnostics said `animated False` about a scene whose only motion is a group fading over `t`. That scene does animate; what it does not do is redraw, because its renderer applies the fade. The line now says so and counts the fading groups.
+- Fixed: a label with its own `missing = "..."` text was still listed under unresolved data names, so a console showing exactly what its author asked for reported two problems. A declared fallback means absence is expected. The heading also no longer says every unresolved name draws magenta -- that is colours; a label draws its `missing` text, or `--`.
 - Fixed: `hover`, `down` and the `hoverev` events only noticed a change when the pointer itself moved. Turning the view moves the console under a still crosshair, so a card stayed lit and `enter`/`exit` did not arrive until the mouse was nudged. What is under the pointer is re-tested every frame now, for as long as the pointer is over the surface.
 
 ## 0.11.38
