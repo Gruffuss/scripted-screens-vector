@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.50
+
+- Fixed: **soft glows were faceted at the corners and stepped in the tail when seen up close.** Mesh density for a blur follows real screen pixels, so walking up to a console already asked for more rings and more points around each corner -- but both were capped at numbers tuned while 8-bit banding hid everything underneath them. Standing at a console, a glow's tail is a few hundred pixels wide, so 24 rings put a band every ten pixels and a corner was a twelve-segment polygon. Raised to 96 rings and 32 points per corner. A scene seen from across the room is unchanged: it never reaches those numbers, so this costs nothing at a distance.
+
 ## 0.11.49
 
 - Fixed: **wide soft glows and slow gradients showed bands tens of pixels wide.** Alpha is quantised twice on the way to the screen -- UGUI packs vertex colour to `Color32`, and the framebuffer is 8-bit as well -- and at full glow contrast the two steps are the same size. A Gaussian tail is flat, so it crosses only about five levels over several hundred screen pixels, and each level is a band. Vector geometry is now drawn with its own shader: Unity's `UI/Default` with a per-pixel dither on the output alpha, which scatters the rounding into a grain the eye averages away. New setting `Renderer.Dither` (default 1, in 255ths) tunes it; 0 is the old behaviour. The shader ships as `vectorshaders.bundle` beside the mod; without it the mod draws with the stock UI material and bands as before, and says so in the log.

@@ -56,7 +56,7 @@ internal static class Shadow
     /// drawn as one quad beside a shadow: the gradient is a straight ramp with no breaks at all
     /// and was perfectly smooth on the same screen, on black, with the same 8-bit colours.
     /// </remarks>
-    private const int MaxRings = 24;
+    private const int MaxRings = 96;
 
     /// <summary>Gaussian support. Past three sigma the contribution is under 0.2%.</summary>
     private const float Support = 3f;
@@ -86,7 +86,13 @@ internal static class Shadow
     }
 
     /// <summary>Most points one corner's run may take, whatever the size on screen.</summary>
-    private const int MaxCornerSamples = 12;
+    // Both this and MaxRings are ceilings on a density that is already driven by real screen
+    // pixels (ScreenPixelsPerCanvasUnit projects through the camera, so walking up to a console
+    // raises it). They were tuned when banding hid everything underneath them. With the banding
+    // gone the ceilings are what is visible: standing at a console, a glow's tail is a few
+    // hundred screen pixels wide, so 24 rings is a band every ten pixels and a corner is a
+    // twelve-segment polygon. A scene seen from across the room never reaches these numbers.
+    private const int MaxCornerSamples = 32;
 
     /// <summary>
     /// Where to put points along the run out of a corner, as fractions of the three-sigma reach.
