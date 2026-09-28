@@ -162,8 +162,14 @@ Shader "ScriptedScreensVector/UIDither"
 
                 // VECTOR: last thing before the blend, and only where something is already drawn,
                 // so a clipped-out or empty pixel stays exactly zero.
-                color.a += (color.a > 0) * (VectorNoise(IN.vertex.xy) - 0.5) * (_VectorDither / 255.0);
-                color.a = saturate(color.a);
+                //
+                // The amplitude is tapered to twice the alpha near zero. Without that, saturate()
+                // clips the negative half of the noise while the positive half survives, and the
+                // mean is lifted: a glow's faint tail settles at about half the amplitude instead
+                // of reaching black, which reads as a haze that never fades out. Tapering keeps
+                // the noise symmetric wherever there is room for it and silent where there is not.
+                float amp = min(_VectorDither / 255.0, 2.0 * color.a);
+                color.a = saturate(color.a + (VectorNoise(IN.vertex.xy) - 0.5) * amp);
 
                 return color;
             }
