@@ -71,7 +71,7 @@ internal static class Shadow
     }
 
     /// <summary>Sample distances from a corner, in sigmas: where a blurred corner actually bends.</summary>
-    private static readonly float[] CornerSamples = { 0.8f, 2f };
+    private static readonly float[] CornerSamples = { 0.5f, 1.1f, 1.9f, 3f };
 
     /// <summary>
     /// A rectangle with extra points near its corners, so a ring can carry a corner's coverage
@@ -249,6 +249,10 @@ internal static class Shadow
         // it is viewed: max error 5.3/255 at two pixels, 12.0/255 at four, mean 0.011 and 0.016
         // -- isolated edge pixels, invisible even amplified sixteen times. Up to half the
         // vertices below the 24-ring cap; ~25% on that shadow, which sits at the cap.
+        // Denser rings were tried for a bright glow and measured: no change to the error, 70%
+        // more vertices. The biggest jump between neighbouring pixels sits where the Gaussian
+        // is steepest -- at the shape's edge, where the true image steps by as much -- so that
+        // is not banding and rings are not what is coarse.
         var rings = sigma <= 0.0001f
             ? 1
             : Mathf.Clamp(Mathf.CeilToInt(reach * Mathf.Max(0.0001f, screenScale) / 4f), MinRings, MaxRings);

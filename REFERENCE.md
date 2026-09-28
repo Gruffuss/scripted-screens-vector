@@ -785,6 +785,13 @@ walk records where each `T` landed and the labels are created and updated when t
 `ellipsis` and `shrink` are TMP's own overflow modes, so fitting is done by the engine that
 knows the glyph metrics rather than estimated.
 
+**Give an `ellipsis` label a box at least one line tall.** The text engine truncates a label
+vertically as well as horizontally, so a box even slightly shorter than one line of its own
+text shows **nothing at all** -- a 26-unit title in a 31-unit box disappears rather than being
+cut short. Roughly 1.4 times the `size` is a safe height for the faces here. Growing such a box
+automatically has been tried twice and reverted twice, both times because it moved labels away
+from where the scene put them.
+
 Group opacity has to arrive this way because it cannot arrive any other way: a TMP child draws
 **above** the mesh, so nothing in the geometry can fade it. Without it a `G o = 0.3` would fade
 all its artwork and leave the readable part at full strength.

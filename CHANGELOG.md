@@ -2,6 +2,13 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.43
+
+- Reverted the `fit = "ellipsis"` growth again, and this time for good. 0.11.40 measured the line through the text engine and 0.11.42 took it from the font's own metrics, measuring nothing; both drew every such label a whole row away from its box, identically, so the fault is in re-placing the label's rect rather than in either measurement. A box shorter than one line shows nothing, as it did in 0.11.39 and before; REFERENCE now says to give an `ellipsis` label about 1.4 times its `size` in height.
+- A blurred corner is smoother again: four sample points around each corner instead of two, which took the worst error against the exact Gaussian from 0.044 to 0.027 (7 of 255) at about 1.4 times the vertices. Reported from a console as "kinda jagged" after 0.11.42, which had fixed the corner's brightness but left its shape coarse.
+- Denser rings were tried for the same complaint and measured as no help at all -- the biggest jump between neighbouring pixels sits where the Gaussian is genuinely steepest, at the shape's own edge, and the true image steps by as much there. The ring spacing is unchanged and the note is in the code so it is not tried a third time.
+- Confirmed on a console: the blurred corners of 0.11.42, and a scene that will not parse drawing its magenta border and naming the line in `vector_stats` while a good scene beside it still draws.
+
 ## 0.11.42
 
 - Fixed: **every box shadow and group blur was wrong at its corners.** A shadow is built as contours whose alpha comes from their distance to the shape, which is right along a straight edge -- the blur there is a one-dimensional problem -- and wrong at a corner, where two edges act at once and the true coverage is their product. Measured against the exact Gaussian: 0.512 drawn at a corner where 0.250 was due, a quarter of full brightness too much, seen on a console as a bright four-pointed star. A rectangle now carries the exact product at every contour vertex, with extra points near each corner so the profile has somewhere to live. Worst error anywhere on the shape is 0.044, from 0.262. It costs about five times the vertices of the old corners, only while the blur is at least three screen pixels; round and other shapes are unchanged.
