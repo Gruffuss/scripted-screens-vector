@@ -291,6 +291,10 @@ colour spaces.
 What it means for authoring: matching a mockup's hex values exactly is not possible below about
 (20,20,20), and two very dark colours that differ by a level or two will draw the same.
 
+Shadow and blur geometry follows the size on screen: walking up to a console rebuilds its
+shadows with more points around each corner, and walking away spends fewer. A shadow you are
+standing at costs roughly three times the vertices of the same shadow across the room.
+
 **The same limit bands a dark gradient**, including the tail of a `blur` or a `sh` glow. Measured
 from a screen where a console stood 3000 px tall: the values across a glow's fade went 0, 12, 19,
 24, 28, 32, 35, 38, 41, 44 -- gaps of 12, 7, 5, 4, 4, 3, widening toward black -- while the same

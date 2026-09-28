@@ -41,6 +41,11 @@ internal static class Shadow
 {
     /// <summary>Contours across the blur. Enough that the ramp reads as smooth.</summary>
     private const int MinRings = 4;
+    /// <summary>
+    /// Raising this to 64 was tried for the stair-stepping seen on a console 3000 pixels tall
+    /// and measured as no change at all -- same slope breaks, same spacing, 2.5x the vertices --
+    /// once the probe was built at the same scale it was rasterised at. The bands are not ours.
+    /// </summary>
     private const int MaxRings = 24;
 
     /// <summary>Gaussian support. Past three sigma the contribution is under 0.2%.</summary>
@@ -70,16 +75,41 @@ internal static class Shadow
         return 0.5f * (1f + Erf(d / (sigma * 1.41421356f)));
     }
 
-    /// <summary>Sample distances from a corner, in sigmas: where a blurred corner actually bends.</summary>
-    private static readonly float[] CornerSamples = { 0.5f, 1.1f, 1.9f, 3f };
+    /// <summary>Most points one corner's run may take, whatever the size on screen.</summary>
+    private const int MaxCornerSamples = 12;
+
+    /// <summary>
+    /// Where to put points along the run out of a corner, as fractions of the three-sigma reach.
+    /// </summary>
+    /// <remarks>
+    /// The count follows the SIZE ON SCREEN, which is the whole lesson of this one. Fixed
+    /// fractions of sigma (0.5, 1.1, 1.9, 3) look fine on a console across the room and become
+    /// facets 40 to 90 pixels wide on one you are standing at, because sigma is scene units and
+    /// the eye measures pixels. Reported as stair-stepping, and invisible to every measurement
+    /// taken at three pixels per unit.
+    ///
+    /// Spaced by a power so they crowd near the corner, where the coverage actually bends.
+    /// </remarks>
+    private static int CornerSampleCount(float sigma, float screenScale)
+    {
+        var reachPixels = 3f * sigma * Mathf.Max(0.0001f, screenScale);
+        return Mathf.Clamp(Mathf.CeilToInt(reachPixels / 10f), 2, MaxCornerSamples);
+    }
+
+    private static float CornerSampleAt(int index, int count, float sigma)
+    {
+        var t = (index + 1) / (float)count;
+        return 3f * sigma * t * t;
+    }
 
     /// <summary>
     /// A rectangle with extra points near its corners, so a ring can carry a corner's coverage
     /// without dragging the whole edge down to it.
     /// </summary>
-    private static List<Vector2> Densify(List<Vector2> rect, float sigma, List<Vector2> into)
+    private static List<Vector2> Densify(List<Vector2> rect, float sigma, float screenScale, List<Vector2> into)
     {
         into.Clear();
+        var samples = CornerSampleCount(sigma, screenScale);
 
         for (var i = 0; i < rect.Count; i++)
         {
@@ -96,16 +126,16 @@ internal static class Shadow
             // Out from this corner, then in toward the next, never past the middle: the two
             // corners' samples must not cross or the contour would fold.
             var half = length * 0.5f;
-            for (var k = 0; k < CornerSamples.Length; k++)
+            for (var k = 0; k < samples; k++)
             {
-                var d = CornerSamples[k] * sigma;
+                var d = CornerSampleAt(k, samples, sigma);
                 if (d < half)
                     into.Add(a + unit * d);
             }
 
-            for (var k = CornerSamples.Length - 1; k >= 0; k--)
+            for (var k = samples - 1; k >= 0; k--)
             {
-                var d = CornerSamples[k] * sigma;
+                var d = CornerSampleAt(k, samples, sigma);
                 if (d < half)
                     into.Add(b - unit * d);
             }
@@ -284,7 +314,7 @@ internal static class Shadow
             // the ramp across an edge; corner points resolve it around a corner; neither buys
             // the other.
 
-            outline = Densify(outline, sigma, _dense ??= new List<Vector2>(32));
+            outline = Densify(outline, sigma, screenScale, _dense ??= new List<Vector2>(64));
             count = outline.Count;
         }
 

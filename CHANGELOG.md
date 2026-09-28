@@ -2,6 +2,12 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.44
+
+- Fixed: a soft shadow or `blur` seen from close up broke into large polygonal facets -- reported as stair-stepping down the side of a glow, on a console standing 3000 pixels tall. The points that shape a blurred corner were placed at fixed fractions of the blur (0.5, 1.1, 1.9 and 3 sigma), which is scene units; on that screen they sat 40 to 90 pixels apart, and the eye measures pixels. They now follow the on-screen size, one about every ten pixels up to a limit.
+- That also makes an ordinary console **cheaper**: a shadow at a normal viewing distance went from 280 vertices to 200, because the old fixed count was more than a small shadow needed. A shadow you are standing at costs about three times what it did, which is where the detail is wanted.
+- Worst error against the exact Gaussian improves to 0.025 (6 of 255).
+
 ## 0.11.43
 
 - Reverted the `fit = "ellipsis"` growth again, and this time for good. 0.11.40 measured the line through the text engine and 0.11.42 took it from the font's own metrics, measuring nothing; both drew every such label a whole row away from its box, identically, so the fault is in re-placing the label's rect rather than in either measurement. A box shorter than one line shows nothing, as it did in 0.11.39 and before; REFERENCE now says to give an `ellipsis` label about 1.4 times its `size` in height.
