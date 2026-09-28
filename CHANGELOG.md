@@ -4,6 +4,7 @@ ScriptedScreens Vector, newest first.
 
 ## 0.11.41
 
+- Reverted 0.11.40's `fit = "ellipsis"` change. Growing a too-short label's box to one line drew labels a whole row away from where they belonged, which is worse than the bug it fixed, so `ellipsis` behaves as it did in 0.11.39: a box shorter than one line shows nothing. The cause is under investigation and the next attempt will be seen on a console before it ships.
 - Fixed: `drag = 1` and `drop = 1` never started a drag in ordinary play. A console's pointer is the crosshair, fixed at the centre of the view, so it never moves across the screen and Unity's drag threshold is never crossed -- only detaching the mouse with Alt gave a real pointer movement, and a scene's drag looked dead without it. Holding on the node and turning until the crosshair leaves it now starts the drag, and releasing over a `drop` target reports it as before. The free-cursor path is unchanged, and a drag is still reported once whichever way it began.
 
 ## 0.11.40
