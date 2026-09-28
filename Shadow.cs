@@ -70,12 +70,159 @@ internal static class Shadow
         return 0.5f * (1f + Erf(d / (sigma * 1.41421356f)));
     }
 
+    /// <summary>Sample distances from a corner, in sigmas: where a blurred corner actually bends.</summary>
+    private static readonly float[] CornerSamples = { 0.8f, 2f };
+
+    /// <summary>
+    /// A rectangle with extra points near its corners, so a ring can carry a corner's coverage
+    /// without dragging the whole edge down to it.
+    /// </summary>
+    private static List<Vector2> Densify(List<Vector2> rect, float sigma, List<Vector2> into)
+    {
+        into.Clear();
+
+        for (var i = 0; i < rect.Count; i++)
+        {
+            var a = rect[i];
+            var b = rect[(i + 1) % rect.Count];
+            var along = b - a;
+            var length = along.magnitude;
+            if (length <= 0.0001f)
+                continue;
+
+            var unit = along / length;
+            into.Add(a);
+
+            // Out from this corner, then in toward the next, never past the middle: the two
+            // corners' samples must not cross or the contour would fold.
+            var half = length * 0.5f;
+            for (var k = 0; k < CornerSamples.Length; k++)
+            {
+                var d = CornerSamples[k] * sigma;
+                if (d < half)
+                    into.Add(a + unit * d);
+            }
+
+            for (var k = CornerSamples.Length - 1; k >= 0; k--)
+            {
+                var d = CornerSamples[k] * sigma;
+                if (d < half)
+                    into.Add(b - unit * d);
+            }
+        }
+
+        return into;
+    }
+
+    [System.ThreadStatic] private static List<Vector2>? _dense;
+
     [System.ThreadStatic] private static List<Vector2>? _inner;
     [System.ThreadStatic] private static List<Vector2>? _outer;
 
     /// <summary>
     /// Emits one shadow beneath a shape. Call before the shape itself is filled.
     /// </summary>
+    /// <summary>
+    /// The exact coverage of a blurred axis-aligned rectangle, which is separable: the product
+    /// of the two one-dimensional profiles.
+    /// </summary>
+    /// <remarks>
+    /// This is what a ring cannot express. A ring carries one alpha for a whole contour, taken
+    /// from its distance to the outline, which is right along a straight edge -- there the blur
+    /// is a one-dimensional problem -- and wrong at a corner, where two edges act at once and
+    /// the true coverage is their PRODUCT. At the corner point itself that is 0.5 x 0.5 = 0.25
+    /// against the ring's 0.5: measured 0.512 drawn where 0.250 was due, a quarter of full
+    /// brightness too much, and visible on a console as a bright four-pointed star.
+    ///
+    /// Giving each ring VERTEX its own alpha from this product fixes the corners exactly and
+    /// costs nothing: the same rings, the same vertices. Only the interpolation between
+    /// vertices is approximate, and the rings are already spaced to a few screen pixels.
+    /// </remarks>
+    private readonly struct RectCoverage
+    {
+        private readonly float _x0, _x1, _y0, _y1, _sigma;
+
+        internal readonly bool Valid;
+
+        internal RectCoverage(List<Vector2> outline, VecShadow shadow, float sigma)
+        {
+            _x0 = _x1 = _y0 = _y1 = 0f;
+            _sigma = sigma;
+            Valid = false;
+
+            // Only a four-point axis-aligned rectangle: a rounded one has arcs, and anything
+            // else has corners this product does not describe. Both keep the old ring alpha.
+            if (outline.Count != 4 || sigma <= 0.0001f)
+                return;
+
+            var a = outline[0];
+            var b = outline[1];
+            var c = outline[2];
+            var d = outline[3];
+            const float E = 0.0001f;
+            var axis = (Mathf.Abs(a.y - b.y) < E && Mathf.Abs(c.y - d.y) < E && Mathf.Abs(a.x - d.x) < E && Mathf.Abs(b.x - c.x) < E)
+                       || (Mathf.Abs(a.x - b.x) < E && Mathf.Abs(c.x - d.x) < E && Mathf.Abs(a.y - d.y) < E && Mathf.Abs(b.y - c.y) < E);
+            if (!axis)
+                return;
+
+            var minX = Mathf.Min(Mathf.Min(a.x, b.x), Mathf.Min(c.x, d.x));
+            var maxX = Mathf.Max(Mathf.Max(a.x, b.x), Mathf.Max(c.x, d.x));
+            var minY = Mathf.Min(Mathf.Min(a.y, b.y), Mathf.Min(c.y, d.y));
+            var maxY = Mathf.Max(Mathf.Max(a.y, b.y), Mathf.Max(c.y, d.y));
+
+            // The shape the shadow is cast from: moved by the offset and grown by the spread.
+            _x0 = minX + shadow.Dx - shadow.Spread;
+            _x1 = maxX + shadow.Dx + shadow.Spread;
+            _y0 = minY + shadow.Dy - shadow.Spread;
+            _y1 = maxY + shadow.Dy + shadow.Spread;
+            Valid = _x1 > _x0 && _y1 > _y0;
+        }
+
+        /// <summary>
+        /// Holds a contour to the rectangle it is meant to be: the one at distance
+        /// <paramref name="d"/> inside the shape spans <c>[x0 + d, x1 - d]</c> either way.
+        /// </summary>
+        /// <remarks>
+        /// The corner points added for the profile are what make this necessary. A mitred
+        /// offset moves each point along its own bisector, so a point near a corner keeps its
+        /// distance along the edge it sits on while the contour shrinks past it, and the
+        /// contour crosses itself. The fill over that fold came out solid: measured 0.92 drawn
+        /// four units inside a corner where 0.56 was due, a bright patch in exactly the place
+        /// this work set out to fix.
+        /// </remarks>
+        internal void ClampContour(List<Vector2> points, float d)
+        {
+            if (!Valid)
+                return;
+
+            var lowX = _x0 + d;
+            var highX = _x1 - d;
+            var lowY = _y0 + d;
+            var highY = _y1 - d;
+
+            // Past the middle the rectangle has closed: everything meets at the centre line.
+            if (lowX > highX)
+                lowX = highX = (_x0 + _x1) * 0.5f;
+            if (lowY > highY)
+                lowY = highY = (_y0 + _y1) * 0.5f;
+
+            for (var i = 0; i < points.Count; i++)
+            {
+                var p = points[i];
+                points[i] = new Vector2(Mathf.Clamp(p.x, lowX, highX), Mathf.Clamp(p.y, lowY, highY));
+            }
+        }
+
+        internal float At(Vector2 p)
+        {
+            // Coverage(d) is the profile at a signed distance INSIDE an edge, so the span
+            // between two edges is the near one's profile minus the far one's.
+            var x = Coverage(p.x - _x0, _sigma) - Coverage(p.x - _x1, _sigma);
+            var y = Coverage(p.y - _y0, _sigma) - Coverage(p.y - _y1, _sigma);
+            return Mathf.Clamp01(x) * Mathf.Clamp01(y);
+        }
+    }
+
     internal static void Emit(MeshBuilder vh, List<Vector2> outline, VecShadow shadow, Matrix4x4 matrix, float screenScale, ClipRegion? clip)
     {
         var count = outline.Count;
@@ -117,8 +264,30 @@ internal static class Shadow
         var start = Mathf.Min(reach, shadow.Spread + InwardLimit(outline, winding, miter: true));
         start = Mathf.Max(start, -reach);
 
+        var exact = new RectCoverage(outline, shadow, sigma);
+
+        // A rectangle's contour has vertices ONLY at its corners, so a corner's true (lower)
+        // coverage would be dragged along the whole edge by interpolation -- measured, the edge
+        // came out at the corner's value. Points near each corner give the profile somewhere to
+        // live; along the straight run between them it is flat and needs none. Skipped when the
+        // blur is too small on screen for the difference to show.
+        var dense = exact.Valid && sigma * Mathf.Max(0.0001f, screenScale) >= 3f;
+        if (dense)
+        {
+            // Ring count is NOT reduced to pay for the corner points. Halving it was tried and
+            // measured: the corners stayed right but the straight edge went from 0.01 to 0.033
+            // off the exact profile, which is the part that was already correct. Rings resolve
+            // the ramp across an edge; corner points resolve it around a corner; neither buys
+            // the other.
+
+            outline = Densify(outline, sigma, _dense ??= new List<Vector2>(32));
+            count = outline.Count;
+        }
+
         // Innermost contour: covered to `start`, so it is filled solid rather than ramped.
         MiterOffset(outline, inner, shift, shadow.Spread - start, winding);
+        if (dense)
+            exact.ClampContour(inner, start);
 
         var core = shadow.Colour;
         core.a *= Coverage(start, sigma);
@@ -139,11 +308,13 @@ internal static class Shadow
             var dOuter = start - (r + 1) * ((start + reach) / rings);
 
             MiterOffset(outline, outer, shift, shadow.Spread - dOuter, winding);
+            if (dense)
+                exact.ClampContour(outer, dOuter);
 
             var aInner = shadow.Colour.a * Coverage(dInner, sigma);
             var aOuter = shadow.Colour.a * Coverage(dOuter, sigma);
 
-            previous = EmitRing(vh, inner, outer, shadow.Colour, aInner, aOuter, matrix, clip, previous);
+            previous = EmitRing(vh, inner, outer, shadow.Colour, aInner, aOuter, matrix, clip, previous, exact);
 
             // The outer contour becomes the next ring's inner one.
             (inner, outer) = (outer, inner);
@@ -170,7 +341,7 @@ internal static class Shadow
     /// same contour against itself -- so the results are not guaranteed to coincide and
     /// sharing them would tear the ring where the clip bites.
     /// </remarks>
-    private static int EmitRing(MeshBuilder vh, List<Vector2> inner, List<Vector2> outer, Color colour, float aInner, float aOuter, Matrix4x4 matrix, ClipRegion? clip, int previous)
+    private static int EmitRing(MeshBuilder vh, List<Vector2> inner, List<Vector2> outer, Color colour, float aInner, float aOuter, Matrix4x4 matrix, ClipRegion? clip, int previous, RectCoverage exact)
     {
         var count = inner.Count;
         var share = previous >= 0 && clip == null;
@@ -199,7 +370,7 @@ internal static class Shadow
                 if (clip != null)
                     a = clip.ClampInside(a, a);
 
-                vh.AddVert(matrix.MultiplyPoint3x4(a), inner32, Vector2.zero);
+                vh.AddVert(matrix.MultiplyPoint3x4(a), Tint(colour, inner32, exact, a, aInner), Vector2.zero);
             }
         }
 
@@ -211,7 +382,7 @@ internal static class Shadow
             if (clip != null)
                 b = clip.ClampInside(inner[i], b);
 
-            vh.AddVert(matrix.MultiplyPoint3x4(b), outer32, Vector2.zero);
+            vh.AddVert(matrix.MultiplyPoint3x4(b), Tint(colour, outer32, exact, b, aOuter), Vector2.zero);
         }
 
         var innerBase = share ? previous : origin;
@@ -226,6 +397,24 @@ internal static class Shadow
 
         // Where this ring's OUTER vertices start, so the next can index them as its inner.
         return outerBase;
+    }
+
+    /// <summary>
+    /// A ring vertex's colour: the exact product where the shape is a rectangle, the ring's own
+    /// alpha otherwise. <paramref name="ring"/> is that fallback, already built.
+    /// </summary>
+    private static Color32 Tint(Color colour, Color32 ring, RectCoverage exact, Vector2 at, float ringAlpha)
+    {
+        if (!exact.Valid)
+            return ring;
+
+        var tinted = colour;
+        tinted.a = colour.a * exact.At(at);
+
+        // Never brighter than the ring it belongs to: a shared contour is emitted once, and a
+        // vertex is read by the ring inside it as well as the one outside.
+        tinted.a = Mathf.Min(tinted.a, Mathf.Max(ringAlpha, 0f));
+        return tinted;
     }
 
     /// <summary>

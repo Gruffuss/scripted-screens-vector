@@ -138,8 +138,16 @@ internal static class VectorElementPatch
             : SceneText.ToProps(source!, ReadString(element.Props, "scene")) ?? element.Props;
 
         var scene = SceneParser.Parse(props);
+
+        // A scene that will not parse must SAY so. Returning here left the console blank with
+        // nothing on screen and no entry in vector_stats -- only a log line, which is the last
+        // place an author looks. It now draws the same magenta border any other scene problem
+        // does, and the tool names the line that stopped it.
         if (scene == null)
-            return;
+        {
+            scene = new VecScene { Id = ReadString(element.Props, "scene") ?? "?" };
+            scene.Problems.Add(SceneText.Rejected ?? "the scene could not be read");
+        }
 
         var graphic = EnsureSurface(host);
 

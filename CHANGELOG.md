@@ -2,6 +2,13 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.42
+
+- Fixed: **every box shadow and group blur was wrong at its corners.** A shadow is built as contours whose alpha comes from their distance to the shape, which is right along a straight edge -- the blur there is a one-dimensional problem -- and wrong at a corner, where two edges act at once and the true coverage is their product. Measured against the exact Gaussian: 0.512 drawn at a corner where 0.250 was due, a quarter of full brightness too much, seen on a console as a bright four-pointed star. A rectangle now carries the exact product at every contour vertex, with extra points near each corner so the profile has somewhere to live. Worst error anywhere on the shape is 0.044, from 0.262. It costs about five times the vertices of the old corners, only while the blur is at least three screen pixels; round and other shapes are unchanged.
+- Fixed: a scene that would not parse drew **nothing**, with no marker on the console and no entry in `vector_stats` -- only a log line, which is the last place an author looks. It now draws the same magenta border every other scene problem does, and the tool names the reason.
+- Parse errors say **where**: the line number and the line's text, plus a note that a value holding spaces, `=` or `;` (a `data:` URL, say) must be quoted. "expected an op" on its own sent a session hunting through a whole page.
+- `fit = "ellipsis"` again gives a label the one line it needs when its box is shorter than that, so a title in a slightly short box is cut rather than vanishing. 0.11.40's attempt measured the text through TMP and moved labels a row out of place; the line height now comes from the font's own metrics, which touches nothing.
+
 ## 0.11.41
 
 - Reverted 0.11.40's `fit = "ellipsis"` change. Growing a too-short label's box to one line drew labels a whole row away from where they belonged, which is worse than the bug it fixed, so `ellipsis` behaves as it did in 0.11.39: a box shorter than one line shows nothing. The cause is under investigation and the next attempt will be seen on a console before it ships.

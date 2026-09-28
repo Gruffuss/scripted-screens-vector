@@ -52,11 +52,20 @@ internal static class SceneText
     /// <summary>Reused while unescaping one quoted value. Parsing is single-threaded.</summary>
     private static readonly System.Text.StringBuilder QuotedScratch = new();
 
+    /// <summary>
+    /// Why the last <see cref="ToProps"/> call failed, for the surface to show and the stats tool
+    /// to report. A scene that will not parse used to draw nothing with only a log line to say
+    /// so, which reads as a dead console.
+    /// </summary>
+    internal static string? Rejected;
+
     /// <summary>Converts scene text into the props the table form would have produced.</summary>
     internal static SS.UiProp[]? ToProps(string text, string? sceneId)
     {
         if (string.IsNullOrWhiteSpace(text))
             return null;
+
+        Rejected = null;
 
         if (Cache.TryGetValue(text, out var cached))
             return cached;
@@ -68,13 +77,15 @@ internal static class SceneText
         }
         catch (FormatException ex)
         {
-            ScriptedScreensVectorPlugin.Log?.LogWarning($"vector scene text: {ex.Message}");
+            ScriptedScreensVectorPlugin.Log?.LogWarning($"vector scene \"{sceneId ?? "?"}\" did not parse: {ex.Message}");
+            Rejected = ex.Message;
             return null;
         }
 
         if (nodes.Count == 0)
         {
-            ScriptedScreensVectorPlugin.Log?.LogWarning("vector scene text: no nodes");
+            ScriptedScreensVectorPlugin.Log?.LogWarning($"vector scene \"{sceneId ?? "?"}\" did not parse: it has no nodes");
+            Rejected = "the scene text has no nodes";
             return null;
         }
 
@@ -165,10 +176,35 @@ internal static class SceneText
 
     private const int MaxDepth = 32;
 
+    /// <summary>
+    /// A parse failure that says WHERE. "expected an op" on its own sent a session hunting
+    /// through a whole page for an unquoted `data:` URL; the line and its text name it at once.
+    /// </summary>
+    private static FormatException Fail(Reader r, string what)
+    {
+        var line = 1;
+        var start = 0;
+        for (var i = 0; i < r.At && i < r.Text.Length; i++)
+        {
+            if (r.Text[i] != '\n')
+                continue;
+
+            line++;
+            start = i + 1;
+        }
+
+        var end = r.Text.IndexOf('\n', start);
+        var text = (end < 0 ? r.Text.Substring(start) : r.Text.Substring(start, end - start)).Trim();
+        if (text.Length > 90)
+            text = text.Substring(0, 90) + "...";
+
+        return new FormatException($"{what}, line {line}: {text}");
+    }
+
     private static List<Node> ParseBlock(Reader r, int depth)
     {
         if (depth > MaxDepth)
-            throw new FormatException("nesting too deep");
+            throw Fail(r, "nesting too deep");
 
         var nodes = new List<Node>();
 
@@ -194,7 +230,7 @@ internal static class SceneText
     {
         var node = new Node { Op = ReadToken(r) };
         if (node.Op.Length == 0)
-            throw new FormatException("expected an op");
+            throw Fail(r, "expected an op (a value holding spaces, `=` or `;` -- a data: URL, say -- must be quoted)");
 
         while (true)
         {
@@ -247,7 +283,7 @@ internal static class SceneText
             {
                 SkipSpaces(r);
                 if (r.At >= r.Text.Length)
-                    throw new FormatException("unterminated [");
+                    throw Fail(r, "unterminated [");
 
                 if (r.Text[r.At] == ']')
                 {
