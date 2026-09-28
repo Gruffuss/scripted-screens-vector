@@ -8,8 +8,11 @@ that needs the Unity editor.
 
 ## Steps
 
-1. Open a Unity 2022.3 project (any of them; the bundle only has to match the game's Unity version
-   and the StandaloneWindows64 target).
+1. Open a Unity **2022.3** project. Any 2022.3 patch works -- the engine version stamped in a
+   bundle only has to be the same major.minor as the player, and mods in the wild ship bundles
+   built with 2022.3.7f1 that a 2022.3.62f3 game loads. Unity 6 does **not** work: it writes a
+   newer serialized-file version, and that is exactly the case where `LoadFromFile` returns null
+   with no explanation.
 2. Copy `VectorDither.shader` into `Assets/`.
 3. Copy `BuildVectorShaderBundle.cs` into `Assets/Editor/`.
 4. Select `VectorDither.shader` in the Project window and check the inspector's **AssetBundle**
@@ -21,10 +24,34 @@ that needs the Unity editor.
 
 The `.manifest` file Unity writes beside the bundle is not needed and is not shipped.
 
+The menu item deletes the output folder and passes `ForceRebuildAssetBundle`, and that is not
+belt-and-braces. `BuildAssetBundleOptions.None` is incremental, and the pipeline decides what to
+rebuild from the manifests left in the output folder: a dependency orphaned by an earlier build
+stays orphaned across every later one, with no error. Edit the shader, rebuild without forcing it,
+and you ship the previous variant set -- which looks exactly like the dither not working.
+
+## Building it headless
+
+```
+"C:/Program Files/Unity/Hub/Editor/<version>/Editor/Unity.exe" -batchmode -quit -nographics   -projectPath <project> -executeMethod BuildVectorShaderBundle.Build -logFile -
+```
+
+A minimal empty project is enough and is the right place for it: a mod project with an exporter
+package wired in may assign asset bundle names across all assets and sweep the shader into its
+own bundle.
+
 ## Verifying it
 
-`AssetBundle.LoadFromFile` rejects a bundle from a different Unity version or platform with no
-detail beyond returning null, so the log line is the check: on a good load the mod logs
+The engine version is plain text in the first couple of hundred bytes of the bundle, so the
+version can be checked without launching anything:
+
+```
+head -c 200 vectorshaders.bundle | tr -c '[:print:]' '
+' | grep -E '^[0-9]{4}\.[0-9]+\.[0-9]+[fab][0-9]+$'
+```
+
+`AssetBundle.LoadFromFile` otherwise rejects a bad bundle with no detail beyond returning null, so
+the log line is the next check: on a good load the mod logs
 `Dither shader loaded; gradients dither at 1/255.` at startup.
 
 Then run `InGameTest-dither.lua`. It has two halves and both matter:
