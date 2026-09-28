@@ -2342,6 +2342,11 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         if (_scene != null && _scene.TextInOrder)
             TextOrder.Resolve(_stats.Text, _builder, _sliceCount);
 
+        // Push the dither amplitude on every upload, not just on enable. One SetFloat per
+        // rebuild is nothing, and it is what makes the setting tunable from the settings UI
+        // without a restart -- which is the whole point of it being a knob.
+        DitherMaterial.Refresh();
+
         _builder.Apply(_mesh!);
         canvasRenderer.SetMesh(_mesh);
 

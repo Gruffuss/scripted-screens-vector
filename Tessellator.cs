@@ -2682,7 +2682,11 @@ internal static class Tessellator
         if (!active)
             return colour;
 
-        colour.a = (byte)Mathf.Clamp(Mathf.RoundToInt(colour.a * scale), 0, 255);
+        // Was `(byte)Mathf.Clamp(Mathf.RoundToInt(colour.a * scale), 0, 255)`, left over from
+        // when this took a Color32. On a float Color, alpha is 0..1, so rounding it to an int
+        // and casting to byte could only ever yield 0 or 1 -- the ramp snapped every vertex to
+        // fully transparent or fully opaque instead of ramping.
+        colour.a = Mathf.Clamp01(colour.a * scale);
         return colour;
     }
 

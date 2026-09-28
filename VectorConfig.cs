@@ -30,6 +30,7 @@ internal static class VectorConfig
     private static ConfigEntry<bool>? _pauseWithGame;
     private static ConfigEntry<bool>? _rateLodEnabled;
     private static ConfigEntry<float>? _dither;
+    private static ConfigEntry<float>? _blurDensity;
     private static ConfigEntry<float>? _maximumHz;
     private static ConfigEntry<float>? _minimumHz;
     private static ConfigEntry<float>? _fullRatePixels;
@@ -58,6 +59,15 @@ internal static class VectorConfig
     /// exactly 1, which is why this is a knob and not a constant.
     /// </summary>
     internal static float Dither => System.Math.Min(8f, System.Math.Max(0f, _dither?.Value ?? 1f));
+
+    /// <summary>
+    /// Multiplies the number of contours and corner points a blur is built from. 1 is the
+    /// shipped density, chosen from screen pixels. It exists because the remaining artefact in a
+    /// wide glow's tail is a slope discontinuity between contours, and no offline metric sees
+    /// that -- the eye does. Raising it is the only way to tell whether contour spacing is what
+    /// is left, and it costs vertices in proportion.
+    /// </summary>
+    internal static float BlurDensity => System.Math.Min(16f, System.Math.Max(0.25f, _blurDensity?.Value ?? 1f));
 
     /// <summary>Interpolate `$name` values between data payloads.</summary>
     internal static bool SmoothData => _smoothData?.Value ?? true;
@@ -125,6 +135,13 @@ internal static class VectorConfig
             "framebuffer are both 8-bit, so a wide soft glow crosses only a few levels and " +
             "shows bands tens of pixels wide; dithering scatters the rounding into fine grain. " +
             "0 disables it. Raise it if bands are still visible, lower it if the grain is.");
+
+        _blurDensity = _file.Bind(
+            "Renderer", "BlurDensity", 1f,
+            "How finely a blur or shadow is built, as a multiple of the normal density. 1 is " +
+            "normal. Raising it costs vertices in proportion and only helps at close range; " +
+            "it is here to test whether banding left in a wide glow's faint tail is the " +
+            "spacing between contours. Takes effect on the next rebuild.");
 
         _smoothData = _file.Bind(
             "Renderer", "SmoothData", true,

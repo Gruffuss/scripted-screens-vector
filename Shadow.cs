@@ -77,6 +77,14 @@ internal static class Shadow
     }
 
     /// <summary>Coverage of a blurred step edge at signed distance d, inside positive.</summary>
+    // The ceilings move with the density multiplier too: capping at the shipped numbers would
+    // make the setting do nothing exactly where it is worth testing, which is close up.
+    private static int RingCeiling() =>
+        Mathf.Clamp(Mathf.CeilToInt(MaxRings * VectorConfig.BlurDensity), MinRings, 2048);
+
+    private static int CornerCeiling() =>
+        Mathf.Clamp(Mathf.CeilToInt(MaxCornerSamples * VectorConfig.BlurDensity), 2, 512);
+
     private static float Coverage(float d, float sigma)
     {
         if (sigma <= 0.0001f)
@@ -109,7 +117,7 @@ internal static class Shadow
     private static int CornerSampleCount(float sigma, float screenScale)
     {
         var reachPixels = 3f * sigma * Mathf.Max(0.0001f, screenScale);
-        return Mathf.Clamp(Mathf.CeilToInt(reachPixels / 10f), 2, MaxCornerSamples);
+        return Mathf.Clamp(Mathf.CeilToInt(reachPixels * VectorConfig.BlurDensity / 10f), 2, CornerCeiling());
     }
 
     private static float CornerSampleAt(int index, int count, float sigma)
@@ -310,7 +318,7 @@ internal static class Shadow
         // is not banding and rings are not what is coarse.
         var rings = sigma <= 0.0001f
             ? 1
-            : Mathf.Clamp(Mathf.CeilToInt(reach * Mathf.Max(0.0001f, screenScale) / 2f), MinRings, MaxRings);
+            : Mathf.Clamp(Mathf.CeilToInt(reach * Mathf.Max(0.0001f, screenScale) * VectorConfig.BlurDensity / 2f), MinRings, RingCeiling());
 
         // Rings inside the outline stop where shrinking it further would turn a corner inside
         // out. Offsetting a rounded corner inward by more than its radius folds its points over

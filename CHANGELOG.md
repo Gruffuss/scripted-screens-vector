@@ -2,6 +2,12 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.51
+
+- Fixed: **a group's per-column opacity ramp snapped every vertex to fully transparent or fully opaque.** `Fade` still rounded alpha to an integer and cast it to a byte, left over from when it took a `Color32`; on a float colour, alpha is 0..1, so the only results it could produce were 0 and 1. Found while auditing the mesh path for 8-bit rounding.
+- Changed: `Renderer.Dither` now applies on every rebuild rather than only when an element is enabled, so it can be tuned from the settings UI without a restart. It was documented as live in 0.11.49 and was not.
+- Added: `Renderer.BlurDensity`, a multiplier on the number of contours and corner points a blur is built from. 1 is normal. It exists to test whether banding left in a wide glow's faint tail is contour spacing; raising it costs vertices in proportion.
+
 ## 0.11.50
 
 - Fixed: **soft glows were faceted at the corners and stepped in the tail when seen up close.** Mesh density for a blur follows real screen pixels, so walking up to a console already asked for more rings and more points around each corner -- but both were capped at numbers tuned while 8-bit banding hid everything underneath them. Standing at a console, a glow's tail is a few hundred pixels wide, so 24 rings put a band every ten pixels and a corner was a twelve-segment polygon. Raised to 96 rings and 32 points per corner. A scene seen from across the room is unchanged: it never reaches those numbers, so this costs nothing at a distance.
