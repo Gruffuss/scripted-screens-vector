@@ -391,7 +391,7 @@ internal static class Shadow
         middle.a = colour.a * exact.At(centre);
 
         var origin = vh.currentVertCount;
-        vh.AddVert(matrix.MultiplyPoint3x4(centre), (Color32)middle, Vector2.zero);
+        vh.AddVert(matrix.MultiplyPoint3x4(centre), middle, Vector2.zero);
 
         for (var i = 0; i < count; i++)
         {
@@ -401,7 +401,7 @@ internal static class Shadow
 
             var tint = colour;
             tint.a = colour.a * exact.At(p);
-            vh.AddVert(matrix.MultiplyPoint3x4(p), (Color32)tint, Vector2.zero);
+            vh.AddVert(matrix.MultiplyPoint3x4(p), tint, Vector2.zero);
         }
 
         for (var i = 0; i < count; i++)
@@ -439,8 +439,8 @@ internal static class Shadow
         var ci = colour; ci.a = aInner;
         var co = colour; co.a = aOuter;
 
-        var inner32 = (Color32)ci;
-        var outer32 = (Color32)co;
+        var inner32 = ci;
+        var outer32 = co;
         var origin = vh.currentVertCount;
 
         // Inner edge first, then outer, rather than interleaved pairs. That keeps the OUTER
@@ -487,7 +487,7 @@ internal static class Shadow
     /// A ring vertex's colour: the exact product where the shape is a rectangle, the ring's own
     /// alpha otherwise. <paramref name="ring"/> is that fallback, already built.
     /// </summary>
-    private static Color32 Tint(Color colour, Color32 ring, RectCoverage exact, Vector2 at, float ringAlpha)
+    private static Color Tint(Color colour, Color ring, RectCoverage exact, Vector2 at, float ringAlpha)
     {
         if (!exact.Valid)
             return ring;
@@ -813,14 +813,14 @@ internal static class Shadow
             return _colour.a * (1f - Coverage(depth - _spread, _sigma));
         }
 
-        internal Color32 Colour(float alpha)
+        internal Color Colour(float alpha)
         {
             var c = _colour;
             c.a = alpha;
             return c;
         }
 
-        internal Color32 Colour(Vector2 p)
+        internal Color Colour(Vector2 p)
         {
             var c = _colour;
             c.a = Alpha(p);

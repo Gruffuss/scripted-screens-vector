@@ -1362,7 +1362,7 @@ internal static class Tessellator
         }
 
         var alpha = Mathf.Clamp01(node.Opacity.Evaluate(context)) * frame.Opacity;
-        Color32 colour = new Color(1f, 1f, 1f, alpha);
+        var colour = new Color(1f, 1f, 1f, alpha);
 
         var region = ClipRegion.FromPolygon(box);
         if (region == null)
@@ -2677,7 +2677,7 @@ internal static class Tessellator
     }
 
     /// <summary>Scales a colour's alpha, for the per-column band opacity ramp.</summary>
-    private static Color32 Fade(Color32 colour, float scale, bool active)
+    private static Color Fade(Color colour, float scale, bool active)
     {
         if (!active)
             return colour;

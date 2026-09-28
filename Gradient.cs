@@ -396,7 +396,7 @@ internal readonly struct Paint
     }
 
     /// <summary>The ramp's colour at a parameter already brought within 0..1, with this paint's alpha.</summary>
-    internal Color32 AtParameter(float t, bool beyond = false)
+    internal Color AtParameter(float t, bool beyond = false)
     {
         var colour = beyond ? Gradient!.Beyond(t) : Gradient!.SampleWithin(t);
         colour.a *= Alpha;
@@ -404,7 +404,7 @@ internal readonly struct Paint
     }
 
     /// <summary>Colour at a point in the shape's own coordinate space.</summary>
-    internal Color32 At(Vector2 point)
+    internal Color At(Vector2 point)
     {
         // A conic's angle has to be measured in the shape's own space: through a bounding box
         // that is not square, fractions would bend every angle but the four axes.

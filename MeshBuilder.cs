@@ -23,7 +23,17 @@ namespace ScriptedScreensVector;
 internal sealed class MeshBuilder
 {
     private readonly List<Vector3> _positions = new(4096);
-    private readonly List<Color32> _colours = new(4096);
+    /// <summary>
+    /// Vertex colours, in FLOAT rather than the 8-bit <c>Color32</c> UGUI normally uses.
+    /// </summary>
+    /// <remarks>
+    /// Eight bits of alpha is a palette in the faint tail of a soft shadow: over a dark page
+    /// one step of 1/255 lands about nine levels apart on screen, so a smooth fade can only
+    /// show 0, 9, 16, 22, 26, 30 and so on. Measured from a console: 0, 12, 19, 24, 28, 32 --
+    /// the same ladder, and the "Win 95 graphics" a player saw. The mesh is ours to build, so
+    /// the colours are floats and the ramp has somewhere to land.
+    /// </remarks>
+    private readonly List<Color> _colours = new(4096);
     private readonly List<Vector2> _uv0 = new(4096);
     private readonly List<int> _indices = new(8192);
 
@@ -289,7 +299,7 @@ internal sealed class MeshBuilder
     /// <summary>Filters and mask of the groups currently being emitted, or null.</summary>
     internal VertexTint? Tint;
 
-    internal void AddVert(Vector3 position, Color32 colour, Vector2 uv)
+    internal void AddVert(Vector3 position, Color colour, Vector2 uv)
     {
         // Filters only: a group's mask is multiplied in once its content is known, MaskRange.
         if (Tint != null)
@@ -349,7 +359,7 @@ internal sealed class MeshBuilder
 
             for (var v = from; v < to; v++)
             {
-                if (_colours[v].a <= 2)
+                if (_colours[v].a <= 2f / 255f)
                     continue;
 
                 var local = (Vector2)mask.CanvasToLocal.MultiplyPoint3x4(_positions[v]);
@@ -381,7 +391,7 @@ internal sealed class MeshBuilder
         {
             var at = _alphaAt.TryGetValue(v, out var sided) ? sided : _positions[v];
             var c = _colours[v];
-            c.a = (byte)Mathf.RoundToInt(c.a * Mathf.Clamp01(mask.AlphaAt(at)));
+            c.a *= Mathf.Clamp01(mask.AlphaAt(at));
             _colours[v] = c;
         }
 
@@ -397,7 +407,7 @@ internal sealed class MeshBuilder
     private const int MaskMaxCells = 8000;
 
     private readonly List<Vector3> _oldP = new();
-    private readonly List<Color32> _oldC = new();
+    private readonly List<Color> _oldC = new();
     private readonly List<Vector2> _oldU = new();
     private readonly List<int> _oldI = new();
     private readonly List<int> _pieces = new();
@@ -634,7 +644,7 @@ internal sealed class MeshBuilder
             return cached;
 
         _positions.Add(Vector3.Lerp(_positions[lo], _positions[hi], t));
-        _colours.Add(Color32.Lerp(_colours[lo], _colours[hi], t));
+        _colours.Add(Color.Lerp(_colours[lo], _colours[hi], t));
         _uv0.Add(Vector2.Lerp(_uv0[lo], _uv0[hi], t));
 
         var index = _positions.Count - 1;
@@ -847,7 +857,7 @@ internal sealed class MeshBuilder
             var t = span.sqrMagnitude < 1e-12f ? 0f : Mathf.Clamp01(Vector2.Dot(along, span) / span.sqrMagnitude);
 
             _positions.Add(new Vector3(point.Position.x, point.Position.y, Mathf.Lerp(_positions[lo].z, _positions[hi].z, t)));
-            _colours.Add(Color32.Lerp(_colours[lo], _colours[hi], t));
+            _colours.Add(Color.Lerp(_colours[lo], _colours[hi], t));
             _uv0.Add(Vector2.Lerp(_uv0[lo], _uv0[hi], t));
 
             var index = _positions.Count - 1;

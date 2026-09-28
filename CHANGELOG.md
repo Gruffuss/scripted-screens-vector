@@ -2,6 +2,11 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.46
+
+- Fixed: **every soft fade was quantised to about thirteen shades.** Vertex colours were stored as 8-bit, which is what UGUI normally uses, and in the faint tail of a shadow or `blur` that leaves almost nothing to work with: over a dark page one step of 1/255 in alpha lands roughly nine levels apart on screen, so a smooth ramp could only show 0, 9, 16, 22, 26, 30 and so on. Measured from a console: 0, 12, 19, 24, 28, 32 -- the same ladder. The mesh is built here rather than by UGUI, so its colours are floats now: the same tail carries 151 distinct values where it carried 13.
+- This is what made a large glow look stepped on a dark background while the game's own gradients looked smooth, and why a light background or a small blur hid it. It is not the same thing as the dark-colour limit in REFERENCE, which is about flat colours and remains.
+
 ## 0.11.45
 
 - Fixed: a blur wider than the shape it blurs drew a **flat bright rectangle** in the middle of the glow. Everything inside the innermost ring was filled with one alpha, which is right only while the blur is small against the shape: blur a 30x24 box by 9 and the true coverage at its centre is 0.74, where it drew 0.89. The core now carries the same exact coverage the rings do, vertex by vertex. Reported from a console as "a bright square in the middle".
