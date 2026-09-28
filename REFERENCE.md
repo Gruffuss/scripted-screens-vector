@@ -289,7 +289,15 @@ halves identical, and both matching the round trip channel for channel. Nothing 
 colour spaces.
 
 What it means for authoring: matching a mockup's hex values exactly is not possible below about
-(20,20,20), and two very dark colours that differ by a level or two will draw the same. Choose
+(20,20,20), and two very dark colours that differ by a level or two will draw the same.
+
+**The same limit bands a dark gradient**, including the tail of a `blur` or a `sh` glow. Measured
+from a screen where a console stood 3000 px tall: the values across a glow's fade went 0, 12, 19,
+24, 28, 32, 35, 38, 41, 44 -- gaps of 12, 7, 5, 4, 4, 3, widening toward black -- while the same
+geometry rasterises one level at a time offline. It reads as stair-stepping in the faint part of
+a glow, and no amount of tessellation touches it, because it happens per pixel after the mesh is
+drawn. Keep a large soft fade off near-black (a slightly lighter background, or a smaller blur)
+and the ramp stays in the part of the range that has levels to spare. Choose
 dark shades a little apart, or judge them on screen rather than by their hex.
 
 ### Screen capture
@@ -788,9 +796,23 @@ knows the glyph metrics rather than estimated.
 **Give an `ellipsis` label a box at least one line tall.** The text engine truncates a label
 vertically as well as horizontally, so a box even slightly shorter than one line of its own
 text shows **nothing at all** -- a 26-unit title in a 31-unit box disappears rather than being
-cut short. Roughly 1.4 times the `size` is a safe height for the faces here. Growing such a box
-automatically has been tried twice and reverted twice, both times because it moved labels away
-from where the scene put them.
+cut short. About **1.4 times the `size`** is a safe height for the faces here.
+
+**On a stretched scene it needs more than that.** A label is laid out at the scene's *horizontal*
+scale and then squashed to fit the vertical one, while its box follows the vertical scale alone.
+So under `fit = "stretch"` on a console whose shape differs from the viewbox, multiply the
+height by the stretch ratio as well:
+
+```
+minimum box height  ~=  1.4 x size x (console width / viewbox width) / (console height / viewbox height)
+```
+
+A 200x280 viewbox on a 684x460 console stretches 3.42 across and 1.64 down, so a `size = 20`
+title needs about 58 units of height there against 28 on a square screen. The simplest way out
+is to keep the scene's aspect close to the console's, or to use a `fit` that preserves it.
+
+Growing such a box automatically has been tried twice and reverted twice: the label then
+overflows into whatever is above or below it, which reads as text in the wrong row.
 
 Group opacity has to arrive this way because it cannot arrive any other way: a TMP child draws
 **above** the mesh, so nothing in the geometry can fade it. Without it a `G o = 0.3` would fade
