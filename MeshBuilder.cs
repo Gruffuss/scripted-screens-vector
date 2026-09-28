@@ -313,7 +313,7 @@ internal sealed class MeshBuilder
         // cannot cover a label. Counted, they made every pair of flush boxes overlap by a
         // feather's width -- which grows with viewing distance -- and forced mesh cuts for
         // labels nothing covers.
-        if (!_trackBounds || colour.a <= 2)
+        if (!_trackBounds || colour.a <= 2f / 255f)
             return;
 
         if (position.x < _minX) _minX = position.x;

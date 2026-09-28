@@ -328,18 +328,18 @@ internal static class GradientTests
         var shortMid = shortShape.At(new Vector2(10f, 105f));
         var tallMid = tallShape.At(new Vector2(10f, 100f));
 
-        var ok = Math.Abs(shortMid.r / 255f - 0.5f) < 0.03f
-                 && Math.Abs(tallMid.r / 255f - 0.5f) < 0.03f;
+        var ok = Math.Abs(shortMid.r - 0.5f) < 0.03f
+                 && Math.Abs(tallMid.r - 0.5f) < 0.03f;
 
         // And the bottom of the short shape should be white, where a scene-space gradient
         // declared 0..1 would have clamped to its end stop everywhere.
         var shortBottom = shortShape.At(new Vector2(10f, 110f));
-        ok &= shortBottom.r > 250;
+        ok &= shortBottom.r > 250f / 255f;
 
         if (ok)
             run.Pass($"gradient: bbox tracks shape (short mid {shortMid.r}, tall mid {tallMid.r}, short end {shortBottom.r})");
         else
-            run.Fail($"gradient: bbox wrong (short mid {shortMid.r}, tall mid {tallMid.r}, short end {shortBottom.r}; expected ~128, ~128, 255)");
+            run.Fail($"gradient: bbox wrong (short mid {shortMid.r}, tall mid {tallMid.r}, short end {shortBottom.r}; expected ~0.5, ~0.5, ~1)");
     }
 
     /// <summary>Radial parameter is distance from the focus over the radius.</summary>
