@@ -1,10 +1,22 @@
-# Changelog
+﻿# Changelog
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.49
+
+- Fixed: **wide soft glows and slow gradients showed bands tens of pixels wide.** Alpha is quantised twice on the way to the screen -- UGUI packs vertex colour to `Color32`, and the framebuffer is 8-bit as well -- and at full glow contrast the two steps are the same size. A Gaussian tail is flat, so it crosses only about five levels over several hundred screen pixels, and each level is a band. Vector geometry is now drawn with its own shader: Unity's `UI/Default` with a per-pixel dither on the output alpha, which scatters the rounding into a grain the eye averages away. New setting `Renderer.Dither` (default 1, in 255ths) tunes it; 0 is the old behaviour. The shader ships as `vectorshaders.bundle` beside the mod; without it the mod draws with the stock UI material and bands as before, and says so in the log.
+
+## 0.11.48 (withdrawn)
+
+- Dithered vertex alpha instead. It made glows visibly worse -- vertices sit tens of pixels apart, so the offset moved whole interpolated ramps rather than scattering the pixels inside them, and band edges turned blocky. Reverted; the reason is recorded in `Shadow.cs` so it is not tried again.
+
+## 0.11.47 (no change)
+
+- Raised the shadow ring limit to 160 to test whether ring density was behind the banding. It was not: 24, 64, 96, 128 and 160 rings are indistinguishable. Back to 24.
+
 ## 0.11.46
 
-- Fixed: **every soft fade was quantised to about thirteen shades.** Vertex colours were stored as 8-bit, which is what UGUI normally uses, and in the faint tail of a shadow or `blur` that leaves almost nothing to work with: over a dark page one step of 1/255 in alpha lands roughly nine levels apart on screen, so a smooth ramp could only show 0, 9, 16, 22, 26, 30 and so on. Measured from a console: 0, 12, 19, 24, 28, 32 -- the same ladder. The mesh is built here rather than by UGUI, so its colours are floats now: the same tail carries 151 distinct values where it carried 13.
+- Fixed: **every soft fade was quantised to about thirteen shades.** Vertex colours were stored as 8-bit, which is what UGUI normally uses, and in the faint tail of a shadow or `blur` that leaves almost nothing to work with: over a dark page one step of 1/255 in alpha lands roughly nine levels apart on screen, so a smooth ramp could only show 0, 9, 16, 22, 26, 30 and so on. Measured from a console: 0, 12, 19, 24, 28, 32 -- the same ladder. The mesh is built here rather than by UGUI, so its colours are floats now. **Correction (0.11.49): this changed nothing on screen.** The canvas re-packs any mesh handed to `CanvasRenderer.SetMesh` into its own `Color32` vertex buffer, so the floats were rounded again immediately, and the framebuffer rounds a second time regardless. The measurement quoted here was taken offline, where neither step exists. The float colours are kept -- they cost nothing and the dither in 0.11.49 has slightly more to work with -- but the banding fix is the shader, not this.
 - This is what made a large glow look stepped on a dark background while the game's own gradients looked smooth, and why a light background or a small blur hid it. It is not the same thing as the dark-colour limit in REFERENCE, which is about flat colours and remains.
 
 ## 0.11.45

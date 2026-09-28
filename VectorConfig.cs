@@ -1,4 +1,4 @@
-using BepInEx.Configuration;
+﻿using BepInEx.Configuration;
 
 namespace ScriptedScreensVector;
 
@@ -29,6 +29,7 @@ internal static class VectorConfig
     private static ConfigEntry<bool>? _cullOffScreen;
     private static ConfigEntry<bool>? _pauseWithGame;
     private static ConfigEntry<bool>? _rateLodEnabled;
+    private static ConfigEntry<float>? _dither;
     private static ConfigEntry<float>? _maximumHz;
     private static ConfigEntry<float>? _minimumHz;
     private static ConfigEntry<float>? _fullRatePixels;
@@ -48,6 +49,15 @@ internal static class VectorConfig
     /// can be switched back on without a rebuild.
     /// </summary>
     internal static bool Diagnostics => _diagnostics?.Value ?? false;
+
+    /// <summary>
+    /// Dither amplitude in 255ths, applied per pixel to the output alpha. One 255th covers both
+    /// quantisers at full contrast: UGUI packs vertex colour to Color32, and the framebuffer is
+    /// 8-bit as well, so a glow's flat Gaussian tail crosses about five levels over hundreds of
+    /// pixels and bands. If the game renders in linear colour space the right amplitude is not
+    /// exactly 1, which is why this is a knob and not a constant.
+    /// </summary>
+    internal static float Dither => System.Math.Min(8f, System.Math.Max(0f, _dither?.Value ?? 1f));
 
     /// <summary>Interpolate `$name` values between data payloads.</summary>
     internal static bool SmoothData => _smoothData?.Value ?? true;
@@ -108,6 +118,13 @@ internal static class VectorConfig
             "for normal play. Lines look like: 'vector \"scene\": 28 Hz, 4.31 ms/rebuild " +
             "(tessellate 4.26 + upload 0.05), 12.1% of a core, ...' and 'frame: 19.02 ms " +
             "mean (53 FPS), 23.20 ms p99, ...'");
+
+        _dither = _file.Bind(
+            "Renderer", "Dither", 1f,
+            "Per-pixel dither on vector gradients, in 255ths of alpha. Vertex colour and the " +
+            "framebuffer are both 8-bit, so a wide soft glow crosses only a few levels and " +
+            "shows bands tens of pixels wide; dithering scatters the rounding into fine grain. " +
+            "0 disables it. Raise it if bands are still visible, lower it if the grain is.");
 
         _smoothData = _file.Bind(
             "Renderer", "SmoothData", true,

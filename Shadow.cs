@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 namespace ScriptedScreensVector;
@@ -46,6 +46,16 @@ internal static class Shadow
     /// and measured as no change at all -- same slope breaks, same spacing, 2.5x the vertices --
     /// once the probe was built at the same scale it was rasterised at. The bands are not ours.
     /// </summary>
+    /// <summary>
+    /// Rings across the ramp, capped. The cap is what a console you are standing at needs.
+    /// </summary>
+    /// <remarks>
+    /// A ring boundary is a break in the SLOPE of the fade, and the eye sees slope breaks as
+    /// bands long before the numbers look wrong -- which is why every measurement of this said
+    /// "no difference" while a player could see it at a glance. The proof came from a gradient
+    /// drawn as one quad beside a shadow: the gradient is a straight ramp with no breaks at all
+    /// and was perfectly smooth on the same screen, on black, with the same 8-bit colours.
+    /// </remarks>
     private const int MaxRings = 24;
 
     /// <summary>Gaussian support. Past three sigma the contribution is under 0.2%.</summary>
@@ -145,6 +155,15 @@ internal static class Shadow
     }
 
     [System.ThreadStatic] private static List<Vector2>? _dense;
+
+    private static System.DateTime _lastReport = System.DateTime.MinValue;
+
+    // Vertex dither does NOT work here, do not try it again. 0.11.48 added a 4x4 Bayer shift of
+    // +-0.5/255 at each emitted vertex; in game it made the glow visibly worse (blocky, jittered
+    // ring edges, screenshot on the 0.11.48 round). Dither has to happen per PIXEL. A vertex is
+    // tens of pixels from its neighbour, so a per-vertex offset does not scatter the rounding of
+    // the pixels between them -- it moves the whole interpolated ramp, which just jitters where
+    // each band starts. Per-pixel dither needs a fragment shader, i.e. leaving CanvasRenderer.
 
     [System.ThreadStatic] private static List<Vector2>? _inner;
     [System.ThreadStatic] private static List<Vector2>? _outer;
@@ -285,7 +304,7 @@ internal static class Shadow
         // is not banding and rings are not what is coarse.
         var rings = sigma <= 0.0001f
             ? 1
-            : Mathf.Clamp(Mathf.CeilToInt(reach * Mathf.Max(0.0001f, screenScale) / 4f), MinRings, MaxRings);
+            : Mathf.Clamp(Mathf.CeilToInt(reach * Mathf.Max(0.0001f, screenScale) / 2f), MinRings, MaxRings);
 
         // Rings inside the outline stop where shrinking it further would turn a corner inside
         // out. Offsetting a rounded corner inward by more than its radius folds its points over
@@ -316,6 +335,21 @@ internal static class Shadow
 
             outline = Densify(outline, sigma, screenScale, _dense ??= new List<Vector2>(64));
             count = outline.Count;
+        }
+
+        // One line per big blur, at most every five seconds: what the renderer actually decided
+        // in game, because every theory about this so far has been argued from offline numbers.
+        if (VectorConfig.Diagnostics && sigma * Mathf.Max(0.0001f, screenScale) >= 30f)
+        {
+            var now = System.DateTime.UtcNow;
+            if ((now - _lastReport).TotalSeconds > 5d)
+            {
+                _lastReport = now;
+                ScriptedScreensVectorPlugin.Log?.LogInfo(
+                    $"blur: sigma {sigma:0.0} units, {screenScale:0.0} px/unit, reach {reach * screenScale:0} px, "
+                    + $"{rings} rings ({reach * screenScale / Mathf.Max(1, rings):0.0} px each), dense {dense}, "
+                    + $"{count} points/contour, alpha {shadow.Colour.a:0.000}..{Coverage(-reach, sigma):0.0000}");
+            }
         }
 
         // Innermost contour: covered to `start`, so it is filled solid rather than ramped.
@@ -401,7 +435,8 @@ internal static class Shadow
 
             var tint = colour;
             tint.a = colour.a * exact.At(p);
-            vh.AddVert(matrix.MultiplyPoint3x4(p), tint, Vector2.zero);
+            var where = matrix.MultiplyPoint3x4(p);
+            vh.AddVert(where, tint, Vector2.zero);
         }
 
         for (var i = 0; i < count; i++)
@@ -454,7 +489,9 @@ internal static class Shadow
                 if (clip != null)
                     a = clip.ClampInside(a, a);
 
-                vh.AddVert(matrix.MultiplyPoint3x4(a), Tint(colour, inner32, exact, a, aInner), Vector2.zero);
+                var at = matrix.MultiplyPoint3x4(a);
+                var tint = Tint(colour, inner32, exact, a, aInner);
+                vh.AddVert(at, tint, Vector2.zero);
             }
         }
 
@@ -466,7 +503,9 @@ internal static class Shadow
             if (clip != null)
                 b = clip.ClampInside(inner[i], b);
 
-            vh.AddVert(matrix.MultiplyPoint3x4(b), Tint(colour, outer32, exact, b, aOuter), Vector2.zero);
+            var to = matrix.MultiplyPoint3x4(b);
+            var outerTint = Tint(colour, outer32, exact, b, aOuter);
+            vh.AddVert(to, outerTint, Vector2.zero);
         }
 
         var innerBase = share ? previous : origin;

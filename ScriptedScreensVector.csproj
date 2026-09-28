@@ -1,11 +1,11 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <ModName>ScriptedScreensVector</ModName>
         <AssemblyName>$(ModName)</AssemblyName>
         <RootNamespace>$(ModName)</RootNamespace>
         <TargetFramework>netstandard2.1</TargetFramework>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-        <Version>0.11.46.0</Version>
+        <Version>0.11.49.0</Version>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     </PropertyGroup>
     <!-- Build paths and the Documents-directory override live in exactly one
@@ -61,11 +61,13 @@
     <ItemGroup>
         <CopyItemsAbout Include="$(ProjectDir)\About\**\*.*" />
         <CopyItemsExamples Include="$(ProjectDir)\examples\**\*.lua" />
+        <CopyItemsBundle Include="$(ProjectDir)\shader\build\*.bundle" />
         <CopyItemsDocs Include="$(ProjectDir)\README.md;$(ProjectDir)\REFERENCE.md;$(ProjectDir)\CHANGELOG.md;$(ProjectDir)\QUICKSTART.md;$(ProjectDir)\Patterns.lua" />
     </ItemGroup>
     <Target Name="CopyAssetsToMods" AfterTargets="PostBuild">
         <Copy SourceFiles="@(CopyItemsAbout)" DestinationFolder="$(StationeersDocumentsDirectory)\mods\$(ModName)\About\%(RecursiveDir)" ContinueOnError="true" />
         <Copy SourceFiles="@(CopyItemsExamples)" DestinationFolder="$(StationeersDocumentsDirectory)\mods\$(ModName)\examples\%(RecursiveDir)" ContinueOnError="true" />
+        <Copy SourceFiles="@(CopyItemsBundle)" DestinationFolder="$(StationeersDocumentsDirectory)\mods\$(ModName)" ContinueOnError="true" />
         <Copy SourceFiles="@(CopyItemsDocs)" DestinationFolder="$(StationeersDocumentsDirectory)\mods\$(ModName)" ContinueOnError="true" />
     </Target>
     <Target Name="GenerateVersionConst" BeforeTargets="CoreCompile">

@@ -1,4 +1,4 @@
-namespace ScriptedScreensVector;
+﻿namespace ScriptedScreensVector;
 
 /// <summary>
 /// The renderer's config, as it behaves with nothing bound.
@@ -17,6 +17,10 @@ namespace ScriptedScreensVector;
 /// </remarks>
 internal static class VectorConfig
 {
+    internal static bool Diagnostics => false;
+
+    internal static float Dither => 1f;
+
     internal static bool CurveLodEnabled => true;
 
     internal static float PixelsPerSegment => 3f;

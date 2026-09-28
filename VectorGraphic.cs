@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -1868,6 +1868,14 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     protected override void OnEnable()
     {
         base.OnEnable();
+
+        // Every mesh this graphic and its slices draw goes through the dither material. Assigning
+        // it here rather than per slice is enough: slices copy `material` when they are created.
+        var dither = DitherMaterial.Shared;
+        if (dither != null && material != dither)
+            material = dither;
+
+        DitherMaterial.Refresh();
         Stats.Register(this);
     }
 
