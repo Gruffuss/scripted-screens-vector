@@ -2,6 +2,11 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.53
+
+- Added: the log now records the render target's precision at startup -- colour space, whether the main camera is HDR, and what it draws into. Guessed at twice during the banding work and wrong both times; in linear space the right dither amplitude is not the one gamma wants, and against an HDR target there is no eight-bit step to dither at all.
+- Not changed, recorded so it is not tried again: **carrying a blur's coverage in a UV instead of in vertex alpha makes no difference.** UVs interpolate as float32 and the canvas carries colour as `Color32`, so the idea was that the ramp was being rounded on the way to the GPU. Built it, measured it against the exact answer: the widest flat step in a wide glow's tail is 38 px with coverage in the colour and 37 px with it in a UV. The vertex colour was never the limit -- the limit is the 8-bit output, quantising a ramp that reached it smooth. Dither takes the same case to 2 px. Reverted, since it cost a vertex stream for nothing.
+
 ## 0.11.52
 
 - Changed: `Renderer.Dither` now defaults to 4/255 rather than 1. 1 was a guess, and measured against the exact answer it is about four times too weak where it matters: on a black page the widest flat step in a wide glow's tail is 38 px undithered, 12 px at 1/255 and 2 px at 4/255.

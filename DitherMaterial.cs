@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using UnityEngine;
 
 namespace ScriptedScreensVector;
@@ -110,6 +110,18 @@ internal static class DitherMaterial
             _material.SetFloat(DitherId, VectorConfig.Dither);
             ScriptedScreensVectorPlugin.Log?.LogInfo(
                 $"Dither shader loaded; gradients dither at {VectorConfig.Dither:0.##}/255.");
+
+            // How much precision there actually is between our mesh and the screen. Guessed at
+            // twice and wrong both times, so it is recorded rather than assumed: in linear space
+            // the right dither amplitude is not the same as in gamma, and with an HDR target
+            // there is no 8-bit step to dither against at all until the final present.
+            var camera = Camera.main;
+            ScriptedScreensVectorPlugin.Log?.LogInfo(
+                $"render target: colour space {QualitySettings.activeColorSpace}, "
+                + (camera != null
+                    ? $"main camera HDR {camera.allowHDR}, MSAA {camera.allowMSAA}, target "
+                      + (camera.targetTexture != null ? camera.targetTexture.format.ToString() : "the backbuffer")
+                    : "no main camera yet"));
         }
         catch (System.Exception ex)
         {
