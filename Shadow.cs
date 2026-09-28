@@ -326,8 +326,21 @@ internal static class Shadow
         var core = shadow.Colour;
         core.a *= Coverage(start, sigma);
 
-        var paint = new Paint(core, null, 1f);
-        FillConvexOrEar(vh, inner, paint, matrix, clip);
+        // The core is everything inside the innermost ring, and filling it with ONE alpha is
+        // only right when the blur is small against the shape. Blur a 30x24 box by 9 and the
+        // true coverage at its centre is 0.74 while `Coverage(start)` says 0.91: it drew as a
+        // flat bright rectangle sitting inside the glow, reported from a console as "a bright
+        // square in the middle". With the exact product to hand, every core vertex can carry
+        // its own value instead, and a fan through the centre gives the middle one too.
+        if (dense)
+        {
+            FillCore(vh, inner, shadow.Colour, exact, matrix, clip);
+        }
+        else
+        {
+            var paint = new Paint(core, null, 1f);
+            FillConvexOrEar(vh, inner, paint, matrix, clip);
+        }
 
         if (rings <= 1 || reach <= 0.0001f)
             return;
@@ -356,6 +369,43 @@ internal static class Shadow
 
         _inner = inner;
         _outer = outer;
+    }
+
+    /// <summary>
+    /// The region inside the innermost ring, as a fan through its centre, every vertex carrying
+    /// the coverage that belongs to it.
+    /// </summary>
+    private static void FillCore(MeshBuilder vh, List<Vector2> contour, Color colour, RectCoverage exact, Matrix4x4 matrix, ClipRegion? clip)
+    {
+        var count = contour.Count;
+        if (count < 3 || Tessellator.Starved(vh, count + 1, "a shadow core"))
+            return;
+
+        var centre = Vector2.zero;
+        for (var i = 0; i < count; i++)
+            centre += contour[i];
+
+        centre /= count;
+
+        var middle = colour;
+        middle.a = colour.a * exact.At(centre);
+
+        var origin = vh.currentVertCount;
+        vh.AddVert(matrix.MultiplyPoint3x4(centre), (Color32)middle, Vector2.zero);
+
+        for (var i = 0; i < count; i++)
+        {
+            var p = contour[i];
+            if (clip != null)
+                p = clip.ClampInside(centre, p);
+
+            var tint = colour;
+            tint.a = colour.a * exact.At(p);
+            vh.AddVert(matrix.MultiplyPoint3x4(p), (Color32)tint, Vector2.zero);
+        }
+
+        for (var i = 0; i < count; i++)
+            vh.AddTriangle(origin, origin + 1 + i, origin + 1 + (i + 1) % count);
     }
 
     /// <summary>
