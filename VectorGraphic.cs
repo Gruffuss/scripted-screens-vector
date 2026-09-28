@@ -678,14 +678,66 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             _dataDirty = true;
         }
 
+        // Kept for every hit, not only a `press` one: the per-frame leave and drag tests need a
+        // pointer to re-test with, and a `drag = 1` node sends nothing on the way down.
+        if (hit)
+            _pressEvent = eventData;
+
+        if (hit && region.Drag)
+            _dragCandidate = region.Id;
+
         if (_forwarder == null || !hit || !region.Press)
             return;
 
         _pressedId = region.Id;
         _pressedRegion = region;
         _pressedInside = true;
-        _pressEvent = eventData;
         Send("down:" + Tagged(region, LocalPoint(eventData)));
+    }
+
+    /// <summary>The `drag = 1` node a press landed on, until the drag starts or the press ends.</summary>
+    private string? _dragCandidate;
+
+    /// <summary>
+    /// A drag begun by aiming rather than by moving the mouse.
+    /// </summary>
+    /// <remarks>
+    /// On a console the crosshair IS the pointer: it sits at the centre of the view and never
+    /// moves across the screen, so Unity's drag threshold is never crossed and
+    /// <c>OnBeginDrag</c> never fires. Only detaching the mouse (Alt) produces a real pointer
+    /// movement. Holding on a `drag = 1` node and turning until the crosshair leaves it starts
+    /// the drag here instead, so a scene's drag works in the way the game is normally played.
+    /// The free-cursor path still works and is left alone; whichever starts first wins.
+    /// </remarks>
+    private void PollDrag()
+    {
+        if (_dragCandidate == null || _draggedId != null || _pressEvent == null)
+            return;
+
+        if (HitAt(_pressEvent.position, _pressEvent.pressEventCamera, out var region) && region.Id == _dragCandidate)
+            return;
+
+        _draggedId = _dragCandidate;
+        Send("dragstart:" + _draggedId);
+    }
+
+    /// <summary>
+    /// A drag ending, from either path: `drop:src&gt;dst` when released over a `drop = 1` node,
+    /// then `dragend:src`, in the order a browser fires them. Clears first, so the free-cursor
+    /// and crosshair paths cannot both report the same drag.
+    /// </summary>
+    private void FinishDrag(PointerEventData? eventData)
+    {
+        var source = _draggedId;
+        _draggedId = null;
+        _dragCandidate = null;
+        if (source == null || eventData == null)
+            return;
+
+        if (HitAt(eventData.position, eventData.pressEventCamera, out var target) && target.Drop)
+            Send("drop:" + source + ">" + target.Id);
+
+        Send("dragend:" + source);
     }
 
     /// <summary>
@@ -701,8 +753,14 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             _dataDirty = true;
         }
 
+        // A drag started by aiming ends here: with no mouse movement there is no OnEndDrag.
+        FinishDrag(eventData);
+
         if (_pressedId == null || eventData == null)
+        {
+            _pressEvent = null;
             return;
+        }
 
         _pressedId = null;
         _pressEvent = null;
@@ -857,6 +915,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         _dragLast = eventData.position;
 
+        // Already begun by aiming (see PollDrag): one drag, one dragstart.
+        if (_draggedId != null)
+            return;
+
         // A drag that starts on a `drag = 1` node is that node's. Tested where the press landed,
         // not where the pointer is now: Unity starts a drag only after it has moved a little.
         _draggedId = HitAt(eventData.pressPosition, eventData.pressEventCamera, out var region) && region.Drag
@@ -876,15 +938,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// </summary>
     public void OnEndDrag(PointerEventData eventData)
     {
-        var source = _draggedId;
-        _draggedId = null;
-        if (source == null || eventData == null)
-            return;
-
-        if (HitAt(eventData.position, eventData.pressEventCamera, out var target) && target.Drop)
-            Send("drop:" + source + ">" + target.Id);
-
-        Send("dragend:" + source);
+        FinishDrag(eventData);
     }
 
     /// <summary>Dragging inside a container moves the content with the pointer.</summary>
@@ -1870,6 +1924,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             CheckLeave(_pressEvent);
 
         PollHover();
+        PollDrag();
 
         // The entire per-frame cost of a static scene is this one boolean.
         // A scene with no `t` still has to redraw while data is easing to a new value.

@@ -1102,6 +1102,13 @@ from device data.
 | `drop:src>dst` | it is released over a `drop = 1` node |
 | `dragend:src` | it is released anywhere, after any `drop` |
 
+**Dragging works both ways a console is used.** The pointer is normally the crosshair, fixed at
+the centre of the view: it never moves across the screen, so there is no mouse movement for a
+drag to begin from. Since 0.11.41 holding on the node and **turning until the crosshair leaves
+it** starts the drag, which is how the game is normally played. Holding **Alt** detaches the
+mouse instead, and that free cursor drags as any other program would. Either way one drag is
+reported once.
+
 Nothing is sent while the drag moves, and the scene does not move the dragged node: the chip
 answers `drop` with whatever the scene should now show. A drag that starts on a `drag = 1` node
 inside a scroll container does not scroll it. Any of `xy`, `hoverev`, `drag` and `drop` makes a
