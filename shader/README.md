@@ -50,6 +50,12 @@ head -c 200 vectorshaders.bundle | tr -c '[:print:]' '
 ' | grep -E '^[0-9]{4}\.[0-9]+\.[0-9]+[fab][0-9]+$'
 ```
 
+If `LoadFromFile` ever returns null on a later build, a version mismatch is **not** the first
+suspect: 2022.3 tolerates patch differences, and a mod in the wild ships a 2022.3.7f1 bundle the
+2022.3.62f3 game loads. Matching exactly is belt-and-braces. The likelier cause is a stale
+artifact, which is what the forced clean rebuild above exists to prevent -- so check that the
+bundle was actually rewritten before doubting the editor version.
+
 `AssetBundle.LoadFromFile` otherwise rejects a bad bundle with no detail beyond returning null, so
 the log line is the next check: on a good load the mod logs
 `Dither shader loaded; gradients dither at 1/255.` at startup.
