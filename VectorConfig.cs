@@ -58,7 +58,7 @@ internal static class VectorConfig
     /// pixels and bands. If the game renders in linear colour space the right amplitude is not
     /// exactly 1, which is why this is a knob and not a constant.
     /// </summary>
-    internal static float Dither => System.Math.Min(8f, System.Math.Max(0f, _dither?.Value ?? 1f));
+    internal static float Dither => System.Math.Min(8f, System.Math.Max(0f, _dither?.Value ?? 4f));
 
     /// <summary>
     /// Multiplies the number of contours and corner points a blur is built from. 1 is the
@@ -130,7 +130,7 @@ internal static class VectorConfig
             "mean (53 FPS), 23.20 ms p99, ...'");
 
         _dither = _file.Bind(
-            "Renderer", "Dither", 1f,
+            "Renderer", "Dither", 4f,
             "Per-pixel dither on vector gradients, in 255ths of alpha. Vertex colour and the " +
             "framebuffer are both 8-bit, so a wide soft glow crosses only a few levels and " +
             "shows bands tens of pixels wide; dithering scatters the rounding into fine grain. " +

@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.52
+
+- Changed: `Renderer.Dither` now defaults to 4/255 rather than 1. 1 was a guess, and measured against the exact answer it is about four times too weak where it matters: on a black page the widest flat step in a wide glow's tail is 38 px undithered, 12 px at 1/255 and 2 px at 4/255.
+
 ## 0.11.51
 
 - Fixed: **a group's per-column opacity ramp snapped every vertex to fully transparent or fully opaque.** `Fade` still rounded alpha to an integer and cast it to a byte, left over from when it took a `Color32`; on a float colour, alpha is 0..1, so the only results it could produce were 0 and 1. Found while auditing the mesh path for 8-bit rounding.
