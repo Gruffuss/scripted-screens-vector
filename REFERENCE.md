@@ -276,6 +276,22 @@ reach rather than two — checked against a 400-ring reference, the difference i
 pixels at 12/255 — so a shadow below the 24-ring cap costs half what it did, and one at the cap
 about a quarter less. Reducing the blur radius is still the direct lever.
 
+### Dark colours lose a level or two
+
+A flat colour comes back a few levels off at the dark end, on screen and in a capture alike:
+`#12202F` (18,32,47) draws as (22,34,46), and `#080C10` (8,12,16) draws as grey (13,13,13)
+because its three channels collapse together. Mid grey and white are exact.
+
+This is the game's own UI path, not this layer: the colour makes one round trip through an
+8-bit linear buffer, which near black holds about one and a half levels. Measured 2026-09-27
+with the same colours drawn as vector shapes and as ScriptedScreens `panel` elements — both
+halves identical, and both matching the round trip channel for channel. Nothing here converts
+colour spaces.
+
+What it means for authoring: matching a mockup's hex values exactly is not possible below about
+(20,20,20), and two very dark colours that differ by a level or two will draw the same. Choose
+dark shades a little apart, or judge them on screen rather than by their hex.
+
 ### Screen capture
 
 `capture_scripted_screen` works on vector consoles, artwork and text alike. It is not free:

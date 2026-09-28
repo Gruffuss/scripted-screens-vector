@@ -2,6 +2,13 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.40
+
+- Fixed: a label with `fit = "ellipsis"` drew **nothing** when its box was even slightly shorter than one line -- a 26-unit title in a 31-unit box vanished instead of being cut short. `ellipsis` truncates vertically as well, and a box that cannot hold one line left nothing to show. The label now gets the one line it needs, growing away from the edge its `valign` pins, and the text is cut horizontally as asked.
+- Fixed: `vector_stats` reported a rebuild rate a fraction of the truth (0.1/s for a scene rebuilding twice a second) whenever Diagnostics was on. The five-second log reset the counting window with its own stopwatch while the rate was worked out from the game clock, so the window was the whole session.
+- Fixed: the five-second log called a scene `idle (off screen, paused, or static)` when its only motion was a group fading over `t`. That is not idle and not static: the renderer fades it every frame without a rebuild, and the line now says so.
+- `vector_stats` says the on-screen size is measured at the last rebuild, and that an unknown size means nothing has been drawn in view yet -- a console behind the camera cannot be measured, which is the normal case when the tool is read from an editor.
+
 ## 0.11.39
 
 - Fixed: two stops at the same offset -- a hard stop, which is what every CSS stripe is made of -- drew as a smooth ramp from the cut to the next stop instead of a step. The band either side of the cut was coloured from the stop position itself, which reads as the colour *before* it. Nudging one stop by a thousandth was the workaround and is no longer needed.

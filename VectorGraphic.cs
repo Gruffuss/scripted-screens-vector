@@ -78,8 +78,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 {
                     // Zero is a result, not an absence: it means culled, paused, or a scene
                     // with no `t` reference. Silence would look like the surface had gone.
-                    ScriptedScreensVectorPlugin.Log?.LogInfo(
-                        $"vector \"{graphic._sceneId}\": idle (off screen, paused, or static)");
+                    // A scene whose only motion is a group fading over `t` also lands here --
+                    // its renderer does that every frame without a rebuild -- and calling it
+                    // static was simply wrong about a console that was visibly pulsing.
+                    ScriptedScreensVectorPlugin.Log?.LogInfo(graphic._fades.Count > 0
+                        ? $"vector \"{graphic._sceneId}\": no rebuilds ({graphic._fades.Count} group(s) fading, which its renderer does without them)"
+                        : $"vector \"{graphic._sceneId}\": idle (off screen, paused, or static)");
                     continue;
                 }
 
@@ -153,7 +157,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 graphic._payloads = 0;
                 graphic._structures = 0;
                 graphic._rescuedLate = 0;
-                graphic._countersSince = now;
+                // `Now()`, not the report Stopwatch: the rebuild path and `Describe` both
+                // measure this window with Time.time, and mixing the two made the tool's
+                // rebuild rate a fraction of the truth (a 600 s window for 5 s of counting).
+                graphic._countersSince = Now();
                 graphic._milliseconds = 0d;
                 graphic._tessellateMs = 0d;
                 graphic._uploadMs = 0d;
@@ -1334,7 +1341,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                         + $"{VectorStatsTool.N(tess)} ms tessellate off-thread, "
                         + $"{VectorStatsTool.N(up)} ms upload on-thread");
 
-        var size = _screenPixels < 0f ? "size unknown" : VectorStatsTool.N(_screenPixels, 0) + " px";
+        // Measured at the last rebuild, and a console behind the camera cannot be measured at
+        // all, which is the normal case when this is read from an editor rather than in front
+        // of the screen. Saying so beats a bare "unknown" that reads like a fault.
+        var size = _screenPixels < 0f
+            ? "size unknown (nothing has been drawn in view yet)"
+            : VectorStatsTool.N(_screenPixels, 0) + " px at the last rebuild";
         // A scene whose only motion is a renderer fade animates without redrawing, so reporting
         // the redraw gate alone said `animated False` about a dot that was visibly pulsing.
         var fading = _fades.Count > 0;

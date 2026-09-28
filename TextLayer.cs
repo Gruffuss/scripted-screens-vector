@@ -233,6 +233,18 @@ internal sealed class TextLayer
         else if (_defaultFont != null && label.font != _defaultFont)
             label.font = _defaultFont;
 
+        // `ellipsis` truncates VERTICALLY as well, so a box even slightly shorter than one line
+        // showed nothing at all -- a 26-unit title in a 31-unit box vanished instead of being
+        // cut. A browser draws that line and lets it overflow, so the label is given the one
+        // line it needs, grown away from whichever edge its `valign` pins. Measured with the
+        // face and size already applied, and only for `ellipsis`: nothing else drops a line.
+        if (placement.Fit == TextFit.Ellipsis && !string.IsNullOrEmpty(placement.Text))
+        {
+            var line = label.GetPreferredValues(placement.Text, 100000f, 0f).y;
+            if (line > placement.Rect.height + 0.01f)
+                Place(label.rectTransform, GrowToLine(placement.Rect, line, placement.VAlign));
+        }
+
         // Build the glyph geometry now if it has none. TMP normally marks itself dirty and
         // lets its own update manager build it on the canvas callback -- but a screen capture
         // runs us from INSIDE that callback, so a label touched there marks itself for a pass
@@ -973,6 +985,23 @@ internal sealed class TextLayer
 
         if (MaterialReferenceManager.TryGetFontAsset(TMP_TextUtilities.GetSimpleHashCode(family), out var asset))
             label.font = asset;
+    }
+
+    /// <summary>
+    /// A box raised to one line's height, keeping the edge the vertical alignment pins: a
+    /// top-aligned label grows downward, a bottom-aligned one upward, a centred one both ways.
+    /// </summary>
+    private static Rect GrowToLine(Rect box, float line, int vAlign)
+    {
+        var extra = line - box.height;
+
+        // Canvas Y is up, so the top edge is yMax.
+        return vAlign switch
+        {
+            0 => new Rect(box.xMin, box.yMin - extra, box.width, line),
+            2 => new Rect(box.xMin, box.yMin, box.width, line),
+            _ => new Rect(box.xMin, box.yMin - extra * 0.5f, box.width, line),
+        };
     }
 
     private static void Place(RectTransform rect, Rect where)
