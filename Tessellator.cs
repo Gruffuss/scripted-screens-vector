@@ -538,6 +538,20 @@ internal static class Tessellator
     /// capture. Every group's `o` is then multiplied into its colours as any other opacity is.
     /// </summary>
     /// <remarks>
+    /// <summary>
+    /// Whether a blur's coverage rides in a UV instead of being folded into vertex alpha. Set at
+    /// startup from whether the dither shader loaded: without that shader the stock UI material
+    /// ignores the stream, and a blur whose ramp lived there would draw at full strength.
+    ///
+    /// On its own this changes nothing, which is why it was reverted once. Measured against the
+    /// exact answer, the widest flat step in a wide glow's tail is 38 px with an 8-bit ramp and
+    /// an 8-bit output, 37 px with a float ramp and an 8-bit output, 32 px with an 8-bit ramp
+    /// and a 16-bit output -- and 1 px with both. Either quantiser alone is enough to produce
+    /// the banding, so removing one can never show a difference. This half is ours; the other
+    /// half is whatever the game draws into, which the startup log now records.
+    /// </summary>
+    internal static bool CoverageInUv;
+
     /// A renderer fade is <c>CanvasRenderer.SetAlpha</c>, which is live state and not part of
     /// the object, so the clone ScriptedScreens photographs starts at full opacity: a pulsing
     /// disc was captured solid however faint it was on screen.

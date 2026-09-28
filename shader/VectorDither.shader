@@ -86,6 +86,9 @@ Shader "ScriptedScreensVector/UIDither"
                 float4 vertex   : POSITION;
                 float4 color    : COLOR;
                 float2 texcoord : TEXCOORD0;
+                // VECTOR: a blur's coverage in x, 1 where a vertex has none of its own. It rides
+                // here because the canvas carries colour as Color32; a UV interpolates as float32.
+                float2 coverage : TEXCOORD1;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -96,6 +99,7 @@ Shader "ScriptedScreensVector/UIDither"
                 float2 texcoord  : TEXCOORD0;
                 float4 worldPosition : TEXCOORD1;
                 half4 mask : TEXCOORD2;
+                float2 coverage : TEXCOORD3;   // VECTOR
                 UNITY_VERTEX_OUTPUT_STEREO
             };
 
@@ -135,6 +139,7 @@ Shader "ScriptedScreensVector/UIDither"
                 OUT.mask = half4(v.vertex.xy * 2 - clampedRect.xy - clampedRect.zw,
                     0.25 / (0.25 * half2(_UIMaskSoftnessX, _UIMaskSoftnessY) + abs(pixelSize.xy)));
 
+                OUT.coverage = v.coverage;     // VECTOR
                 OUT.color = v.color * _Color;
                 return OUT;
             }
@@ -142,6 +147,9 @@ Shader "ScriptedScreensVector/UIDither"
             fixed4 frag(v2f IN) : SV_Target
             {
                 half4 color = IN.color * (tex2D(_MainTex, IN.texcoord) + _TextureSampleAdd);
+
+                // VECTOR: the float ramp, before anything else touches alpha.
+                color.a *= IN.coverage.x;
 
                 #ifdef UNITY_UI_CLIP_RECT
                 half2 m = saturate((_ClipRect.zw - _ClipRect.xy - abs(IN.mask.xy)) * IN.mask.zw);

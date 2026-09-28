@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -35,6 +35,14 @@ internal sealed class MeshBuilder
     /// </remarks>
     private readonly List<Color> _colours = new(4096);
     private readonly List<Vector2> _uv0 = new(4096);
+
+    /// <summary>
+    /// Coverage in x, 1 where a vertex has none of its own. It rides in a UV rather than in
+    /// the colour because UVs interpolate as float32 the whole way to the fragment, while the
+    /// canvas's own vertex stream carries colour as <c>Color32</c>. A blur's ramp lives here
+    /// so that eight bits never touch it; the shader multiplies alpha by x.
+    /// </summary>
+    private readonly List<Vector2> _uv1 = new(4096);
     private readonly List<int> _indices = new(8192);
 
     /// <summary>Vertex counts at which the geometry may be cut into a separate mesh.</summary>
@@ -120,6 +128,7 @@ internal sealed class MeshBuilder
         _positions.Clear();
         _colours.Clear();
         _uv0.Clear();
+        _uv1.Clear();
         _indices.Clear();
         _cuts.Clear();
         _cutIndices.Clear();
@@ -299,7 +308,11 @@ internal sealed class MeshBuilder
     /// <summary>Filters and mask of the groups currently being emitted, or null.</summary>
     internal VertexTint? Tint;
 
-    internal void AddVert(Vector3 position, Color colour, Vector2 uv)
+    internal void AddVert(Vector3 position, Color colour, Vector2 uv) => AddVert(position, colour, uv, 1f);
+
+    /// <summary>As <see cref="AddVert(Vector3, Color, Vector2)"/>, with a float coverage that
+    /// multiplies alpha in the shader instead of being folded into the colour.</summary>
+    internal void AddVert(Vector3 position, Color colour, Vector2 uv, float coverage)
     {
         // Filters only: a group's mask is multiplied in once its content is known, MaskRange.
         if (Tint != null)
@@ -308,6 +321,7 @@ internal sealed class MeshBuilder
         _positions.Add(position);
         _colours.Add(colour);
         _uv0.Add(uv);
+        _uv1.Add(new Vector2(coverage, 0f));
 
         // Transparent vertices do not count: a feather ring or the fading edge of a shadow
         // cannot cover a label. Counted, they made every pair of flush boxes overlap by a
@@ -409,6 +423,7 @@ internal sealed class MeshBuilder
     private readonly List<Vector3> _oldP = new();
     private readonly List<Color> _oldC = new();
     private readonly List<Vector2> _oldU = new();
+    private readonly List<Vector2> _oldU1 = new();
     private readonly List<int> _oldI = new();
     private readonly List<int> _pieces = new();
     private readonly List<int> _cutScratch = new();
@@ -448,12 +463,13 @@ internal sealed class MeshBuilder
     {
         var indexFrom = firstCut == 0 ? 0 : _cutIndices[firstCut - 1];
 
-        _oldP.Clear(); _oldC.Clear(); _oldU.Clear(); _oldI.Clear();
+        _oldP.Clear(); _oldC.Clear(); _oldU.Clear(); _oldU1.Clear(); _oldI.Clear();
         for (var v = from; v < _positions.Count; v++)
         {
             _oldP.Add(_positions[v]);
             _oldC.Add(_colours[v]);
             _oldU.Add(_uv0[v]);
+            _oldU1.Add(_uv1[v]);
         }
 
         for (var t = indexFrom; t < _indices.Count; t++)
@@ -462,6 +478,7 @@ internal sealed class MeshBuilder
         _positions.RemoveRange(from, _positions.Count - from);
         _colours.RemoveRange(from, _colours.Count - from);
         _uv0.RemoveRange(from, _uv0.Count - from);
+        _uv1.RemoveRange(from, _uv1.Count - from);
         _indices.RemoveRange(indexFrom, _indices.Count - indexFrom);
 
         var conic = mask.Seam(out var centre, out var start);
@@ -480,6 +497,7 @@ internal sealed class MeshBuilder
                 _positions.Add(_oldP[v - from]);
                 _colours.Add(_oldC[v - from]);
                 _uv0.Add(_oldU[v - from]);
+                _uv1.Add(_oldU1[v - from]);
             }
 
             _pieces.Clear();
@@ -646,6 +664,7 @@ internal sealed class MeshBuilder
         _positions.Add(Vector3.Lerp(_positions[lo], _positions[hi], t));
         _colours.Add(Color.Lerp(_colours[lo], _colours[hi], t));
         _uv0.Add(Vector2.Lerp(_uv0[lo], _uv0[hi], t));
+        _uv1.Add(Vector2.Lerp(_uv1[lo], _uv1[hi], t));
 
         var index = _positions.Count - 1;
         _onCut.Add(index);
@@ -859,6 +878,7 @@ internal sealed class MeshBuilder
             _positions.Add(new Vector3(point.Position.x, point.Position.y, Mathf.Lerp(_positions[lo].z, _positions[hi].z, t)));
             _colours.Add(Color.Lerp(_colours[lo], _colours[hi], t));
             _uv0.Add(Vector2.Lerp(_uv0[lo], _uv0[hi], t));
+            _uv1.Add(Vector2.Lerp(_uv1[lo], _uv1[hi], t));
 
             var index = _positions.Count - 1;
             var loSided = _alphaAt.TryGetValue(lo, out var loAt);
@@ -882,6 +902,7 @@ internal sealed class MeshBuilder
         Color ca = _colours[a], cb = _colours[b], cc = _colours[c];
         _colours.Add(ca * w.x + cb * w.y + cc * w.z);
         _uv0.Add(_uv0[a] * w.x + _uv0[b] * w.y + _uv0[c] * w.z);
+        _uv1.Add(_uv1[a] * w.x + _uv1[b] * w.y + _uv1[c] * w.z);
 
         var made = _positions.Count - 1;
         _gridCache[key] = made;
@@ -943,6 +964,7 @@ internal sealed class MeshBuilder
             mesh.SetVertices(_positions);
             mesh.SetColors(_colours);
             mesh.SetUVs(0, _uv0);
+            mesh.SetUVs(1, _uv1);
             mesh.SetTriangles(_indices, 0, calculateBounds: true);
             return;
         }
@@ -980,6 +1002,7 @@ internal sealed class MeshBuilder
         mesh.SetVertices(_positions, from, to - from);
         mesh.SetColors(_colours, from, to - from);
         mesh.SetUVs(0, _uv0, from, to - from);
+        mesh.SetUVs(1, _uv1, from, to - from);
         mesh.SetTriangles(_sliceI, 0, calculateBounds: true);
     }
 }

@@ -25,6 +25,16 @@ internal static class DitherMaterial
     private static bool _tried;
     private static Material? _material;
 
+    /// <summary>Whether the shader is loaded, and so whether coverage may ride in a UV.</summary>
+    internal static bool HasShader
+    {
+        get
+        {
+            Load();
+            return _material != null;
+        }
+    }
+
     /// <summary>The material to draw with, or null to use UGUI's default.</summary>
     internal static Material? Shared
     {

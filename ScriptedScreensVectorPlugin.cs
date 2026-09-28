@@ -50,6 +50,9 @@ public sealed class ScriptedScreensVectorPlugin : ModBehaviour
             // base.OnLoaded created Config; LaunchPad surfaces that instance in its
             // settings UI, so binding here is what makes the tunables appear in game.
             VectorConfig.Load(Config);
+            // Coverage may only ride in a UV if the shader that reads it actually loaded.
+            Tessellator.CoverageInUv = DitherMaterial.HasShader;
+
             VectorStatsTool.TryRegister();
             Log.LogInfo(Config != null
                 ? "Level-of-detail settings registered with LaunchPad."

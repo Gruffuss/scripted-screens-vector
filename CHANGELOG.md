@@ -2,10 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
-## 0.11.53
+## 0.11.54
 
 - Added: the log now records the render target's precision at startup -- colour space, whether the main camera is HDR, and what it draws into. Guessed at twice during the banding work and wrong both times; in linear space the right dither amplitude is not the one gamma wants, and against an HDR target there is no eight-bit step to dither at all.
-- Not changed, recorded so it is not tried again: **carrying a blur's coverage in a UV instead of in vertex alpha makes no difference.** UVs interpolate as float32 and the canvas carries colour as `Color32`, so the idea was that the ramp was being rounded on the way to the GPU. Built it, measured it against the exact answer: the widest flat step in a wide glow's tail is 38 px with coverage in the colour and 37 px with it in a UV. The vertex colour was never the limit -- the limit is the 8-bit output, quantising a ramp that reached it smooth. Dither takes the same case to 2 px. Reverted, since it cost a vertex stream for nothing.
+- Added: **a blur's coverage rides in a UV rather than in vertex alpha**, and the shader multiplies it in. UVs interpolate as float32; the canvas's own vertex stream carries colour as `Color32`. Measured against the exact answer, on its own this is worth nothing -- the widest flat step in a wide glow's tail is 38 px with an 8-bit ramp and 37 px with a float one. It only pays with an output that has headroom: 8-bit ramp into a 16-bit output is 32 px, float ramp into a 16-bit output is **1 px**. Either quantiser alone produces the banding, so removing one can never show a difference on its own, which is why every single-variable test read as "no change". This half is ours. Falls back to the old behaviour when the shader is not loaded, since the stock UI material would ignore the stream and draw a blur at full strength.
 
 ## 0.11.52
 

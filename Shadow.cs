@@ -85,6 +85,19 @@ internal static class Shadow
     private static int CornerCeiling() =>
         Mathf.Clamp(Mathf.CeilToInt(MaxCornerSamples * VectorConfig.BlurDensity), 2, 512);
 
+    /// <summary>
+    /// Emits one vertex, putting the ramp wherever it survives best. With the shader loaded the
+    /// colour keeps its own alpha and the coverage rides in a UV, so nothing about the ramp ever
+    /// meets eight bits; without it, coverage is folded into alpha as it always was.
+    /// </summary>
+    private static void Emit(MeshBuilder vh, Vector3 at, Color colour, Color tinted)
+    {
+        if (Tessellator.CoverageInUv && colour.a > 0.0001f)
+            vh.AddVert(at, colour, Vector2.zero, Mathf.Clamp01(tinted.a / colour.a));
+        else
+            vh.AddVert(at, tinted, Vector2.zero);
+    }
+
     private static float Coverage(float d, float sigma)
     {
         if (sigma <= 0.0001f)
@@ -439,7 +452,7 @@ internal static class Shadow
         middle.a = colour.a * exact.At(centre);
 
         var origin = vh.currentVertCount;
-        vh.AddVert(matrix.MultiplyPoint3x4(centre), middle, Vector2.zero);
+        Emit(vh, matrix.MultiplyPoint3x4(centre), colour, middle);
 
         for (var i = 0; i < count; i++)
         {
@@ -450,7 +463,7 @@ internal static class Shadow
             var tint = colour;
             tint.a = colour.a * exact.At(p);
             var where = matrix.MultiplyPoint3x4(p);
-            vh.AddVert(where, tint, Vector2.zero);
+            Emit(vh, where, colour, tint);
         }
 
         for (var i = 0; i < count; i++)
@@ -505,7 +518,7 @@ internal static class Shadow
 
                 var at = matrix.MultiplyPoint3x4(a);
                 var tint = Tint(colour, inner32, exact, a, aInner);
-                vh.AddVert(at, tint, Vector2.zero);
+                Emit(vh, at, colour, tint);
             }
         }
 
@@ -519,7 +532,7 @@ internal static class Shadow
 
             var to = matrix.MultiplyPoint3x4(b);
             var outerTint = Tint(colour, outer32, exact, b, aOuter);
-            vh.AddVert(to, outerTint, Vector2.zero);
+            Emit(vh, to, colour, outerTint);
         }
 
         var innerBase = share ? previous : origin;
