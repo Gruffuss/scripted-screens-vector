@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 using SS = ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem;
@@ -302,6 +302,10 @@ internal sealed class VecNode
     internal string? FontFamily;
     internal bool Bold;
     internal float CharSpacing;
+
+    /// <summary>`kern=0` turns pair kerning off for this label. On unless asked otherwise.</summary>
+    internal bool Kern = true;
+
     internal int Align;
     internal int VAlign;
     internal int Fit;
@@ -1016,7 +1020,7 @@ internal static class SceneParser
     {
         "f", "fo", "fea", "fea_edge", "fr", "sh",
         "s_", "so", "sw", "cap", "join", "ml", "dash", "dofs",
-        "size", "font", "weight", "cspace", "align", "valign", "fit", "min_size",
+        "size", "font", "weight", "cspace", "kern", "align", "valign", "fit", "min_size",
     };
 
     private static SS.UiProp[]? ParseStyle(SS.UiProp[] map, SS.UiProp[]? inherited)
@@ -1072,7 +1076,7 @@ internal static class SceneParser
         "f", "fo", "fo2", "fr", "fea", "fea_edge", "sh",
         "sw", "so", "cap", "join", "ml", "dash", "dofs", "sd", "sdo",
         "grad", "at", "units", "spread", "stops", "fx", "fy",
-        "text", "size", "align", "valign", "font", "weight", "cspace", "fit", "min_size",
+        "text", "size", "align", "valign", "font", "weight", "cspace", "kern", "fit", "min_size",
         "fmt", "unit", "missing", "wrap", "lh",
         "fat", "sat", "m", "bri", "con", "hue", "gray", "sep", "inv", "mask", "sov", "src", "fl", "uv", "v", "at", "off", "tile", "rep", "srep", "smp", "slice", "bw", "mid", "ow", "oc",
     };
@@ -1320,6 +1324,11 @@ internal static class SceneParser
                 node.VAlign = TextAlign.Vertical(PropString(map, "valign"));
                 node.Fit = TextFit.Parse(PropString(map, "fit"));
                 node.CharSpacing = PropNumber(map, "cspace", 0f);
+
+                // On by default, as a browser does it: a page opts OUT, never in. Only
+                // does anything for a face the fonts mod built -- the game's own font
+                // assets carry no pair records, so there is nothing to switch off.
+                node.Kern = PropNumber(map, "kern", 1f) != 0f;
 
                 // Off by default, and that is the deliberate half. A readout that grows a
                 // second line pushes its own baseline up and shunts the layout around it,

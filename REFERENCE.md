@@ -1,4 +1,4 @@
-# Vector layer — reference
+﻿# Vector layer — reference
 
 Every node, attribute and function the renderer accepts. Checked against the parser, not
 against the design document — where the two disagreed, the code won.
@@ -715,6 +715,7 @@ container, where it will be clipped away and look like nothing happened.
 | `font` | a registered TMP family, e.g. from the companion fonts mod |
 | `weight` | `bold`, or a number ≥ 600 |
 | `cspace` | character spacing |
+| `kern` | `0` turns pair kerning off for this label; on otherwise. Only a font that carries kerning pairs is affected, so a label on the game's own font is unchanged either way |
 | `wrap` | `1` lets the text run to more than one line inside its box |
 | `lh` | line height as a multiple of the font size, CSS style; omitted uses the font's own |
 | `sh` | text shadows, several allowed, one of them `inset` — see Shadows |
@@ -1437,7 +1438,7 @@ G fea=0 f=#c6c6c8 {
 ```
 
 Only **paint** keys are inherited this way: `f fo fea fea_edge fr sh so sw cap join ml dash
-dofs` and the text keys `size font weight cspace align valign fit min_size`. A group's own
+dofs` and the text keys `size font weight cspace kern align valign fit min_size`. A group's own
 `t r s a o clip` are not, because it uses those itself and inheriting them would apply every
 transform twice.
 

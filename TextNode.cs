@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 namespace ScriptedScreensVector;
@@ -25,6 +25,7 @@ internal struct TextPlacement
     internal string? Font;
     internal bool Bold;
     internal float CharSpacing;
+    internal bool Kern;
     internal int Fit;            // 0 none, 1 ellipsis, 2 shrink
     internal float MinSize;
     internal float Rotation;     // degrees, from the group transform
@@ -97,6 +98,7 @@ internal struct TextPlacement
                && string.Equals(Font, other.Font, System.StringComparison.Ordinal)
                && Bold == other.Bold
                && CharSpacing == other.CharSpacing
+               && Kern == other.Kern
                && Fit == other.Fit
                && MinSize == other.MinSize
                && Rotation == other.Rotation

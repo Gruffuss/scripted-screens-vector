@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Diagnostics;
@@ -1275,6 +1275,7 @@ internal static class Tessellator
             Font = node.FontFamily,
             Bold = node.Bold,
             CharSpacing = node.CharSpacing,
+            Kern = node.Kern,
             Fit = node.Fit,
             MinSize = (node.MinSize?.Evaluate(context) ?? 6f) * frame.Scale,
             Rotation = rotation,

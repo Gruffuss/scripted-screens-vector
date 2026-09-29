@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -180,6 +180,12 @@ internal sealed class TextLayer
         label.color = placement.Colour;
         label.fontSize = Mathf.Max(1f, placement.Size);
         label.characterSpacing = placement.CharSpacing;
+
+        // Unconditionally, like the font reset above and for the same reason: the pool is
+        // by index, so a label that does not ask must not inherit whatever the object was
+        // left with last rebuild. TMP's setter no-ops when the value is unchanged, so this
+        // costs nothing on a rebuild that did not change it.
+        label.enableKerning = placement.Kern;
         label.fontStyle = placement.Bold ? FontStyles.Bold : FontStyles.Normal;
         label.alignment = Alignment(placement);
 
@@ -397,7 +403,7 @@ internal sealed class TextLayer
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
         var key = string.Join("|", placement.Text, style.Colour?.ToString() ?? "", style.Size?.ToString(invariant) ?? "",
             style.Bold?.ToString() ?? "", style.Font ?? "", placement.Rect.width.ToString(invariant), placement.Size.ToString(invariant),
-            placement.Wrap.ToString(), label.font != null ? label.font.name : "", placement.Bold.ToString(), placement.CharSpacing.ToString(invariant));
+            placement.Wrap.ToString(), label.font != null ? label.font.name : "", placement.Bold.ToString(), placement.CharSpacing.ToString(invariant), placement.Kern.ToString());
 
         if (_firstLines[index] is { } cached && cached.Key == key)
         {

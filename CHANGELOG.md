@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.59
+
+- Added: **`kern` on a `T` node.** `kern=0` turns pair kerning off for that label; absent or `1` leaves it on, which is how a browser behaves -- a page opts out, never in. It is inheritable through a group's `style` like the other text keys. Only a font carrying kerning pairs is affected, so a label on the game's own font renders the same either way.
+
 ## 0.11.58
 
 - Fixed: **a soft glow seen from a distance rendered as a four-pointed star.** The exact-coverage path switched off below three screen pixels of sigma, and without it a rectangle's contour has vertices only at its four corners; the rings are mitred, so each one pushes a spike out along the diagonal by sqrt(2) times its offset. The threshold is now half a pixel, by which point the blur is sub-pixel and nothing is visible either way. A distant console is a few dozen pixels across, so the exact path costs a few hundred vertices there.
