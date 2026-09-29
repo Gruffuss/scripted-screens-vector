@@ -20,9 +20,16 @@
 --   reset is unconditional as intended. If two neighbours ever match, the pool is leaking --
 --   the same fault `font` had when placement order changed.
 --
--- 4 DEFAULT FACE. The same pair of lines on the game's own font. Both must look IDENTICAL:
---   the stock font assets carry no kerning pairs, so there is nothing for `kern` to switch off.
---   A difference here would mean the attribute is doing something other than kerning.
+-- 4 DEFAULT FACE. The same pair of lines on the game's own font. Read this one by DIRECTION,
+--   not by whether there is a difference at all. TMP bakes kerning pairs into a font asset when
+--   it is made, so a game face may or may not carry its own -- nobody has logged whether these
+--   do.
+--     * no difference             -> the asset has no baked pairs. The clean result.
+--     * kern=0 line slightly WIDER, a few per cent, same glyphs otherwise -> the asset does have
+--                                    baked pairs and the switch is working correctly on them.
+--                                    Not a bug.
+--     * anything else             -> narrower, shifted, different glyphs, changed line breaks.
+--                                    That is a real bug; stop and report it.
 
 local ui = ss.ui.surface("main")
 ss.ui.activate("main")
@@ -67,8 +74,8 @@ for i = 0, 3 do
         :format(y, tag, PAIRS, FACE, off))
 end
 
--- 4 DEFAULT FACE: no pair records, so kern must make no difference at all
-line('T x=4 y=136 w=192 h=6 text="4 DEFAULT FACE  (both must match)" size=5 f=#5FD9A8')
+-- 4 DEFAULT FACE: may or may not carry baked pairs; see the header for how to read it
+line('T x=4 y=136 w=192 h=6 text="4 DEFAULT FACE  (see header: judge by direction)" size=5 f=#5FD9A8')
 line(('T x=4 y=144 w=192 h=10 text="%s" size=9 f=#EAF4F8'):format(PAIRS))
 line(('T x=4 y=156 w=192 h=10 text="%s" size=9 kern=0 f=#EAF4F8'):format(PAIRS))
 
