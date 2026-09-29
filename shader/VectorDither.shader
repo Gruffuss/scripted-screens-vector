@@ -168,13 +168,6 @@ Shader "ScriptedScreensVector/UIDither"
                 // mean is lifted: a glow's faint tail settles at about half the amplitude instead
                 // of reaching black, which reads as a haze that never fades out. Tapering keeps
                 // the noise symmetric wherever there is room for it and silent where there is not.
-                // Below half an output level a pixel would round to the background anyway, so
-                // dithering there does not recover detail -- it converts "invisible" into sparse
-                // single-level speckle on a flat dark field, which is one of the easiest things
-                // for an eye to find. Cut it first. The discontinuity this introduces is half a
-                // level, which is by definition below what the output can show.
-                color.a *= step(0.5 / 255.0, color.a);
-
                 float amp = min(_VectorDither / 255.0, 2.0 * color.a);
                 color.a = saturate(color.a + (VectorNoise(IN.vertex.xy) - 0.5) * amp);
 

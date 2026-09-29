@@ -2,7 +2,11 @@
 
 ScriptedScreens Vector, newest first.
 
-## 0.11.56
+## 0.11.57
+
+- Reverted 0.11.56. Cutting coverage below half an output level made glows visibly worse on a console -- it ends a glow on a hard edge rather than letting it fade, which is far more noticeable than the faint lift it was meant to remove. 0.11.55's behaviour is restored exactly. The reasoning in 0.11.56 was sound in isolation and wrong in practice: half a level is only invisible against a flat field, and the eye finds the resulting boundary immediately.
+
+## 0.11.56 (withdrawn)
 
 - Fixed: **the very end of a glow's tail showed a faint speckle instead of fading out.** Where coverage falls below half an output level the pixel would round to the background anyway, so dithering there recovers no detail -- it turns "invisible" into sparse single-level noise on a flat dark field, which is one of the easiest things for an eye to find. Coverage below half a level is now cut before the dither. The step this introduces is half a level, which is by definition below what the output can show. Reported from a console, confirmed by probing a screenshot: the far corner of a drawn area sat 0.15 of a level above the page background, about one pixel in seven.
 
