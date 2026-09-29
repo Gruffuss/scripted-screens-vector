@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.56
+
+- Fixed: **the very end of a glow's tail showed a faint speckle instead of fading out.** Where coverage falls below half an output level the pixel would round to the background anyway, so dithering there recovers no detail -- it turns "invisible" into sparse single-level noise on a flat dark field, which is one of the easiest things for an eye to find. Coverage below half a level is now cut before the dither. The step this introduces is half a level, which is by definition below what the output can show. Reported from a console, confirmed by probing a screenshot: the far corner of a drawn area sat 0.15 of a level above the page background, about one pixel in seven.
+
 ## 0.11.55
 
 - Fixed: **a glow's faint tail never reached black, settling in a faint haze instead.** The dither was added and then clamped with `saturate`, which clips the negative half of the noise while the positive half survives, so near zero the mean was lifted by about half the amplitude -- at 4/255 that is a permanent 2/255 of pedestal over the whole reach of every blur. The amplitude is now tapered to twice the alpha, so the noise stays symmetric where there is room for it and falls silent where there is not. Introduced in 0.11.49 and visible on a console as soon as 0.11.54 removed the banding that had been hiding it.
