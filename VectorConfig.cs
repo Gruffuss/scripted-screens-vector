@@ -31,6 +31,7 @@ internal static class VectorConfig
     private static ConfigEntry<bool>? _rateLodEnabled;
     private static ConfigEntry<float>? _dither;
     private static ConfigEntry<float>? _blurDensity;
+    private static ConfigEntry<bool>? _blurLod;
     private static ConfigEntry<float>? _maximumHz;
     private static ConfigEntry<float>? _minimumHz;
     private static ConfigEntry<float>? _fullRatePixels;
@@ -68,6 +69,15 @@ internal static class VectorConfig
     /// is left, and it costs vertices in proportion.
     /// </summary>
     internal static float BlurDensity => System.Math.Min(16f, System.Math.Max(0.25f, _blurDensity?.Value ?? 1f));
+
+    /// <summary>
+    /// Whether a blur's detail follows how large it is on screen. On is the normal behaviour:
+    /// walking toward a console builds its glows from more contours and more points per corner,
+    /// and walking away builds fewer. Off builds every blur at full detail whatever its size,
+    /// which costs vertices on distant consoles and buys nothing the eye can use -- it exists so
+    /// a distance artefact can be told apart from a geometry one without moving the camera.
+    /// </summary>
+    internal static bool BlurLod => _blurLod?.Value ?? true;
 
     /// <summary>Interpolate `$name` values between data payloads.</summary>
     internal static bool SmoothData => _smoothData?.Value ?? true;
@@ -142,6 +152,13 @@ internal static class VectorConfig
             "normal. Raising it costs vertices in proportion and only helps at close range; " +
             "it is here to test whether banding left in a wide glow's faint tail is the " +
             "spacing between contours. Takes effect on the next rebuild.");
+
+        _blurLod = _file.Bind(
+            "Renderer", "BlurLod", true,
+            "Build blurs and shadows from fewer contours when they are small on screen, and " +
+            "more when you walk up to them. On is normal. Turning it off builds every blur at " +
+            "full detail regardless of distance: it costs vertices on far consoles and is " +
+            "mainly useful for telling a distance artefact apart from a geometry one.");
 
         _smoothData = _file.Bind(
             "Renderer", "SmoothData", true,

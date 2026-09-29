@@ -2,6 +2,12 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.58
+
+- Fixed: **a soft glow seen from a distance rendered as a four-pointed star.** The exact-coverage path switched off below three screen pixels of sigma, and without it a rectangle's contour has vertices only at its four corners; the rings are mitred, so each one pushes a spike out along the diagonal by sqrt(2) times its offset. The threshold is now half a pixel, by which point the blur is sub-pixel and nothing is visible either way. A distant console is a few dozen pixels across, so the exact path costs a few hundred vertices there.
+- Added: `Renderer.BlurLod`, on by default. Off builds every blur at full detail regardless of how large it is on screen. It costs vertices on distant consoles and buys nothing the eye can use, but it tells a distance artefact apart from a geometry one without moving the camera -- which is how long the star above took to find.
+- Changed: a blur's corner runs never drop below 8 points (`MinCornerSamples`). The pixel-driven count bottomed out at 2, which cannot round a mitred corner at any size.
+
 ## 0.11.57
 
 - Reverted 0.11.56. Cutting coverage below half an output level made glows visibly worse on a console -- it ends a glow on a hard edge rather than letting it fade, which is far more noticeable than the faint lift it was meant to remove. 0.11.55's behaviour is restored exactly. The reasoning in 0.11.56 was sound in isolation and wrong in practice: half a level is only invisible against a flat field, and the eye finds the resulting boundary immediately.

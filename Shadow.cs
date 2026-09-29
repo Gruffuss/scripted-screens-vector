@@ -41,6 +41,16 @@ internal static class Shadow
 {
     /// <summary>Contours across the blur. Enough that the ramp reads as smooth.</summary>
     private const int MinRings = 4;
+
+    /// <summary>
+    /// Fewest points per corner run, whatever the screen size says. A rectangle's rings are
+    /// mitred, so a corner offset outward by d reaches sqrt(2)*d along the diagonal; with two
+    /// samples nothing rounds that off and each ring pushes a spike out at 45 degrees. Seen from
+    /// across a room a glow became a four-pointed star, because the pixel-driven count bottomed
+    /// out at 2. A distant glow is a few dozen pixels across, so this floor costs nothing where
+    /// it applies and the pixel count takes over long before it matters.
+    /// </summary>
+    private const int MinCornerSamples = 8;
     /// <summary>
     /// Raising this to 64 was tried for the stair-stepping seen on a console 3000 pixels tall
     /// and measured as no change at all -- same slope breaks, same spacing, 2.5x the vertices --
@@ -83,7 +93,7 @@ internal static class Shadow
         Mathf.Clamp(Mathf.CeilToInt(MaxRings * VectorConfig.BlurDensity), MinRings, 2048);
 
     private static int CornerCeiling() =>
-        Mathf.Clamp(Mathf.CeilToInt(MaxCornerSamples * VectorConfig.BlurDensity), 2, 512);
+        Mathf.Clamp(Mathf.CeilToInt(MaxCornerSamples * VectorConfig.BlurDensity), MinCornerSamples, 512);
 
     /// <summary>
     /// Emits one vertex, putting the ramp wherever it survives best. With the shader loaded the
@@ -130,7 +140,14 @@ internal static class Shadow
     private static int CornerSampleCount(float sigma, float screenScale)
     {
         var reachPixels = 3f * sigma * Mathf.Max(0.0001f, screenScale);
-        return Mathf.Clamp(Mathf.CeilToInt(reachPixels * VectorConfig.BlurDensity / 10f), 2, CornerCeiling());
+        var ceiling = Mathf.Max(MinCornerSamples, CornerCeiling());
+        if (!VectorConfig.BlurLod)
+            return ceiling;
+
+        return Mathf.Clamp(
+            Mathf.CeilToInt(reachPixels * VectorConfig.BlurDensity / 10f),
+            MinCornerSamples,
+            ceiling);
     }
 
     private static float CornerSampleAt(int index, int count, float sigma)
@@ -331,7 +348,9 @@ internal static class Shadow
         // is not banding and rings are not what is coarse.
         var rings = sigma <= 0.0001f
             ? 1
-            : Mathf.Clamp(Mathf.CeilToInt(reach * Mathf.Max(0.0001f, screenScale) * VectorConfig.BlurDensity / 2f), MinRings, RingCeiling());
+            : !VectorConfig.BlurLod
+                ? RingCeiling()
+                : Mathf.Clamp(Mathf.CeilToInt(reach * Mathf.Max(0.0001f, screenScale) * VectorConfig.BlurDensity / 2f), MinRings, RingCeiling());
 
         // Rings inside the outline stop where shrinking it further would turn a corner inside
         // out. Offsetting a rounded corner inward by more than its radius folds its points over
@@ -351,7 +370,13 @@ internal static class Shadow
         // came out at the corner's value. Points near each corner give the profile somewhere to
         // live; along the straight run between them it is flat and needs none. Skipped when the
         // blur is too small on screen for the difference to show.
-        var dense = exact.Valid && sigma * Mathf.Max(0.0001f, screenScale) >= 3f;
+        // The threshold was 3 screen pixels of sigma, which switched the exact path off at any
+        // distance. Without it a rectangle's contour has vertices only at its four corners, and
+        // the rings are mitred, so each one pushes a spike sqrt(2)*d out along the diagonal: seen
+        // from across a room a glow rendered as a four-pointed star. The exact path costs a few
+        // hundred vertices on a console that small, so it is worth paying for until the blur is
+        // genuinely sub-pixel and nothing can be seen either way.
+        var dense = exact.Valid && (!VectorConfig.BlurLod || sigma * Mathf.Max(0.0001f, screenScale) >= 0.5f);
         if (dense)
         {
             // Ring count is NOT reduced to pay for the corner points. Halving it was tried and

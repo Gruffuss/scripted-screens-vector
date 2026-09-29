@@ -23,6 +23,8 @@ internal static class VectorConfig
 
     internal static float BlurDensity => 1f;
 
+    internal static bool BlurLod => true;
+
     internal static bool CurveLodEnabled => true;
 
     internal static float PixelsPerSegment => 3f;
