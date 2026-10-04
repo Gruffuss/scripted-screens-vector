@@ -668,6 +668,14 @@ internal static class Tessellator
         if (Starved(vh, 1, "a node"))
             return;
 
+        // `v = 0` on ANY node, not only a `G`. It was checked in the group case alone, so a
+        // `v = 0` on a shape or a label parsed, was accepted as a known attribute, and then
+        // did nothing -- the node drew as though it had never been written. The group case
+        // keeps its own check: it must run before the frame is pushed, so the subtree is not
+        // walked at all.
+        if (node.Op != VecOp.Group && node.Visible != null && node.Visible.Evaluate(context) <= 0.5f)
+            return;
+
         if (stack.Peek().Pieces != null && IsLeaf(node.Op))
         {
             EmitPieces(vh, scene, node, context, stack, ref emitted);

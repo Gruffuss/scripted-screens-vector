@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.75
+
+- Fixed: **`v = 0` did nothing on anything but a `G`.** It was read in the group case of the parser and checked in the group case of the tessellator, so on a shape or a label it was accepted as a known attribute, reported no fault, and was then never looked at again: the node drew as though it had not been written. It now hides any node, and takes that node's hit region with it, as it always has for a group. Found by a test page of my own that used `v` on a `T` and silently showed both states at once.
+
 ## 0.11.74
 
 Five things the docs described as limits. Each was a choice or an unfilled detail rather than

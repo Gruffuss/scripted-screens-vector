@@ -448,7 +448,7 @@ ignored, so annotations are harmless.
 | `s` | `{sx, sy}` | scale |
 | `a` | `{x, y}` | anchor the transform pivots about, default `{0, 0}` |
 | `o` | number/expr | group opacity `0..1`, multiplied into all descendants |
-| `v` | number/expr | `0` removes the subtree entirely, clicks included (CSS `visibility`) |
+| `v` | number/expr | `0` removes the subtree entirely, clicks included (CSS `visibility`). **On any node, not only a `G`** — on a shape or a label it was accepted and ignored before 0.11.75 |
 | `clip` | string | id of a `CP` in `defs` |
 | `m` | `{a, b, c, d, e, f}` | CSS `matrix()`, applied after `t r s` (innermost) |
 | `bri` `con` `sat` `hue` `gray` `sep` `inv` | number/expr | colour filters, CSS `filter()` semantics |

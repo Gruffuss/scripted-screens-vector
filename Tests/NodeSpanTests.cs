@@ -18,7 +18,58 @@ internal static class NodeSpanTests
         ("root style", RootStyle),
         ("closed spline", ClosedSpline),
         ("hits on every shape", ShapeHits),
+        ("v on a leaf", LeafVisibility),
     };
+
+    /// <summary>
+    /// `v = 0` was checked in the group case only, so on a shape or a label it parsed, was
+    /// accepted as a known attribute, and then did nothing: the node drew as though the
+    /// attribute had never been written.
+    /// </summary>
+    private static void LeafVisibility(TestRun run)
+    {
+        static int Verts(string src)
+        {
+            var mesh = new MeshBuilder();
+            Tessellator.Emit(mesh, Parse("SCENE w=100 h=100 fit=stretch\n" + src), new EvalContext(),
+                new Rect(0f, 0f, 100f, 100f), 1f, true, new TessellationStats());
+            return mesh.currentVertCount;
+        }
+
+        // An IMG, not a filled R: a colour literal cannot be parsed in this suite, and an `R`
+        // with no fill draws nothing either way, which would make the v=0 case pass for the
+        // wrong reason -- as the first version of this test did.
+        ImageCache.Loaded["test:span"] = (8, 8, null);
+
+        // Every scene here keeps one always-visible node, so none of the three is empty: an
+        // empty scene reports a problem and draws a border, which an earlier version of this
+        // test measured instead of the node under test.
+        const string Keep = "IMG x=20 y=0 w=10 h=10 src=test:span\n";
+        var absent = Verts(Keep);
+        var hidden = Verts(Keep + "IMG x=0 y=0 w=10 h=10 src=test:span v=0\n");
+        var shown = Verts(Keep + "IMG x=0 y=0 w=10 h=10 src=test:span v=1\n");
+
+        run.Check("v: a shape with v=0 draws exactly what an absent one draws",
+            hidden == absent, $"{hidden} verts vs {absent} with no second node at all");
+        run.Check("v: the same shape with v=1 draws more", shown > absent,
+            $"{shown} verts vs {absent}");
+
+        // And the hit region goes with it, as it already did for a group.
+        var hits = new System.Collections.Generic.List<HitRegion>();
+        Tessellator.HitsFound = hits;
+        try
+        {
+            Tessellator.Emit(new MeshBuilder(),
+                Parse("SCENE w=100 h=100 fit=stretch\nIMG id=k x=0 y=0 w=10 h=10 src=test:span press=1 v=0\n"),
+                new EvalContext(), new Rect(0f, 0f, 100f, 100f), 1f, true, new TessellationStats());
+        }
+        finally
+        {
+            Tessellator.HitsFound = null;
+        }
+
+        run.Check("v: a hidden shape registers no hit", hits.Count == 0, $"{hits.Count} region(s)");
+    }
 
     /// <summary>
     /// A `style` on the scene root was simply never read, so the defaults an author wrote in

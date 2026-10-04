@@ -1501,6 +1501,12 @@ internal static class SceneParser
                 node.Children.Add(child);
         }
 
+        // `v` on every node, not only a `G`. It was read in the group case alone, so on a shape
+        // or a label it was accepted as a known attribute and then never looked at again: the
+        // node drew as though it had not been written. The group case still sets it first, and
+        // this leaves that alone.
+        node.Visible ??= HasKey(map, "v") ? Attr(map, "v", 1f) : null;
+
         node.Id = PropString(map, "id");
         node.Pressable = PropNumber(map, "press", 0f) > 0.5f;
         node.ReportsPosition = PropNumber(map, "xy", 0f) > 0.5f;
