@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.64
+
+- **Changed: a reference to an undeclared gradient now draws magenta instead of white.** It was already reported as a problem and still is; what changed is that the shape now carries the same signal an unresolved data colour does, because white is a colour somebody meant to use and magenta is not. A scene with a dangling `@id` is not working, so this reads as the fault it is rather than as a design decision. An undeclared **clip** id is unchanged: the reference is ignored and the content draws unclipped.
+
 ## 0.11.63
 
 - Fixed: **a `units=bbox` gradient on a stroke was never bound to the shape's box.** Fills, bands and text bound theirs; strokes did not, so the ramp was sampled in scene space instead -- and a shape whose fill and stroke shared one gradient drew them in two different spaces. The box used is the contour's, not the stroked band's, so a fill and a stroke with the same gradient line up. Confirmed by disabling the fix and watching a red-to-blue bbox ramp on a shape at x=120..180 come out uniformly blue.

@@ -3834,6 +3834,11 @@ internal static class Tessellator
 
             scene.Problems.Add($"unknown gradient \"{name}\"");
             ScriptedScreensVectorPlugin.Log?.LogWarning($"unknown gradient \"{name}\"");
+
+            // Magenta, for the same reason an unresolved data colour is magenta a few lines
+            // below: a dangling @id is a fault, and white is a colour somebody meant to use.
+            // It used to fall through to white, which read as a design decision.
+            return new Paint(Magenta, null, opacity);
         }
 
         // A data-bound colour is re-read every tick, so an alarm can go red without the

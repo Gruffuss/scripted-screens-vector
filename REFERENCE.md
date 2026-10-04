@@ -193,7 +193,8 @@ A scene reports its own faults rather than drawing nothing and leaving you to gu
 | unknown attribute name | reported, with the op and the node id |
 | malformed expression | reported; that attribute falls back to its default |
 | `$name` with no data value | reported; a bound **colour** draws **magenta** |
-| missing gradient or clip id | reported; the reference is ignored |
+| missing gradient id | reported, and the shape draws **magenta** — the same signal as an unresolved data colour, so a dangling `@id` looks like a fault rather than a design decision |
+| missing clip id | reported; the reference is ignored, so the content draws unclipped |
 
 Anything reported also puts a magenta hatched border around the surface, so a broken scene
 looks broken instead of looking switched off. Detail goes to `BepInEx/LogOutput.log`.
