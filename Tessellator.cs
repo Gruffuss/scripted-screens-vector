@@ -2026,7 +2026,25 @@ internal static class Tessellator
     private static void FillAndStroke(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame, List<Vector2> outline, bool closed)
     {
         if (node.Clickable && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
-            RecordHit(node.Id!, outline, frame.Matrix, frame.CanvasClip, context, node);
+        {
+            // An OPEN shape has no interior. Its outline is the path's own points, which close
+            // implicitly for the point-in-polygon test, so a three-sided box answered clicks in
+            // the empty middle it never drew. A stroked open shape is clickable along its
+            // stroke, as SVG's `visiblePainted` has it.
+            //
+            // Only when it HAS a stroke: an open shape with neither fill nor stroke draws
+            // nothing at all, and some scenes use exactly that as an invisible hit area, which
+            // a zero-width band would take away.
+            var hit = outline;
+            if (!closed && node.HasStroke)
+            {
+                var strokeWidth = node.StrokeWidth.Evaluate(context);
+                if (strokeWidth > 0f)
+                    hit = Stroke.Band(outline, strokeWidth, node.Join, node.MiterLimit);
+            }
+
+            RecordHit(node.Id!, hit, frame.Matrix, frame.CanvasClip, context, node);
+        }
 
         // Shadows first: they sit beneath the shape, and in declaration order like CSS.
         if (closed)

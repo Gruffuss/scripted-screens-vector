@@ -1137,6 +1137,11 @@ end
 
 Outside a repeat it is the bare id, unchanged.
 
+**An OPEN shape is clickable along its stroke, not across the area it would enclose** (0.11.78):
+an `L` drawing three sides of a box answers clicks on those three lines, not in the middle.
+A **closed** shape answers inside its outline whether or not it is filled, which is how a scene
+makes an invisible hit area; so does an open shape with no stroke at all.
+
 Every shape can be clicked: `R`, `C`, `L`, `Y`, `SP`, `P`, `IMG` and `T`. Until 0.11.74 only
 `R`, `C`, `IMG` and `T` registered a hit area, so `press`, `xy`, `drag` and plain clicks on a
 polyline, a polygon, a spline or a path did nothing at all and reported nothing. A `P` is

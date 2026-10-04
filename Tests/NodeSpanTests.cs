@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using SS = ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem;
 
 namespace ScriptedScreensVector.Tests;
@@ -20,7 +20,86 @@ internal static class NodeSpanTests
         ("hits on every shape", ShapeHits),
         ("v on a leaf", LeafVisibility),
         ("recursion caps", RecursionCaps),
+        ("open shapes are clickable on the stroke", OpenShapeHitArea),
     };
+
+    /// <summary>
+    /// An open shape has no interior, but its hit outline was the path's own points, which
+    /// close implicitly for the point-in-polygon test. A three-sided box therefore answered
+    /// clicks in the empty middle it had never drawn -- seen in game as soon as `L` became
+    /// clickable at all in 0.11.74.
+    /// </summary>
+    private static void OpenShapeHitArea(TestRun run)
+    {
+        // Three sides of a 40x30 box: across the top, down the right, back along the bottom.
+        // The middle is empty, the stroke is 6 wide. The stroke colour is a `$` binding rather
+        // than a literal: a colour literal goes through a native ECall that throws headless.
+        const string Open = "SCENE w=100 h=100 fit=stretch\n"
+                            + "L id=k p=[10,10,50,10,50,40,10,40] sw=6 s=$ink press=1\n";
+
+        var hit = Hits(Open);
+        run.Check("open hit: the shape still registers one region", hit.Length == 1, $"{hit.Length}");
+
+        if (hit.Length != 1)
+            return;
+
+        // Points are given as fractions of the region's own bounding box, because RecordHit
+        // stores CANVAS coordinates: scene space is +Y down and the canvas is +Y up, so a
+        // scene-space point tests the wrong place and reads as a miss either way.
+        run.Check("open hit: a point ON the stroke hits", Inside(hit[0], 0.95f, 0.5f), "miss");
+
+        // The empty middle, far from every edge, must now miss.
+        run.Check("open hit: the empty middle does NOT hit", !Inside(hit[0], 0.5f, 0.5f), "hit");
+
+        // A CLOSED shape keeps its interior: that is the region it fills, and scenes rely on it.
+        const string Closed = "SCENE w=100 h=100 fit=stretch\n"
+                              + "Y id=k p=[10,10,50,10,50,40,10,40] sw=6 s=$ink press=1\n";
+        var shut = Hits(Closed);
+        run.Check("open hit: a CLOSED shape still answers in its middle",
+            shut.Length == 1 && Inside(shut[0], 0.5f, 0.5f), "miss");
+    }
+
+    private static HitRegion[] Hits(string src)
+    {
+        var found = new System.Collections.Generic.List<HitRegion>();
+        Tessellator.HitsFound = found;
+        try
+        {
+            Tessellator.Emit(new MeshBuilder(), Parse(src), new EvalContext(),
+                new Rect(0f, 0f, 100f, 100f), 1f, true, new TessellationStats());
+        }
+        finally
+        {
+            Tessellator.HitsFound = null;
+        }
+
+        return found.ToArray();
+    }
+
+    /// <summary>
+    /// Point in polygon, the same crossing rule the hit test uses, at a fraction of the
+    /// region's bounding box so the caller needs to know nothing about canvas orientation.
+    /// </summary>
+    private static bool Inside(HitRegion region, float fx, float fy)
+    {
+        var x = region.Rect.xMin + fx * region.Rect.width;
+        var y = region.Rect.yMin + fy * region.Rect.height;
+        var poly = region.Outline;
+        if (poly == null || poly.Length < 3)
+            return false;
+
+        var inside = false;
+        for (int i = 0, j = poly.Length - 1; i < poly.Length; j = i++)
+        {
+            if (poly[i].y > y != poly[j].y > y
+                && x < (poly[j].x - poly[i].x) * (y - poly[i].y) / (poly[j].y - poly[i].y) + poly[i].x)
+            {
+                inside = !inside;
+            }
+        }
+
+        return inside;
+    }
 
     /// <summary>
     /// Three inputs that recursed without a limit. Unlike the parser hangs, these end the

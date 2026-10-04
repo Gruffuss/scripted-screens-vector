@@ -2,6 +2,11 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.78
+
+- Fixed: **an open shape answered clicks in its empty middle.** A hit region is a polygon, and for an open `L`, `SP` or `P` that polygon was the path's own points, which close implicitly: three sides of a box therefore claimed the whole box, including the middle it had never drawn. A stroked open shape is now clickable along its stroke, as SVG's `visiblePainted` has it. Seen in game on `InGameTest-0.11.74.lua` the moment those shapes became clickable at all (0.11.74).
+- Unchanged on purpose: a **closed** shape still answers inside its outline, whether or not it is filled -- that is the region it encloses, and an unfilled closed shape is a way scenes make an invisible hit area. An open shape with neither fill nor stroke also keeps the old behaviour, for the same reason: there is no stroke to take as its area.
+
 ## 0.11.77
 
 Three inputs that ended the PROCESS rather than the parse. A .NET stack overflow cannot be

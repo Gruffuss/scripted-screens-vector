@@ -112,6 +112,47 @@ internal static class Stroke
     /// <summary>
     /// Splits a path into dashes before stroking. Spec §5.2 <c>dash</c> / <c>dofs</c>.
     /// </summary>
+    /// <summary>
+    /// The outline of the stroked band around an OPEN path: the left offsets forward, then the
+    /// right offsets back, which is the same pair of offset rows <see cref="Emit"/> builds its
+    /// triangles from.
+    /// </summary>
+    /// <remarks>
+    /// This exists for hit testing. A click is resolved by point-in-polygon against the shape's
+    /// outline, and for an open polyline that outline is the path's own points, which close
+    /// implicitly and enclose an interior that was never painted -- so a three-sided box
+    /// answered clicks in the empty middle. The band is what the shape actually covers.
+    /// Caps are not added: a butt cap ends square on the last point, which the band already
+    /// does, and half a stroke width at each end is below what a crosshair can aim at.
+    /// </remarks>
+    internal static List<Vector2> Band(IReadOnlyList<Vector2> points, float width,
+        JoinStyle join, float miterLimit)
+    {
+        var path = Clean(points, false);
+        var band = new List<Vector2>();
+        if (path.Count < 2 || width <= 0f)
+        {
+            band.AddRange(path);
+            return band;
+        }
+
+        var half = width * 0.5f;
+
+        for (var i = 0; i < path.Count; i++)
+        {
+            var normal = VertexNormal(path, i, false, join, miterLimit, out var scale);
+            band.Add(path[i] + normal * half * scale);
+        }
+
+        for (var i = path.Count - 1; i >= 0; i--)
+        {
+            var normal = VertexNormal(path, i, false, join, miterLimit, out var scale);
+            band.Add(path[i] - normal * half * scale);
+        }
+
+        return band;
+    }
+
     internal static List<List<Vector2>> Dash(IReadOnlyList<Vector2> points, float[] pattern, float offset)
     {
         var runs = new List<List<Vector2>>();
