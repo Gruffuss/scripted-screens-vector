@@ -2,6 +2,13 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.61
+
+- Added: **`Tessellator.TagNodes`**, off by default, records which node produced which vertices (`Tessellator.NodeSpans`, a `First`/`Count` range per node). A group's span encloses its children's, so the smallest span containing a point is the innermost node under it. It exists for editors and previews that need click-to-select over a built mesh; in game it is never switched on and costs one bool test per node.
+- Fixed: **`x % 0` returned NaN instead of 0.** The guard sat on the constant divisor of an inner `Divide(a % b, 1f)` rather than on `b`, so a modulo by zero produced NaN -- and a NaN reaching a coordinate silently poisons every vertex derived from it. Now 0, matching `/` and what the docs promise.
+- Fixed: **`fmt` with `%x` or `%X` rendered the `missing` text.** .NET refuses hex formatting on a float and the `FormatException` was swallowed. A value destined for hex is an integer by intent, so it is now rounded and retried before giving up.
+- Docs: several claims in `REFERENCE.md` and `QUICKSTART.md` over-promised and have been corrected against the parser -- `SP` is stroke-only (no fill, no shadow, no inset), `blur` on a group covers `R` and `C` only, a `style` on the scene ROOT is not read (use an outermost `G`), the shadow ring cap is 96 x `BlurDensity` rather than 24, and `pi`/`tau` are zero-argument functions needing brackets. The clip problem message now lists `L`, which the parser has always accepted.
+
 ## 0.11.60
 
 - **Changed: gradient stops interpolate in premultiplied alpha, as CSS does.** A fully transparent stop now contributes its alpha and none of its colour, so `#5FD9A8FF → #00000000` fades exactly like `#5FD9A8FF → #5FD9A800` instead of greying through the middle. This is a visible change to any scene that deliberately ramped to transparent black: those fades keep their hue now and will look lighter in the middle. The workaround the docs used to prescribe -- fade to the same colour -- is no longer needed and has been removed from `README.md` and `QUICKSTART.md`.

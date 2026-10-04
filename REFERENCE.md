@@ -273,8 +273,9 @@ grows with vertex count.
 A box-shadow is the most expensive ordinary thing a scene can ask for, because its ring count
 follows the blur's on-screen size. Since 0.11.19 it lays one ring per four screen pixels of
 reach rather than two — checked against a 400-ring reference, the difference is a few isolated
-pixels at 12/255 — so a shadow below the 24-ring cap costs half what it did, and one at the cap
-about a quarter less. Reducing the blur radius is still the direct lever.
+pixels at 12/255. The cap is **96 rings**, multiplied by `Renderer.BlurDensity`; it was 24 until
+0.11.50, when a glow seen up close turned out to be hitting it. Reducing the blur radius is still
+the direct lever.
 
 ### Dark colours lose a level or two
 
@@ -416,8 +417,8 @@ ignored, so annotations are harmless.
 
 Applied scale → rotate → translate, about `a`. Nests without limit.
 
-**`blur` blurs flat fills only.** Each flat, closed fill under the group (`R`, `C`, a closed `Y`,
-`SP` or `P`) is drawn as its own blurred silhouette, the same geometry a shadow uses, which is
+**`blur` blurs flat fills only, and only on `R` and `C`.** Each flat fill under the group on a
+rectangle or an ellipse is drawn as its own blurred silhouette, the same geometry a shadow uses, which is
 exactly a Gaussian blur of that one shape. Strokes, gradient fills, pictures and text are drawn
 sharp. Two overlapping shapes are each blurred on their own and then composited, which a browser
 does the other way round; for soft glows, blobs and out-of-focus backdrops the difference does
@@ -1168,7 +1169,8 @@ kept a full-strength halo. The shadow colour's own alpha is separate and unaffec
   sh = { { 0, 3, 8, 0, "#0000001f" }, { 0, 3, 1, 0, "#0000000a" } } }
 ```
 
-Available on **`R`, `C`, a filled closed `Y` or `SP`, a closed `P`, and `T`.** Everything but
+Available on **`R`, `C`, a filled closed `Y`, a closed `P`, and `T`.** `SP` is stroke-only: it
+is never marked closed, so it takes no fill and no shadow. Everything but
 text is drawn as geometry — no offscreen pass, no shader — by stacking contours from `-3σ` to
 `+3σ` carrying the closed-form coverage of a blurred edge, `0.5·erfc(d / (σ√2))`. Ring count
 follows the blur's on-screen size.
@@ -1217,7 +1219,7 @@ builds its own mesh above ours — so a `T` shadow is the SDF shader's underlay 
   only — the text underlay draws strictly behind its glyphs and has no such problem.
 - **`inset`** — a sixth field `"inset"` (or `1`) — draws inside the shape, over the fill and
   under the stroke: the shape moved by `dx`/`dy` and shrunk by `spread`, inverted, blurred and
-  clipped to the shape, as CSS draws it. Needs a **convex** outline (`R`, `C`, a convex `Y`, `SP`
+  clipped to the shape, as CSS draws it. Needs a **convex** outline (`R`, `C`, a convex `Y`
   or `P`); a concave one is refused with a problem rather than leaking past its edges. Costs
   roughly three times the vertices of an outset shadow of the same blur, since its rings are cut
   to the shape triangle by triangle.
@@ -1232,8 +1234,8 @@ shadow composites at the value the design specifies.
 
 ### Inherited defaults — `style`
 
-A `style` map on a `G`, or on the scene root, supplies defaults for descendants that do not
-set the key themselves:
+A `style` map on a `G` supplies defaults for descendants that do not set the key themselves.
+**A `style` on the scene root is not read** — put the defaults on an outermost `G` instead:
 
 ```lua
 { op = "G", style = { f = "#5FD9A8", fea = 0, sw = 1 }, c = { ... } }

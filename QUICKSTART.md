@@ -125,7 +125,8 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
   - Also `hover` and `down`, `1` while the pointer is over or held on a clickable node inside
     the nearest node with an `id`, and `since($name)`, seconds since that value last arrived.
   - Functions: `sin cos tan atan2 abs sign sqrt floor ceil round min max clamp lerp mod saw
-    tri pulse step smoothstep if eq lt gt lte gte and or not hash hash2 pi tau`. `^` is power;
+    tri pulse step smoothstep if eq lt gt lte gte and or not hash hash2 pi() tau()`. `pi` and
+    `tau` are zero-argument functions and need their brackets. `^` is power;
     there is no `pow`. Unknown functions fail the scene.
 - A `T` may hold several values and expressions: `text = "set {$press:%.1f} of {=t*2:%.0f}"`,
   and `missing = "..."` says what to show before a value arrives.

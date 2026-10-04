@@ -281,6 +281,11 @@ internal static class Tessellator
         // Canvas units per scene unit comes from the viewbox; screen pixels per canvas unit
         // comes from the camera. Only the product is a real on-screen size.
         ScreenScale = Mathf.Max(0.0001f, screenPixelsPerUnit);
+
+        // Spans belong to one rebuild. Without this they accumulate every frame an editor
+        // redraws, which is a leak that only shows up in the tool that asked for them.
+        if (TagNodes)
+            _spans?.Clear();
         ScreenSizeKnown = screenSizeKnown;
         System.Array.Clear(OpMilliseconds, 0, OpMilliseconds.Length);
         System.Array.Clear(OpCounts, 0, OpCounts.Length);
@@ -570,7 +575,62 @@ internal static class Tessellator
     /// <summary>Ids from the root down to the node being walked, for hit regions' `hover` scope.</summary>
     [ThreadStatic] private static List<string>? _idPath;
 
+    /// <summary>
+    /// The vertices one node produced, when <see cref="TagNodes"/> is on: <paramref name="First"/>
+    /// is the index of its first vertex in the built mesh and <paramref name="Count"/> how many it
+    /// and its descendants added. A group's span therefore encloses its children's, so a tool
+    /// picking the smallest span that contains a point selects the innermost node under it.
+    /// </summary>
+    internal readonly struct NodeSpan
+    {
+        internal NodeSpan(VecNode node, int first, int count)
+        {
+            Node = node;
+            First = first;
+            Count = count;
+        }
+
+        internal VecNode Node { get; }
+
+        internal int First { get; }
+
+        internal int Count { get; }
+    }
+
+    /// <summary>
+    /// Records which node produced which vertices. OFF by default and never switched on in game:
+    /// it exists for editors and previews that need click-to-select over a built mesh. While off,
+    /// the cost is one bool test per node.
+    /// </summary>
+    /// <remarks>
+    /// Spans are collected per rebuild and valid until the next one on the same thread. Read
+    /// <see cref="NodeSpans"/> immediately after <see cref="Emit"/> returns. Nodes that emit no
+    /// geometry are recorded with a zero count rather than skipped, so a tool can still map a
+    /// group or a hidden node back to its place in the tree.
+    /// </remarks>
+    internal static bool TagNodes { get; set; }
+
+    [ThreadStatic] private static List<NodeSpan>? _spans;
+
+    /// <summary>The spans from the last <see cref="Emit"/> on this thread; empty unless
+    /// <see cref="TagNodes"/> was on for it.</summary>
+    internal static IReadOnlyList<NodeSpan> NodeSpans =>
+        (IReadOnlyList<NodeSpan>?)_spans ?? System.Array.Empty<NodeSpan>();
+
     private static void EmitNode(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
+    {
+        if (TagNodes)
+        {
+            var first = vh.currentVertCount;
+            EmitNodeTracked(vh, scene, node, context, stack, ref emitted);
+            (_spans ??= new List<NodeSpan>(64)).Add(new NodeSpan(node, first, vh.currentVertCount - first));
+            return;
+        }
+
+        EmitNodeTracked(vh, scene, node, context, stack, ref emitted);
+    }
+
+    private static void EmitNodeTracked(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
     {
         // A node with an id is the scope `hover` and `down` answer to, for itself and whatever
         // it holds, until a nearer id takes over.
@@ -2987,7 +3047,20 @@ internal static class Tessellator
         }
         catch (FormatException)
         {
-            return node.TextMissing;
+            // Some specs only accept an integer -- `%x` and `%X` above all, which .NET refuses on
+            // a float and which this used to swallow, rendering the `missing` text instead of a
+            // number. A value destined for hex is an integer by intent, so round and retry before
+            // giving up.
+            try
+            {
+                return string.Format(CultureInfo.InvariantCulture, Printf.ToNet(node.TextFormat),
+                           (long)Mathf.Round(value))
+                       + node.TextUnit;
+            }
+            catch (FormatException)
+            {
+                return node.TextMissing;
+            }
         }
     }
 

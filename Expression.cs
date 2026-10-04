@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
@@ -626,7 +626,11 @@ internal sealed class Expression
             case Kind.Subtract: return Arg(0, context) - Arg(1, context);
             case Kind.Multiply: return Arg(0, context) * Arg(1, context);
             case Kind.Divide: return Divide(Arg(0, context), Arg(1, context));
-            case Kind.Modulo: return Divide(Arg(0, context) % Arg(1, context), 1f);
+            // The guard has to be on the DIVISOR. This was Divide(a % b, 1f), which put the
+            // zero check on the constant 1 and let `x % 0` return NaN -- and a NaN reaching a
+            // coordinate poisons every vertex derived from it, silently. Zero matches what `/`
+            // already does and what the docs promise.
+            case Kind.Modulo: return Modulo(Arg(0, context), Arg(1, context));
             case Kind.Power: return Mathf.Pow(Arg(0, context), Arg(1, context));
             case Kind.Call: return Invoke(context);
 
@@ -645,6 +649,11 @@ internal sealed class Expression
     private static float Divide(float a, float b)
     {
         return Mathf.Approximately(b, 0f) ? 0f : a / b;
+    }
+
+    private static float Modulo(float a, float b)
+    {
+        return Mathf.Approximately(b, 0f) ? 0f : a % b;
     }
 
     private float Invoke(EvalContext context)

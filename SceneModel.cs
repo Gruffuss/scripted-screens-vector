@@ -1777,7 +1777,7 @@ internal static class SceneParser
                     }
                     else
                     {
-                        scene.Problem($"clip \"{id}\" has no usable shape (must be an R, C, Y or P)");
+                        scene.Problem($"clip \"{id}\" has no usable shape (must be an R, C, L, Y or P)");
                     }
 
                     break;

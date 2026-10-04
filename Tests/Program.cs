@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace ScriptedScreensVector.Tests;
@@ -171,6 +171,7 @@ internal static class Program
         GradientTests.BoundingBoxGradientTracksShape(run);
 
         Console.WriteLine();
+        NodeSpanTests.All[0].Item2(run);
         RequirementTests.ConicAngles(run);
         RequirementTests.Filters(run);
         RequirementTests.GroupMatrix(run);
