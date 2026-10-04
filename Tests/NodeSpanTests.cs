@@ -11,7 +11,43 @@ internal static class NodeSpanTests
     internal static readonly (string, System.Action<TestRun>)[] All =
     {
         ("node spans", Spans),
+        ("ver", Version),
     };
+
+    /// <summary>
+    /// `ver` is a plain number a scene can compare, and the way it DEGRADES is the feature: on a
+    /// mod that lacks it the expression fails to parse and the attribute falls back to its
+    /// default, which for `v` is visible. That is what lets an exported console show an "update
+    /// your mod" banner on exactly the versions too old to draw it.
+    /// </summary>
+    private static void Version(TestRun run)
+    {
+        var ctx = new EvalContext();
+
+        // `ver` reads the version of the assembly Expression was compiled into. In this suite
+        // that is the TEST assembly, not the mod, so its absolute value cannot be asserted here
+        // -- and an earlier version of this test passed for the wrong reason because 10000 also
+        // satisfied "at least 1162". What is testable is the encoding and the degradation; the
+        // mod's own number is read off the running build.
+        var ver = Expression.Parse("ver", -1f).Evaluate(ctx);
+        var assembly = typeof(Expression).Assembly.GetName().Version!;
+        var expected = assembly.Major * 10000f + assembly.Minor * 100f + assembly.Build;
+        run.Check("ver: encodes major*10000 + minor*100 + patch of its own assembly",
+            Mathf.Approximately(ver, expected), $"{ver}, expected {expected}");
+
+        // The comparison an exported scene actually writes.
+        var current = Expression.Parse($"lt(ver,{(int)ver})", 1f).Evaluate(ctx);
+        run.Check("ver: a scene built for this version hides its banner", current < 0.5f, $"{current}");
+
+        var newer = Expression.Parse($"lt(ver,{(int)ver + 1})", 1f).Evaluate(ctx);
+        run.Check("ver: a scene built for a NEWER version shows its banner", newer > 0.5f, $"{newer}");
+
+        // An unknown variable must fall back to the attribute's default rather than evaluate to
+        // zero or fail the scene -- this is the behaviour an old mod exhibits for `ver` itself.
+        var unknown = Expression.Parse("lt(nosuchthing,1)", 1f).Evaluate(ctx);
+        run.Check("ver: an unknown variable falls back to the attribute default, not 0",
+            unknown > 0.5f, $"{unknown}");
+    }
 
     private static VecScene Parse(string src) =>
         SceneParser.Parse(SceneText.ToProps(src, "spans")!)!;

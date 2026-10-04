@@ -172,6 +172,7 @@ internal static class Program
 
         Console.WriteLine();
         NodeSpanTests.All[0].Item2(run);
+        NodeSpanTests.All[1].Item2(run);
         RequirementTests.ConicAngles(run);
         RequirementTests.Filters(run);
         RequirementTests.GroupMatrix(run);

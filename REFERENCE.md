@@ -1497,6 +1497,7 @@ Any numeric attribute may be a string beginning with `=`.
 | `sy` | scroll offset of the enclosing scroll view or `SC`, in scene units; `0` when there is none |
 | `vh` | viewport height of that scroll view or `SC`, in scene units; `0` when there is none |
 | `hover` | `1` while the pointer is over a clickable node inside the nearest node with an `id` around this expression (the node itself, or a group), else `0` |
+| `ver` | the running mod's version as `major*10000 + minor*100 + patch`, so 0.11.62 is `1162`. On a mod too old to know the name the whole expression fails to parse and the attribute falls back to **its own default** — which is what makes `G v="=lt(ver,1162)" { ... }` an update banner that appears only on versions that cannot draw what follows |
 | `down` | the same, while a pointer is held down on it |
 
 **`hover` and `down` style a control from the pointer**, CSS `:hover` and `:active`, with nothing

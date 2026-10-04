@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.62
+
+- Added: **`ver`**, an expression variable carrying the running mod's version as `major*10000 + minor*100 + patch` (0.11.62 is `1162`). It is usable anywhere an expression is. The degradation is the feature: on a mod too old to know the name, the expression fails to parse and the attribute falls back to **its own default**, so `G v="=lt(ver,1162)" { ...banner... }` shows an "update the mod" notice on exactly the versions that cannot draw what follows, and hides itself on the ones that can. The parse failure is also reported as a problem, which is a diagnostic rather than a fault.
+
 ## 0.11.61
 
 - Added: **`Tessellator.TagNodes`**, off by default, records which node produced which vertices (`Tessellator.NodeSpans`, a `First`/`Count` range per node). A group's span encloses its children's, so the smallest span containing a point is the innermost node under it. It exists for editors and previews that need click-to-select over a built mesh; in game it is never switched on and costs one bool test per node.

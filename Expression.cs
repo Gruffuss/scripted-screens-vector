@@ -933,8 +933,36 @@ internal sealed class Expression
             return node;
         }
 
+        /// <summary>
+        /// The running mod's version as `major*10000 + minor*100 + patch` -- 0.11.62 is 1162.
+        /// </summary>
+        /// <remarks>
+        /// It is a plain number so a scene can compare it, and it exists so an exported console
+        /// can tell a player their mod is too old to draw it. The degradation is the point: on a
+        /// mod without `ver` the name is an unknown variable, the expression fails to parse, and
+        /// the attribute falls back to its default. With `v="=lt(ver,NNNN)"` that default is
+        /// `visible`, so an "update the mod" banner appears on exactly the versions that lack the
+        /// feature and hides itself on the ones that do not. The parse failure is also reported as
+        /// a problem, which is a diagnostic rather than a fault.
+        ///
+        /// Computed once: the version cannot change while the game runs, and this is reached from
+        /// the tessellation worker.
+        /// </remarks>
+        private static readonly float VersionNumber = ReadVersion();
+
+        private static float ReadVersion()
+        {
+            var version = typeof(Expression).Assembly.GetName().Version;
+            return version == null
+                ? 0f
+                : version.Major * 10000f + version.Minor * 100f + version.Build;
+        }
+
         private static Expression Variable(string name)
         {
+            if (name == "ver")
+                return Constant(VersionNumber);
+
             if (name == "t")
                 return new Expression { _kind = Kind.Time, UsesTime = true };
 
