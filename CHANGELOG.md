@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.66
+
+- Fixed: **a data colour with leading or trailing whitespace was rejected and drew magenta.** Unity's parser does not trim, so `" #FFFFFF "` failed where `"#FFFFFF"` worked. A value arriving with stray space -- from a concatenation, a text field or a copy-paste -- plainly means the colour inside it. `transparent` and `none` are trimmed on the same path.
+
 ## 0.11.65
 
 - Docs: `REFERENCE.md` now lists **which colour strings a `data` value may be**, measured on a console rather than taken from Unity's documentation. The one that catches people: `grey` is accepted and **`gray` is not** -- Unity carries only the British spelling, so a page written in American English gets a magenta shape with no other clue. Also rejected: a bare `FFFFFF` with no `#`, a malformed length, non-hex digits, `rgba()`/`hsl()`, and anything with surrounding whitespace.

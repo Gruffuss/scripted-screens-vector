@@ -699,6 +699,11 @@ internal static class SceneParser
     /// </summary>
     private static bool DataColour(string text, out Color colour)
     {
+        // Unity's parser does not trim, so " #FFFFFF " was rejected and the shape drew magenta.
+        // A value arriving with stray whitespace -- from a concatenation, a text field or a
+        // copy-paste -- plainly means the colour inside it, and nothing is lost by saying so.
+        text = text.Trim();
+
         if (string.Equals(text, "transparent", StringComparison.OrdinalIgnoreCase)
             || string.Equals(text, "none", StringComparison.OrdinalIgnoreCase))
         {

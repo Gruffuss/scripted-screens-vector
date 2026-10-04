@@ -296,7 +296,7 @@ than taken from Unity's documentation:
 | `grey` | **`gray`** — Unity carries only the British spelling |
 | `transparent`, `none` (this mod, not Unity) | non-hex digits, e.g. `#GGGGGG` |
 | `#RRGGBB00` — fully transparent is still a colour | `rgba(...)`, `hsl(...)` and other CSS functions |
-| | anything with leading or trailing whitespace |
+| surrounding whitespace is trimmed before parsing | |
 
 `gray` is the one that catches people. It is a legitimate CSS colour and not a Unity one, so a
 page written in American English gets a magenta shape with no other clue.
