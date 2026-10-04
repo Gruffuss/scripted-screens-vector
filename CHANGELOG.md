@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.73
+
+- Fixed: **`Tessellator.NodeSpans` could report vertex ranges that no longer existed.** A masked group that refines removes everything from its start onward and rebuilds it with a different vertex count, so spans already recorded for the nodes inside it described nothing. Those are now discarded; the group keeps its own span, which is recorded afterwards and is still correct. A tool mapping a click to the wrong node is worse than one mapping it to the enclosing group. `TagNodes` is off in game, so this affects editors and previews only.
+
 ## 0.11.72
 
 - Fixed: **an array spanning a newline exhausted memory instead of parsing or failing.** Inside `[ ]` the reader steps over space and tab only, so a newline -- or a `{` or `}` -- was neither skipped, nor `]`, nor `,`, and the value reader returned an empty token without advancing. The loop then appended empty values until the process died. `R p=[1,` newline `2]` is an ordinary thing for an author to write, so this was reachable by hand. An array must be closed on the line it opens, and saying so is now the error rather than a hang: letting a line break through would make a missing `]` swallow the rest of the scene instead of being reported where it happened.

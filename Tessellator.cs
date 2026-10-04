@@ -607,6 +607,11 @@ internal static class Tessellator
     /// <see cref="NodeSpans"/> immediately after <see cref="Emit"/> returns. Nodes that emit no
     /// geometry are recorded with a zero count rather than skipped, so a tool can still map a
     /// group or a hidden node back to its place in the tree.
+    ///
+    /// Under a masked group that refines, the descendants' spans are DISCARDED rather than left
+    /// stale: refining rebuilds that whole vertex range, so the ranges recorded for the nodes
+    /// inside it no longer describe anything. The group keeps its own span, so a click there
+    /// selects the group rather than the wrong child.
     /// </remarks>
     internal static bool TagNodes { get; set; }
 
@@ -1042,6 +1047,14 @@ internal static class Tessellator
             }
 
             vh.MaskRange(from, mask, NeedsRefinement(new Paint(Color.white, mask.Gradient, 1f)), ScreenScale, labels);
+
+            // A mask that refines removes everything from `from` onward and rebuilds it with a
+            // different vertex count, so any span already recorded inside that range points at
+            // vertices that no longer exist. The enclosing group's own span is recorded on the
+            // way out and is still right; its descendants' are not. Drop them: a tool that maps
+            // a click to the wrong node is worse than one that maps it to the group.
+            if (TagNodes && _spans != null)
+                _spans.RemoveAll(span => span.First >= from);
         }
     }
 
