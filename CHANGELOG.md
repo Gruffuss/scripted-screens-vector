@@ -2,6 +2,11 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.63
+
+- Fixed: **a `units=bbox` gradient on a stroke was never bound to the shape's box.** Fills, bands and text bound theirs; strokes did not, so the ramp was sampled in scene space instead -- and a shape whose fill and stroke shared one gradient drew them in two different spaces. The box used is the contour's, not the stroked band's, so a fill and a stroke with the same gradient line up. Confirmed by disabling the fix and watching a red-to-blue bbox ramp on a shape at x=120..180 come out uniformly blue.
+- Docs: four more claims corrected against the parser. `if()` is **lazy** -- only the branch taken is evaluated, so the other may safely divide by zero or read a missing name. A `nodes` patch re-parses the **whole merged subtree**, a patch carrying `c` replaces children rather than merging, and a descendant re-parsed that way keeps only whitelisted inherited keys; patching a group is not free for what it holds. `sat` does nothing on a `T`, since text is never stroked.
+
 ## 0.11.62
 
 - Added: **`ver`**, an expression variable carrying the running mod's version as `major*10000 + minor*100 + patch` (0.11.62 is `1162`). It is usable anywhere an expression is. The degradation is the feature: on a mod too old to know the name, the expression fails to parse and the attribute falls back to **its own default**, so `G v="=lt(ver,1162)" { ...banner... }` shows an "update the mod" notice on exactly the versions that cannot draw what follows, and hides itself on the ones that can. The parse failure is also reported as a problem, which is a diagnostic rather than a fault.

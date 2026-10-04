@@ -43,7 +43,11 @@ data:set_props({ nodes = { hv_bar = { w = 42, f = "#E23D3D" } } })
 
 The patch is **merged onto the node's original props and the node re-parsed**, so keys the
 patch does not mention keep their values — a partial apply would reset them to defaults.
-Children are not patchable and are kept, so patching a group costs nothing for its subtree.
+Children are kept when the patch does not mention them, but the re-parse walks the **whole merged
+subtree**, so patching a group is not free for what it holds. Two consequences worth knowing:
+a patch that does carry `c` **replaces** the children rather than merging into them, and a
+descendant re-parsed this way keeps only the inherited keys on the whitelist -- anything inherited
+outside it is lost. Patch the leaf you mean rather than a group above it.
 
 Use it for a change no expression can express — a different op, a new gradient reference, a
 count. For anything that is only a *value*, prefer `data` and an expression: that path needs
@@ -1010,7 +1014,8 @@ L p=[10,40,90,40] s=@status sat==$level sw=2
 ```
 
 `fat` samples the fill's gradient and `sat` the stroke's; both need `f` / `s` to be a
-`@gradient`, and both work on `T`.
+`@gradient`. On a `T` only `fat` does anything: text is never stroked, so there is no stroke
+gradient for `sat` to sample.
 
 **Fill rules.** `evenodd`: every further contour is a hole. `nonzero`: a contour is a hole
 only when wound *against* the outer one. This is a winding comparison, exact for nested
@@ -1577,7 +1582,7 @@ rather than a visible glitch.
 | `pulse(x,duty)` | `1` for the first `duty` of each period, else `0` |
 | `step(edge,x)` | `0` below the edge, `1` at or above |
 | `smoothstep(a,b,x)` | smooth `0..1` ramp between the edges |
-| `if(c,a,b)` | `a` when `c` is non-zero, else `b` |
+| `if(c,a,b)` | `a` when `c` is non-zero, else `b`. **Lazy**: only the branch taken is evaluated, so the other may safely divide by zero or read a name that is missing on this frame |
 | `eq(a,b)` `lt(a,b)` `gt(a,b)` `lte(a,b)` `gte(a,b)` | comparisons returning `0`/`1` |
 | `and(a,b)` `or(a,b)` `not(a)` | logical, on `0`/non-zero |
 | `hash(x)` | deterministic pseudo-random `0..1` |

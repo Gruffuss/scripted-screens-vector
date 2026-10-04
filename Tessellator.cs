@@ -3246,6 +3246,26 @@ internal static class Tessellator
     {
         var before = vh.currentVertCount;
 
+        // A `units=bbox` gradient has to be bound to the shape's box here too. It was bound for
+        // fills, bands and text but never for strokes, so `units=bbox` -- whose whole purpose is
+        // to avoid placing a gradient by hand -- silently did nothing on a stroke, and a shape
+        // whose fill and stroke shared one gradient drew them in two different spaces.
+        //
+        // The box is the CONTOUR's, not the stroked band's: that is the shape's own box, so a
+        // fill and a stroke using the same gradient line up, which is the point.
+        if (paint.Gradient is { BoundingBox: true } && points.Count > 0)
+        {
+            var min = points[0];
+            var max = points[0];
+            foreach (var point in points)
+            {
+                min = Vector2.Min(min, point);
+                max = Vector2.Max(max, point);
+            }
+
+            paint = paint.WithBounds(min, max - min);
+        }
+
         Stroke.Emit(vh, points, closed, width, paint, node.Cap, node.Join, node.MiterLimit, feather, matrix, MaxVertices);
 
         if (vh.currentVertCount >= MaxVertices && vh.currentVertCount > before)
