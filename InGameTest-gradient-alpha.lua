@@ -16,9 +16,12 @@
 --   hides against a dark background and cannot hide against a pale one. Both bars must fade
 --   smoothly to the panel with no grey band and no colour shift.
 --
--- 3 THE EXTREME. Magenta fading to transparent GREEN. Premultiplied, the green is weightless,
---   so this must read as magenta fading out -- never a muddy olive band in the middle. This is
---   the case that fails most visibly if the mix is straight.
+-- 3 THE EXTREME. The stops are magenta -> transparent GREEN, and **no green may be visible**.
+--   That is the pass condition, not a mistake in the page: premultiplied, a fully transparent
+--   stop contributes its alpha and NONE of its colour, so this must read as magenta fading out.
+--   Seeing green, or a muddy olive band in the middle, means the mix is straight and the fix is
+--   not working. The stops are named on screen because "no green" is only meaningful if you know
+--   green was asked for.
 --
 -- 4 CONTROL. A ramp between two OPAQUE colours, magenta to green. Premultiplying changes
 --   nothing when both stops are opaque, so this must look exactly as it always has: a clean
@@ -59,8 +62,9 @@ local s = {
 
     -- 3 THE EXTREME: the transparent stop is a different hue entirely
     "R x=0 y=104 w=200 h=48 f=#101820 fea=0",
-    'T x=4 y=106 w=192 h=6 text="3 EXTREME  magenta -> transparent green" size=5 f=#EAF4F8',
-    "R x=8 y=116 w=184 h=28 f=@magGreen fea=0",
+    'T x=4 y=106 w=192 h=6 text="3 EXTREME  NO GREEN must be visible" size=5 f=#EAF4F8',
+    'T x=4 y=112 w=192 h=5 text="stops are magenta -> transparent GREEN; the green must contribute nothing" size=4 f=#9FB3C8',
+    "R x=8 y=119 w=184 h=25 f=@magGreen fea=0",
 
     -- 4 CONTROL: both stops opaque, so nothing should have changed at all
     "R x=0 y=152 w=200 h=48 f=#101820 fea=0",

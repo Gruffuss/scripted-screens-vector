@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.65
+
+- Docs: `REFERENCE.md` now lists **which colour strings a `data` value may be**, measured on a console rather than taken from Unity's documentation. The one that catches people: `grey` is accepted and **`gray` is not** -- Unity carries only the British spelling, so a page written in American English gets a magenta shape with no other clue. Also rejected: a bare `FFFFFF` with no `#`, a malformed length, non-hex digits, `rgba()`/`hsl()`, and anything with surrounding whitespace.
+
 ## 0.11.64
 
 - **Changed: a reference to an undeclared gradient now draws magenta instead of white.** It was already reported as a problem and still is; what changed is that the shape now carries the same signal an unresolved data colour does, because white is a colour somebody meant to use and magenta is not. A scene with a dangling `@id` is not working, so this reads as the fault it is rather than as a design decision. An undeclared **clip** id is unchanged: the reference is ignored and the content draws unclipped.

@@ -282,6 +282,25 @@ pixels at 12/255. The cap is **96 rings**, multiplied by `Renderer.BlurDensity`;
 0.11.50, when a glow seen up close turned out to be hitting it. Reducing the blur radius is still
 the direct lever.
 
+### Which colour strings a data value may be
+
+A string sent in `data` becomes a **colour** only if Unity's own parser accepts it, plus
+`transparent` and `none`, which this mod handles itself. Anything else stays text, so a shape
+bound to it draws **magenta** and the name is listed as unresolved. Measured on a console rather
+than taken from Unity's documentation:
+
+| accepted | rejected |
+|---|---|
+| `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, any case | a bare `FFFFFF` with **no leading `#`** |
+| named colours, case-insensitively (`red`, `Red`, `RED`) | a malformed length such as `#FFFFF` |
+| `grey` | **`gray`** — Unity carries only the British spelling |
+| `transparent`, `none` (this mod, not Unity) | non-hex digits, e.g. `#GGGGGG` |
+| `#RRGGBB00` — fully transparent is still a colour | `rgba(...)`, `hsl(...)` and other CSS functions |
+| | anything with leading or trailing whitespace |
+
+`gray` is the one that catches people. It is a legitimate CSS colour and not a Unity one, so a
+page written in American English gets a magenta shape with no other clue.
+
 ### Dark colours lose a level or two
 
 A flat colour comes back a few levels off at the dark end, on screen and in a capture alike:
