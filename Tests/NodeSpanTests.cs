@@ -71,6 +71,15 @@ internal static class NodeSpanTests
             twice.Problems.Count == 0 && twice.Root.Count == 2,
             $"{twice.Root.Count} root node(s), {twice.Problems.Count} problem(s)");
 
+        // The same cycle written in SCENE TEXT, which is the form an author writes. `SYM`
+        // lives inside a `DEFS` block: at root level it is an unsupported op, so a harness
+        // that puts it there never reaches the expander and passes for the wrong reason.
+        var textCycle = Parse("SCENE w=100 h=100\nDEFS {\n SYM id=a {\n  USE ref=b\n }\n"
+                              + " SYM id=b {\n  USE ref=a\n }\n}\nUSE ref=a\n");
+        run.Check("recursion: a text-form symbol cycle inside DEFS is refused too",
+            textCycle.Problems.Count == 1 && textCycle.Problems[0].Contains("a -> b -> a"),
+            textCycle.Problems.Count > 0 ? textCycle.Problems[0] : "(no problem reported)");
+
         // Arrays nested past the cap, which recursed through ReadValue.
         var deep = SceneText.ToProps("SCENE w=10 h=10\nR p=" + new string('[', 2000) + "\n", "deep");
         run.Check("recursion: arrays nested too deep are refused",
