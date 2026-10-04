@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
@@ -29,6 +29,12 @@ internal sealed class SubPath
 /// </remarks>
 internal sealed class PathData
 {
+    /// <summary>
+    /// Why parsing stopped early, or null if the whole string was read. A malformed `d` used to
+    /// spin for ever rather than fail; now it stops and says where.
+    /// </summary>
+    internal string? Rejected;
+
     private enum Op
     {
         Move,
@@ -278,6 +284,15 @@ internal sealed class PathData
 
         while (reader.SkipSeparators())
         {
+            // EVERY pass must consume something. Two ways it would not, both of which hung the
+            // parser in a tight loop rather than failing: a number after `Z` re-enters `case 'Z'`
+            // through the repeated-command rule, and `case 'Z'` reads no input; and `Number()`
+            // returns 0 without advancing when it meets a character that is not a sign, a digit
+            // or a dot. The second covers any stray `)`, `;` or `:`, which is exactly what a
+            // half-typed path looks like. A parser that hangs on a keystroke is worse than one
+            // that refuses the string, so refuse it and say where.
+            var positionAtPassStart = reader.Position;
+
             var c = reader.Peek();
             char command;
 
@@ -298,6 +313,7 @@ internal sealed class PathData
 
             var relative = char.IsLower(command);
             var origin = relative ? cursor : Vector2.zero;
+            var guardCommand = command;
 
             switch (char.ToUpperInvariant(command))
             {
@@ -386,6 +402,16 @@ internal sealed class PathData
             previousWasCubic = upper is 'C' or 'S';
             previousWasQuadratic = upper is 'Q' or 'T';
             previous = command;
+
+            // The guard. If a whole pass read nothing, the next one would read nothing either,
+            // for ever. Stop and record why rather than spin.
+            if (reader.Position == positionAtPassStart)
+            {
+                path.Rejected =
+                    $"'{guardCommand}' near \"{reader.Around(positionAtPassStart)}\" consumed nothing";
+                ScriptedScreensVectorPlugin.Log?.LogWarning($"path: {path.Rejected}, stopping");
+                return path;
+            }
         }
 
         return path;
@@ -395,6 +421,17 @@ internal sealed class PathData
     {
         private readonly string _text;
         private int _at;
+
+        /// <summary>Where the reader is, so a caller can tell whether a pass consumed anything.</summary>
+        internal int Position => _at;
+
+        /// <summary>A few characters around a position, for a message a page author can act on.</summary>
+        internal string Around(int at)
+        {
+            var from = System.Math.Max(0, at - 4);
+            var to = System.Math.Min(_text.Length, at + 6);
+            return _text[from..to];
+        }
 
         internal Reader(string text)
         {

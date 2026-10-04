@@ -193,6 +193,7 @@ A scene reports its own faults rather than drawing nothing and leaving you to gu
 | unknown attribute name | reported, with the op and the node id |
 | malformed expression | reported; that attribute falls back to its default |
 | `$name` with no data value | reported; a bound **colour** draws **magenta** |
+| a colour that will not parse, in `f` or `s` | reported, and the shape draws **magenta** |
 | missing gradient id | reported, and the shape draws **magenta** — the same signal as an unresolved data colour, so a dangling `@id` looks like a fault rather than a design decision |
 | missing clip id | reported; the reference is ignored, so the content draws unclipped |
 
@@ -293,13 +294,14 @@ than taken from Unity's documentation:
 |---|---|
 | `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, any case | a bare `FFFFFF` with **no leading `#`** |
 | named colours, case-insensitively (`red`, `Red`, `RED`) | a malformed length such as `#FFFFF` |
-| `grey` | **`gray`** — Unity carries only the British spelling |
+| `grey`, and `gray` accepted as the same | |
 | `transparent` — Unity's own name, and `none`, which is this mod's | non-hex digits, e.g. `#GGGGGG` |
 | `#RRGGBB00` — fully transparent is still a colour | `rgba(...)`, `hsl(...)` and other CSS functions |
 | surrounding whitespace is trimmed before parsing | |
 
-`gray` is the one that catches people. It is a legitimate CSS colour and not a Unity one, so a
-page written in American English gets a magenta shape with no other clue.
+Unity's own table carries only `grey`; `gray` is accepted here as the same colour, because a page
+written in American English meaning anything else is not a thing that happens. Surrounding
+whitespace is trimmed for the same reason.
 
 Unity's table holds exactly these 23 names and no others, read from the engine binary. Anything
 outside the list, `none` excepted, is not a colour.

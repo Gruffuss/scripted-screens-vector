@@ -697,23 +697,7 @@ internal static class SceneParser
     /// which CSS writes constantly and which used to leave `f = "$name"` unresolved -- drawn
     /// magenta -- rather than invisible.
     /// </summary>
-    private static bool DataColour(string text, out Color colour)
-    {
-        // Unity's parser does not trim, so " #FFFFFF " was rejected and the shape drew magenta.
-        // A value arriving with stray whitespace -- from a concatenation, a text field or a
-        // copy-paste -- plainly means the colour inside it, and nothing is lost by saying so.
-        text = text.Trim();
-
-        if (string.Equals(text, "transparent", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(text, "none", StringComparison.OrdinalIgnoreCase))
-        {
-            colour = new Color(0f, 0f, 0f, 0f);
-            return true;
-        }
-
-        colour = default;
-        return text.Length > 0 && ColorUtility.TryParseHtmlString(text, out colour);
-    }
+    private static bool DataColour(string text, out Color colour) => Colours.TryParse(text, out colour);
 
     internal static void ReadData(SS.UiProp[] props, EvalContext into)
     {
@@ -1258,6 +1242,8 @@ internal static class SceneParser
             case "P":
                 node.Op = VecOp.Path;
                 node.Path = PathData.Parse(PropString(map, "d") ?? string.Empty);
+                if (node.Path.Rejected != null)
+                    scene.Problem($"path: {node.Path.Rejected}");
                 node.EvenOdd = string.Equals(PropString(map, "fr"), "evenodd", StringComparison.OrdinalIgnoreCase);
                 break;
 
@@ -1291,7 +1277,7 @@ internal static class SceneParser
                 var outline = PropString(map, "oc");
                 if (outline != null)
                 {
-                    if (ColorUtility.TryParseHtmlString(outline, out var outlineColour))
+                    if (Colours.TryParse(outline, out var outlineColour))
                         node.TextOutlineColour = outlineColour;
                     else
                         scene.Problem($"T: oc \"{outline}\" is not a colour");
@@ -1478,8 +1464,8 @@ internal static class SceneParser
 
         Validate(map, scene, op, PropString(map, "id"));
 
-        ParseFill(map, node);
-        ParseStroke(map, node);
+        ParseFill(map, node, scene);
+        ParseStroke(map, node, scene);
 
         var children = PropValue(map, "c");
         if (children != null && children.Value.Type == SS.UiValueType.Array)
@@ -1574,7 +1560,10 @@ internal static class SceneParser
                || (node.TextParts != null && System.Array.Exists(node.TextParts, p => p.Index is { UsesScroll: true } || p.Value is { UsesScroll: true }));
     }
 
-    private static void ParseFill(SS.UiProp[] map, VecNode node)
+    /// <summary>The same magenta an unresolved data colour and an undeclared gradient draw.</summary>
+    private static readonly Color UnparsedColour = new(1f, 0f, 1f, 1f);
+
+    private static void ParseFill(SS.UiProp[] map, VecNode node, VecScene scene)
     {
         // Map form: f = { grad = "name", at = "=expr" } samples the ramp at an expression
         // rather than by position, which is how a colour is animated or driven by data.
@@ -1636,8 +1625,19 @@ internal static class SceneParser
             return;
         }
 
-        if (!ColorUtility.TryParseHtmlString(fill, out var colour))
+        if (!Colours.TryParse(fill, out var colour))
+        {
+            // Used to `return`, leaving HasFill false: a typo in a colour made the shape
+            // silently invisible, with nothing in vector_stats to say why. An unresolved data
+            // colour and an undeclared gradient id both report and draw magenta; a colour that
+            // is not a colour is the same kind of mistake and now behaves the same way.
+            scene.Problem($"\"{fill}\" is not a colour");
+            node.HasFill = true;
+            node.Fill = UnparsedColour;
+            node.FillOpacity = Attr(map, "fo", 1f);
+            node.Feather = Attr(map, "fea", -1f);
             return;
+        }
 
         node.HasFill = true;
         node.Fill = colour;
@@ -1983,7 +1983,7 @@ internal static class SceneParser
                || (node.CornerRadii != null && System.Array.Exists(node.CornerRadii, r => !r.IsConstant));
     }
 
-    private static void ParseStroke(SS.UiProp[] map, VecNode node)
+    private static void ParseStroke(SS.UiProp[] map, VecNode node, VecScene scene)
     {
         var paint = PropValue(map, "s");
         if (paint?.Type == SS.UiValueType.Map && paint.Value.Map != null)
@@ -2020,14 +2020,18 @@ internal static class SceneParser
             node.StrokeData = boundStroke.Name;
             node.StrokeIndex = boundStroke.Index;
         }
-        else if (ColorUtility.TryParseHtmlString(stroke, out var colour))
+        else if (Colours.TryParse(stroke, out var colour))
         {
             node.HasStroke = true;
             node.StrokeColour = colour;
         }
         else
         {
-            return;
+            // As for a fill: a stroke colour that will not parse used to leave the shape
+            // unstroked and silent. Report it and draw the same magenta instead.
+            scene.Problem($"\"{stroke}\" is not a colour");
+            node.HasStroke = true;
+            node.StrokeColour = UnparsedColour;
         }
 
         ReadStrokeStyle(map, node);
@@ -2243,7 +2247,7 @@ internal static class SceneParser
         static float Num(SS.UiValue v) => v.Type == SS.UiValueType.Number ? v.Number : 0f;
 
         var text = parts[4].Type == SS.UiValueType.String ? parts[4].String : null;
-        if (string.IsNullOrEmpty(text) || !ColorUtility.TryParseHtmlString(text, out var colour))
+        if (string.IsNullOrEmpty(text) || !Colours.TryParse(text, out var colour))
             return null;
 
         // Sixth field: `inset` (or 1), as CSS writes it.

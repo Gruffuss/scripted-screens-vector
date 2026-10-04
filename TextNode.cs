@@ -691,7 +691,7 @@ internal sealed class FirstLineStyle
             switch (key)
             {
                 case "f":
-                    if (ColorUtility.TryParseHtmlString(value, out var colour))
+                    if (Colours.TryParse(value, out var colour))
                         style.Colour = colour;
                     else
                         scene.Problem($"T fl: \"{value}\" is not a colour");

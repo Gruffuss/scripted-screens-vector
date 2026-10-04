@@ -12,7 +12,40 @@ internal static class NodeSpanTests
     {
         ("node spans", Spans),
         ("ver", Version),
+        ("path guard", PathGuard),
     };
+
+    /// <summary>
+    /// A malformed `d` must stop, not spin. Two shapes of input consumed nothing per pass and so
+    /// looped for ever: a number after `Z`, which re-enters `case 'Z'` through the repeated-command
+    /// rule, and any character `Number()` cannot read, which it reports as 0 without advancing.
+    /// </summary>
+    /// <remarks>
+    /// Every case here HANGS on a build without the guard -- the failure is non-termination, not a
+    /// wrong answer, so this test cannot be watched to fail in the suite without hanging it. It was
+    /// confirmed against the unguarded parser out of process, with a timeout.
+    /// </remarks>
+    private static void PathGuard(TestRun run)
+    {
+        foreach (var d in new[]
+                 {
+                     "M0 0 L10 0 Z 5",      // a number after Z
+                     "M0 0 L10 0 )",        // a stray character where a number is expected
+                     "M0 0 L10 0 ;",
+                     "M0 0 L10 0 :",
+                     "M0 0 Z Z 1 2 3",
+                 })
+        {
+            var path = PathData.Parse(d);
+            run.Check($"path: \"{d}\" stops and says why",
+                path.Rejected != null, path.Rejected ?? "(parsed clean, guard did not fire)");
+        }
+
+        // And a well-formed path must still parse with nothing reported, or the guard is too eager.
+        var good = PathData.Parse("M0 0 L10 0 L10 10 Z");
+        run.Check("path: a valid path is untouched by the guard",
+            good.Rejected == null, good.Rejected ?? "ok");
+    }
 
     /// <summary>
     /// `ver` is a plain number a scene can compare, and the way it DEGRADES is the feature: on a

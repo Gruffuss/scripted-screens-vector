@@ -502,7 +502,7 @@ internal static class GradientParser
 
         for (var i = 0; i < count; i++)
         {
-            if (!ColorUtility.TryParseHtmlString(colours[i], out var colour))
+            if (!Colours.TryParse(colours[i], out var colour))
                 continue;
 
             into.Positions.Add(Mathf.Clamp01(flatPositions[i]));

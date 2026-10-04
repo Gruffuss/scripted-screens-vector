@@ -1903,7 +1903,18 @@ internal static class Tessellator
         var rx = Mathf.Clamp(node.Rx.Evaluate(context), 0f, Mathf.Min(w, h) * 0.5f);
         var ry = Mathf.Clamp(node.Ry.Evaluate(context), 0f, h * 0.5f);
 
-        if (rx < 0.01f || ry < 0.01f)
+        // `rx` here is the TOP-LEFT corner when per-corner radii are given, because that is what
+        // the parser puts in node.Rx. Taking the early-out on it alone threw away the other three:
+        // `rx=[0,8,8,8]` drew a plain rectangle instead of one sharp corner and three round ones.
+        // A shape is only square when EVERY corner is.
+        // With per-corner radii, `ry` is not consulted below either -- tl/tr/br/bl come straight
+        // from the array -- and the parser derives both node.Rx and node.Ry from the TOP-LEFT
+        // corner, so testing either here reads one corner and discards the rest.
+        var squareCorners = node.CornerRadii == null
+            ? rx < 0.01f || ry < 0.01f
+            : System.Linq.Enumerable.All(node.CornerRadii, r => r.Evaluate(context) < 0.01f);
+
+        if (squareCorners)
         {
             outline.Add(new Vector2(x, y));
             outline.Add(new Vector2(x + w, y));

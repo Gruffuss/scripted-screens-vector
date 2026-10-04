@@ -2,6 +2,17 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.70
+
+- Fixed: **a malformed `d` could hang the renderer.** Two inputs consumed nothing per pass and so looped for ever: a number after `Z`, which re-enters the close command through the repeated-command rule while reading no input, and any character `Number()` cannot read -- a stray `)`, `;` or `:` -- which it reports as 0 without advancing. Exactly what a half-typed path looks like. The parser now requires every pass to consume something and otherwise stops and reports where, as SVG specifies for a malformed path. Reported by a reader of the source; confirmed by running the unguarded parser with a timeout and watching it not return.
+- Fixed: **`rx=[0,8,8,8]` made every corner sharp instead of one.** The square-shape early-out read `node.Rx`, which the parser sets to the TOP-LEFT corner when per-corner radii are given, so a single zero discarded the other three. A rectangle is now only drawn square when every corner is zero.
+- Changed: **`gray` is accepted as `grey`.** Unity's table carries only the British spelling, so the American one drew magenta with no other clue. It was documented as a trap in 0.11.65; documenting an unambiguous mistake is not fixing it.
+- Changed: **every colour now goes through one parser**, so the whitespace trim added in 0.11.66 applies everywhere rather than only to `data`. `f=" #FFFFFF "` in scene text used to fail while the same value in a payload worked. Six call sites -- fill, stroke, outline, shadow, gradient stops and text -- previously called Unity's parser directly.
+
+## 0.11.69
+
+- Fixed: **a colour that would not parse made the shape silently invisible.** `f="notacolour"` left the fill unset and reported nothing, so a typo produced a missing shape with no entry in `vector_stats` and no log line -- the hardest kind of mistake to find. A fill or stroke whose colour will not parse now reports a problem and draws the same magenta an unresolved data colour and an undeclared gradient id already draw. Found by the control row of a test page that was meant to prove the opposite.
+
 ## 0.11.68
 
 - Docs: `REFERENCE.md` now lists **all 23 named colours with their values**, read from the engine binary and derived twice by different routes. Every value is the W3C one; `darkblue` is `#00008B`. Two traps worth knowing: `green` is `#008000`, not `#00FF00` (that is `lime`), and `aqua`/`cyan` and `fuchsia`/`magenta` are each the same colour under two names.

@@ -28,6 +28,7 @@
              re-implementation of it. A ported copy would drift. -->
         <Compile Include="..\Triangulator.cs" />
         <Compile Include="..\Clip.cs" />
+        <Compile Include="..\Colours.cs" />
         <Compile Include="..\Gradient.cs" />
         <Compile Include="..\Easing.cs" />
         <Compile Include="..\ImageDecode.cs" />
