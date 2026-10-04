@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.67
+
+- Docs: corrected the colour-name table. **`transparent` is one of Unity's own 23 names**, not this mod's addition -- only `none` is ours. `InGameTest-colourstrict.lua` could not have shown this, because the data path short-circuits both names before Unity's parser sees them; the engine binary settles it. The full list is now in `REFERENCE.md`, and it confirms from a second source that `gray` is absent and only `grey` exists.
+
 ## 0.11.66
 
 - Fixed: **a data colour with leading or trailing whitespace was rejected and drew magenta.** Unity's parser does not trim, so `" #FFFFFF "` failed where `"#FFFFFF"` worked. A value arriving with stray space -- from a concatenation, a text field or a copy-paste -- plainly means the colour inside it. `transparent` and `none` are trimmed on the same path.

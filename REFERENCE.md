@@ -294,12 +294,16 @@ than taken from Unity's documentation:
 | `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, any case | a bare `FFFFFF` with **no leading `#`** |
 | named colours, case-insensitively (`red`, `Red`, `RED`) | a malformed length such as `#FFFFF` |
 | `grey` | **`gray`** — Unity carries only the British spelling |
-| `transparent`, `none` (this mod, not Unity) | non-hex digits, e.g. `#GGGGGG` |
+| `transparent` — Unity's own name, and `none`, which is this mod's | non-hex digits, e.g. `#GGGGGG` |
 | `#RRGGBB00` — fully transparent is still a colour | `rgba(...)`, `hsl(...)` and other CSS functions |
 | surrounding whitespace is trimmed before parsing | |
 
 `gray` is the one that catches people. It is a legitimate CSS colour and not a Unity one, so a
 page written in American English gets a magenta shape with no other clue.
+
+Unity's table holds 23 names, read from the engine binary: `yellow purple fuchsia lime silver
+white black grey brown orange green maroon navy olive aqua teal red blue cyan lightblue darkblue
+transparent magenta`. Anything outside that list, `none` excepted, is not a colour.
 
 ### Dark colours lose a level or two
 
