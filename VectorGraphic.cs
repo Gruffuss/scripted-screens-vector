@@ -1088,6 +1088,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         {
             Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats);
         }
+        catch (Exception e)
+        {
+            // As on the worker: a capture of a scene that cannot be drawn reports it rather
+            // than coming back blank.
+            _scene.Problem($"the scene could not be drawn: {e.GetType().Name}: {e.Message}");
+        }
         finally
         {
             Tessellator.BakeFades = false;
@@ -2199,12 +2205,24 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             var cpuBefore = ThreadCpuMilliseconds();
             var mark = Stopwatch.GetTimestamp();
 
-            Tessellator.Emit(builder, scene, context, rect, scale, known, stats);
+            // A throw in here used to fault the task and stop there: the surface received no
+            // geometry, the scene reported no problem and the log said nothing, so the console
+            // simply went blank. One `{=255:%x}` in one label did exactly that. A scene that
+            // cannot be drawn must SAY so, like every other fault, and must not take the
+            // surface with it -- whatever was built before the throw is still drawn.
+            try
+            {
+                Tessellator.Emit(builder, scene, context, rect, scale, known, stats);
 
-            // Off-thread on purpose: this is a rect test per label per later shape, and it
-            // has to happen before Slices() is asked how the mesh divides.
-            if (scene.TextInOrder)
-                TextOrder.Assign(stats.Text, builder);
+                // Off-thread on purpose: this is a rect test per label per later shape, and it
+                // has to happen before Slices() is asked how the mesh divides.
+                if (scene.TextInOrder)
+                    TextOrder.Assign(stats.Text, builder);
+            }
+            catch (Exception e)
+            {
+                scene.Problem($"the scene could not be drawn: {e.GetType().Name}: {e.Message}");
+            }
 
             var wall = (Stopwatch.GetTimestamp() - mark) * 1000d / Stopwatch.Frequency;
             var cpuAfter = ThreadCpuMilliseconds();

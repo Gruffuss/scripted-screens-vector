@@ -2993,7 +2993,13 @@ internal static class Tessellator
             part.Prefix.AsSpan().CopyTo(_textBuffer.AsSpan(at));
             at += part.Prefix.Length;
 
-            if (value.TryFormat(_textBuffer.AsSpan(at, 64), out var written, part.Spec, CultureInfo.InvariantCulture))
+            // `X` is an integer format: `float.TryFormat` THROWS on it rather than returning
+            // false, so hex rounds to a long first. See TextPart.Hex.
+            var ok = part.Hex
+                ? ((long)value).TryFormat(_textBuffer.AsSpan(at, 64), out var written, part.Spec, CultureInfo.InvariantCulture)
+                : value.TryFormat(_textBuffer.AsSpan(at, 64), out written, part.Spec, CultureInfo.InvariantCulture);
+
+            if (ok)
             {
                 at += written;
                 part.Suffix.AsSpan().CopyTo(_textBuffer.AsSpan(at));
@@ -3010,7 +3016,8 @@ internal static class Tessellator
         {
             printed = part.Net == null
                 ? value.ToString("0.##", CultureInfo.InvariantCulture)
-                : string.Format(CultureInfo.InvariantCulture, part.Net, value);
+                : string.Format(CultureInfo.InvariantCulture, part.Net,
+                    part.Hex ? (long)value : value);
         }
         catch (FormatException)
         {

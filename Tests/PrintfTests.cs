@@ -29,6 +29,37 @@ internal static class PrintfTests
         Same(run, "%d", "{0:F0}");
         Same(run, "%.3e", "{0:E3}");
         Same(run, "%X", "{0:X}");
+
+        // printf's %x is lower case and %X upper; both used to translate to "X".
+        Same(run, "%x", "{0:x}");
+
+        // And the one that mattered: .NET's X is an INTEGER format, so handing it a float
+        // throws rather than declining. That throw escaped the tessellation worker and took
+        // the whole surface with it -- a console blanked by one `{=255:%x}` in one label,
+        // with no problem reported and nothing in the log. The part must round to an integer.
+        foreach (var (spec, value, expected) in new[]
+                 {
+                     ("%x", 255f, "ff"),
+                     ("%X", 255f, "FF"),
+                     ("%x", 4096.7f, "1000"),
+                 })
+        {
+            var part = TextPart.Computed(Expression.Constant(value), spec);
+            string printed;
+            try
+            {
+                printed = part.Hex
+                    ? ((long)value).ToString(part.Spec, System.Globalization.CultureInfo.InvariantCulture)
+                    : value.ToString(part.Spec, System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch (System.Exception e)
+            {
+                printed = e.GetType().Name;
+            }
+
+            run.Check($"printf: {spec} of {value} prints {expected} and does not throw",
+                printed == expected, printed);
+        }
     }
 
     internal static void KeepsSurroundingText(TestRun run)

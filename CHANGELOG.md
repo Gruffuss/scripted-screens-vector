@@ -2,6 +2,13 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.76
+
+Both of these were found by one test page: a label containing `{=255:%x}` blanked a console.
+
+- Fixed: **`%x` threw, and the throw blanked the whole surface.** .NET's `X` is an integer format, so handing it a float raises `FormatException` rather than declining, and `float.TryFormat` throws it instead of returning false. A hex value now rounds to an integer first. Also `%x` is lower case and `%X` upper, as printf has them; both used to give upper.
+- Fixed: **a scene that threw while being drawn went blank and said nothing.** The tessellation runs in a `Task`, so the exception faulted the task and stopped there: no geometry reached the surface, the scene listed no problem, and the log had no line -- `vector_stats` said "25 nodes, 0 shapes emitted, no problems" while the console showed the room behind it. A throw is now reported as a scene problem, like every other fault, and whatever was built before it is still drawn. The capture path reports it the same way.
+
 ## 0.11.75
 
 - Fixed: **`v = 0` did nothing on anything but a `G`.** It was read in the group case of the parser and checked in the group case of the tessellator, so on a shape or a label it was accepted as a known attribute, reported no fault, and was then never looked at again: the node drew as though it had not been written. It now hides any node, and takes that node's hit region with it, as it always has for a group. Found by a test page of my own that used `v` on a `T` and silently showed both states at once.

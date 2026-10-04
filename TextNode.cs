@@ -339,6 +339,14 @@ internal readonly struct TextPart
     internal readonly string? Spec;
     internal readonly string Suffix;
 
+    /// <summary>
+    /// `%x`. .NET's `X` is an INTEGER format: handed a float it throws rather than declining,
+    /// and that throw escaped the tessellation worker and took the whole surface with it --
+    /// one `{=255:%x}` in one label blanked the console and reported nothing. The value is
+    /// rounded to a `long` before it is formatted.
+    /// </summary>
+    internal readonly bool Hex;
+
     private TextPart(string? literal, string? name, Expression? index, string? format, Expression? value = null)
     {
         Literal = literal;
@@ -349,6 +357,7 @@ internal readonly struct TextPart
         Prefix = Suffix = string.Empty;
         Spec = "0.##";
         Split = Net == null || Printf.TrySplit(Net, out Prefix, out Spec, out Suffix);
+        Hex = Spec is { Length: > 0 } && (Spec[0] == 'X' || Spec[0] == 'x');
     }
 
     internal static TextPart Text(string literal) => new(literal, null, null, null);
@@ -465,7 +474,8 @@ internal static class Printf
             'e' or 'E' => "E" + (precision ?? "2"),
             'g' or 'G' => "G" + precision,
             'd' or 'i' => "F0",
-            'x' or 'X' => "X",
+            'x' => "x",
+            'X' => "X",
             _ => null,
         };
 
