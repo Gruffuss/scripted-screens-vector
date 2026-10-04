@@ -2355,7 +2355,7 @@ internal static class Tessellator
             }
 
             case VecOp.Spline:
-                points = Stroke.Spline(FromFlat(node.Points), node.RepeatCount);
+                points = Stroke.Spline(FromFlat(node.Points), node.RepeatCount, node.Closed);
                 break;
 
             default:
@@ -2366,14 +2366,11 @@ internal static class Tessellator
         if (points.Count < 2)
             return;
 
-        if (node.HasFill && node.Closed)
-        {
-            EmitShadows(vh, node, context, points, frame);
-            FillContour(vh, node, context, frame, points, null, ResolvePaint(scene, node, context, frame, stroke: false));
-            EmitInsetShadows(vh, scene, node, context, points, frame);
-        }
-
-        StrokeOutline(vh, scene, node, context, frame, points, node.Closed);
+        // The same fill-and-stroke a rectangle or an ellipse gets, rather than a copy of it:
+        // this path had its own three lines, which is why a polygon, a polyline and a spline
+        // were the shapes a `blur` left sharp and -- worse -- the shapes that registered no
+        // hit at all, so `press`, `xy` and `drag` on them did nothing and said nothing.
+        FillAndStroke(vh, scene, node, context, frame, points, node.Closed);
     }
 
     /// <summary>The largest closed subpath, which is the outer contour by the same rule the
@@ -2408,18 +2405,41 @@ internal static class Tessellator
         if (subpaths.Count == 0)
             return;
 
+        // The OUTER contour only, which is the largest closed subpath -- the same rule
+        // the triangulator uses to tell an outline from its holes. Shadowing every closed
+        // subpath would draw a solid shadow behind each hole; punching one out needs the
+        // polygon boolean this renderer does not have, and is the limit already recorded
+        // for holes inside a clipped fill. Blur and the hit area follow the same rule, so a
+        // clickable `P` is clickable over its outline, holes included.
+        var outer = Outermost(subpaths);
+
+        if (outer != null && node.Clickable && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
+            RecordHit(node.Id!, outer, frame.Matrix, frame.CanvasClip, context, node);
+
         if (node.HasFill)
         {
-            // The OUTER contour only, which is the largest closed subpath -- the same rule
-            // the triangulator uses to tell an outline from its holes. Shadowing every closed
-            // subpath would draw a solid shadow behind each hole; punching one out needs the
-            // polygon boolean this renderer does not have, and is the limit already recorded
-            // for holes inside a clipped fill.
-            var outer = Outermost(subpaths);
             if (outer != null)
                 EmitShadows(vh, node, context, outer, frame);
 
-            FillSubpaths(vh, scene, node, context, frame, subpaths);
+            // As on every other shape, a flat fill under a `blur` is drawn as its own blurred
+            // silhouette. A path's is its outer contour, so a blurred path with holes blurs as
+            // though it had none -- the same approximation its shadow already makes.
+            var blurred = false;
+            if (frame.Blur > 0.0001f && outer != null)
+            {
+                var paint = ResolvePaint(scene, node, context, frame, stroke: false);
+                if (!paint.IsGradient)
+                {
+                    var colour = paint.Colour;
+                    colour.a *= paint.Alpha;
+                    Shadow.Emit(vh, outer, new VecShadow(0f, 0f, 2f * frame.Blur, 0f, colour, false),
+                        frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+                    blurred = true;
+                }
+            }
+
+            if (!blurred)
+                FillSubpaths(vh, scene, node, context, frame, subpaths);
 
             if (outer != null)
                 EmitInsetShadows(vh, scene, node, context, outer, frame);

@@ -2,6 +2,22 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.74
+
+Five things the docs described as limits. Each was a choice or an unfilled detail rather than
+something the renderer could not do, so each is now done.
+
+- Fixed: **`press`, `xy`, `drag` and plain clicks did nothing at all on `L`, `Y`, `SP` and `P`.** A hit area was recorded on the one code path a rectangle and an ellipse take, so a clickable polyline, polygon, spline or path registered nothing, fired nothing and reported nothing -- the silent kind of failure. All four now register exactly one region each, like every other shape; a `P` is clickable over its outer contour, holes included.
+- Fixed: **`blur` left every shape but `R` and `C` sharp.** The polyline path carried its own copy of fill-and-stroke, which is why it missed both the blur and the hit area; it now calls the same one. A `P` blurs its outer contour, the approximation its shadow already made. A closed shape with `sh` but no fill now also casts its shadow, as `R` and `C` always have.
+- Fixed: **a `style` on the scene root was read by nothing.** It is now inherited by every node in the scene, in the table form (`style = { ... }`) and the text form (bare attributes on the `SCENE` line), exactly as a `G`'s is. `fit` is excluded, because on the root it means how the viewBox meets the surface while on a `T` it means shrink-to-fit and on an `IMG` how the picture fills its box -- put a text or image `fit` default on a `G`.
+- Fixed: **re-sending the same structure restarted every animation.** `set_props` re-upserts the whole element, so a script holding its structure in an element it touches each tick reset `t` to 0 every tick and dropped every `nodes` patch with it: animation never advanced. An identical `src` to the same surface is now nothing to do -- same text, same geometry, same scene -- and the parse and rebuild are skipped with it. A changed structure still restarts the clock, as it must. The table form has no cheap comparison and is unchanged.
+- Added: **`SP close = 1`**, a closed spline. The curve wraps through one further span back to its first point with its tangents taken around the ring, so the seam is as smooth as any other point, and the ring takes a fill, a shadow and a `blur` like any other closed shape. Needs three points or more. Before it, a rounded blob had to be written as a `P`.
+- Fixed: **three unit tests had been added to a list the runner indexed by hand**, `All[0]` to `All[3]`, so they compiled, ran never, and passed by being absent. The runner iterates the list.
+
+Left as it is: **`sat` on a `T` still does nothing.** That one is not a missing detail -- a `T` is a
+TextMeshPro label whose outline (`ow`, `oc`) is a single uniform colour, so there is no gradient
+along it for `sat` to pick a point on.
+
 ## 0.11.73
 
 - Fixed: **`Tessellator.NodeSpans` could report vertex ranges that no longer existed.** A masked group that refines removes everything from its start onward and rebuilds it with a different vertex count, so spans already recorded for the nodes inside it described nothing. Those are now discarded; the group keeps its own span, which is recorded afterwards and is still correct. A tool mapping a click to the wrong node is worse than one mapping it to the enclosing group. `TagNodes` is off in game, so this affects editors and previews only.

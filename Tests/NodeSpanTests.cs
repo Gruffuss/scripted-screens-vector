@@ -1,4 +1,5 @@
 using UnityEngine;
+using SS = ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem;
 
 namespace ScriptedScreensVector.Tests;
 
@@ -14,7 +15,134 @@ internal static class NodeSpanTests
         ("ver", Version),
         ("path guard", PathGuard),
         ("scene text guard", TextGuard),
+        ("root style", RootStyle),
+        ("closed spline", ClosedSpline),
+        ("hits on every shape", ShapeHits),
     };
+
+    /// <summary>
+    /// A `style` on the scene root was simply never read, so the defaults an author wrote in
+    /// the one obvious place did nothing. `fit` is the exception and must stay one: on the root
+    /// it means how the viewBox meets the surface.
+    /// </summary>
+    private static void RootStyle(TestRun run)
+    {
+        // `size` on a `T`, because it is read unconditionally: `sw` is only read when the node
+        // has a stroke to apply it to, so an inherited `sw` on an unstroked shape proves nothing.
+        static float Size(VecNode node) => node.TextSize.Evaluate(new EvalContext());
+
+        // A bare paint attribute on the root, which is the only form scene text has: `style`
+        // is a map and the text format has no map syntax.
+        var bare = Parse("SCENE w=100 h=100 size=5\n T x=0 y=0 w=10 h=10 text=hi\n");
+        run.Check("root style: a bare paint attribute on the root is inherited",
+            Mathf.Approximately(Size(bare.Root[0]), 5f), $"size {Size(bare.Root[0])}");
+
+        var own = Parse("SCENE w=100 h=100 size=5\n T x=0 y=0 w=10 h=10 text=hi size=2\n");
+        run.Check("root style: a node's own value still wins",
+            Mathf.Approximately(Size(own.Root[0]), 2f), $"size {Size(own.Root[0])}");
+
+        // The table form's explicit `style` map, built as ScriptedScreens delivers it.
+        var table = SceneParser.Parse(new[]
+        {
+            Prop("scene", Str("root")),
+            Prop("w", Num(100f)), Prop("h", Num(100f)),
+            Prop("style", Map(Prop("size", Num(7f)))),
+            Prop("root", Arr(Map(Prop("op", Str("T")), Prop("text", Str("hi")),
+                Prop("x", Num(0f)), Prop("y", Num(0f)), Prop("w", Num(10f)), Prop("h", Num(10f))))),
+        })!;
+        run.Check("root style: an explicit `style` map on the root is inherited",
+            Mathf.Approximately(Size(table.Root[0]), 7f), $"size {Size(table.Root[0])}");
+
+        // `fit` is the exclusion: on the root it means how the viewBox meets the surface, and
+        // inherited it would reach both a `T` (shrink-to-fit) and an `IMG` (how a picture fills).
+        var fit = Parse("SCENE w=100 h=100 fit=shrink\n T x=0 y=0 w=10 h=10 text=hi\n");
+        run.Check("root style: the root's own `fit` is not inherited as a text default",
+            fit.Root[0].Fit == TextFit.None, $"fit {fit.Root[0].Fit}");
+
+        // And a text `fit` default on a `G` must still work, or the exclusion went too far.
+        var viaGroup = Parse("SCENE w=100 h=100\n G fit=shrink {\n T x=0 y=0 w=10 h=10 text=hi\n}\n");
+        run.Check("root style: a text `fit` default on a G still reaches its child",
+            viaGroup.Root[0].Children[0].Fit == TextFit.Shrink,
+            $"fit {viaGroup.Root[0].Children[0].Fit}");
+    }
+
+    /// <summary>
+    /// `SP close=1` wraps the curve through the last span back to the first point, which is
+    /// what lets it be filled. Open and closed must differ in exactly that span, and the ring
+    /// must not repeat its first point (a filler and a stroker each close it their own way).
+    /// </summary>
+    private static void ClosedSpline(TestRun run)
+    {
+        var square = new[]
+        {
+            new Vector2(0f, 0f), new Vector2(10f, 0f),
+            new Vector2(10f, 10f), new Vector2(0f, 10f),
+        };
+
+        var open = Stroke.Spline(square, 8);
+        var ring = Stroke.Spline(square, 8, closed: true);
+
+        run.Check("spline: closing adds exactly one span",
+            ring.Count == open.Count - 1 + 8, $"open {open.Count}, ring {ring.Count}");
+
+        run.Check("spline: the ring does not repeat its first point",
+            (ring[^1] - ring[0]).magnitude > 0.01f, $"{ring[0]} .. {ring[^1]}");
+
+        // The wrap is the point: the closed ring must enclose area the open curve does not.
+        run.Check("spline: the ring encloses the author's square",
+            Mathf.Abs(Triangulator.SignedArea(ring)) > 90f,
+            $"area {Mathf.Abs(Triangulator.SignedArea(ring)):0.0}");
+
+        // Tangents are taken around the ring, so no vertex sits where the open curve's
+        // clamped end tangents put it. Checking the corner nearest the seam is enough.
+        var seam = ring[0];
+        run.Check("spline: the seam is a curve point, not the raw corner",
+            (seam - square[0]).magnitude < 3f, $"{seam}");
+
+        // Two points cannot make a ring, and must not be mangled into one.
+        var line = Stroke.Spline(new[] { new Vector2(0f, 0f), new Vector2(10f, 0f) }, 4, closed: true);
+        run.Check("spline: two points stay an open curve",
+            (line[^1] - new Vector2(10f, 0f)).magnitude < 0.01f, $"{line[^1]}");
+    }
+
+    /// <summary>
+    /// A hit region was recorded only on the path a rectangle and an ellipse take, so `press`,
+    /// `xy` and `drag` on a polygon, a polyline, a spline or a `P` did nothing at all -- and
+    /// said nothing either, which is the part that makes it a bug rather than a limit.
+    /// </summary>
+    private static void ShapeHits(TestRun run)
+    {
+        foreach (var (src, what) in new[]
+                 {
+                     ("R id=k x=0 y=0 w=10 h=10 press=1\n", "a rectangle"),
+                     ("C id=k cx=5 cy=5 rx=5 press=1\n", "an ellipse"),
+                     ("Y id=k p=[0,0,10,0,10,10] press=1\n", "a polygon"),
+                     ("L id=k p=[0,0,10,0,10,10] press=1\n", "a polyline"),
+                     ("SP id=k p=[0,0,10,0,10,10,0,10] close=1 press=1\n", "a closed spline"),
+                     ("P id=k d=\"M0 0 L10 0 L10 10 Z\" press=1\n", "a path"),
+                 })
+        {
+            var hits = new System.Collections.Generic.List<HitRegion>();
+            Tessellator.HitsFound = hits;
+            try
+            {
+                Tessellator.Emit(new MeshBuilder(), Parse("SCENE w=100 h=100 fit=stretch\n" + src),
+                    new EvalContext(), new Rect(0f, 0f, 100f, 100f), 1f, true, new TessellationStats());
+            }
+            finally
+            {
+                Tessellator.HitsFound = null;
+            }
+
+            var mine = 0;
+            foreach (var hit in hits)
+                if (string.Equals(hit.Id, "k", System.StringComparison.Ordinal))
+                    mine++;
+
+            // Exactly one: a shape registered twice fires its press twice.
+            run.Check($"hits: {what} registers exactly one region", mine == 1, $"{mine} region(s)");
+        }
+    }
 
     /// <summary>
     /// Scene text must never fail to terminate. Inside `[ ]` the reader skips space and tab only,
@@ -115,6 +243,13 @@ internal static class NodeSpanTests
         run.Check("ver: an unknown variable falls back to the attribute default, not 0",
             unknown > 0.5f, $"{unknown}");
     }
+
+    // The table form by hand, for the cases scene text cannot express (it has no map syntax).
+    private static SS.UiProp Prop(string key, SS.UiValue value) => new() { Key = key, Value = value };
+    private static SS.UiValue Num(float n) => new() { Type = SS.UiValueType.Number, Number = n };
+    private static SS.UiValue Str(string s) => new() { Type = SS.UiValueType.String, String = s };
+    private static SS.UiValue Arr(params SS.UiValue[] items) => new() { Type = SS.UiValueType.Array, Array = items };
+    private static SS.UiValue Map(params SS.UiProp[] props) => new() { Type = SS.UiValueType.Map, Map = props };
 
     private static VecScene Parse(string src) =>
         SceneParser.Parse(SceneText.ToProps(src, "spans")!)!;

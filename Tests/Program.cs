@@ -171,10 +171,10 @@ internal static class Program
         GradientTests.BoundingBoxGradientTracksShape(run);
 
         Console.WriteLine();
-        NodeSpanTests.All[0].Item2(run);
-        NodeSpanTests.All[1].Item2(run);
-        NodeSpanTests.All[2].Item2(run);
-        NodeSpanTests.All[3].Item2(run);
+        // Every entry, not four of them: the list was indexed by hand, so three tests added
+        // later compiled, reported nothing, and were counted as passing by their absence.
+        foreach (var (_, test) in NodeSpanTests.All)
+            test(run);
         RequirementTests.ConicAngles(run);
         RequirementTests.Filters(run);
         RequirementTests.GroupMatrix(run);

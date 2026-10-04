@@ -197,7 +197,14 @@ internal static class Stroke
     /// which is what a chart or a gauge needle wants: the author supplies samples, not
     /// handles. Endpoints are duplicated so the curve starts and ends where it should.
     /// </remarks>
-    internal static List<Vector2> Spline(IReadOnlyList<Vector2> points, int segmentsPerSpan)
+    /// <summary>
+    /// A Catmull-Rom spline through the given points. <paramref name="closed"/> wraps it: the
+    /// curve runs through one more span, from the last point back to the first, and every
+    /// tangent is taken around the ring instead of being clamped at the ends. The returned
+    /// contour does not repeat the first point, so it is a closed polygon the filler and the
+    /// stroker can both loop on their own terms.
+    /// </summary>
+    internal static List<Vector2> Spline(IReadOnlyList<Vector2> points, int segmentsPerSpan, bool closed = false)
     {
         var output = new List<Vector2>();
         if (points.Count < 2)
@@ -208,12 +215,17 @@ internal static class Stroke
 
         var steps = Mathf.Clamp(segmentsPerSpan, 1, 32);
 
-        for (var i = 0; i < points.Count - 1; i++)
+        // A ring of two points has no area and the wrapped tangents collapse onto the same
+        // line, so it is left as the open curve it can actually be.
+        closed &= points.Count > 2;
+        var spans = closed ? points.Count : points.Count - 1;
+
+        for (var i = 0; i < spans; i++)
         {
-            var p0 = points[Mathf.Max(i - 1, 0)];
-            var p1 = points[i];
-            var p2 = points[i + 1];
-            var p3 = points[Mathf.Min(i + 2, points.Count - 1)];
+            var p0 = closed ? points[(i - 1 + points.Count) % points.Count] : points[Mathf.Max(i - 1, 0)];
+            var p1 = points[i % points.Count];
+            var p2 = closed ? points[(i + 1) % points.Count] : points[i + 1];
+            var p3 = closed ? points[(i + 2) % points.Count] : points[Mathf.Min(i + 2, points.Count - 1)];
 
             for (var s = 0; s < steps; s++)
             {
@@ -222,7 +234,9 @@ internal static class Stroke
             }
         }
 
-        output.Add(points[^1]);
+        if (!closed)
+            output.Add(points[^1]);
+
         return output;
     }
 

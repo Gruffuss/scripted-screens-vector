@@ -133,21 +133,6 @@ internal static class VectorElementPatch
         // `src` is the text form. It is converted to the same props the table form
         // arrives as and parsed by the same code, so the two cannot diverge.
         var source = ReadString(element.Props, "src");
-        var props = string.IsNullOrEmpty(source)
-            ? element.Props
-            : SceneText.ToProps(source!, ReadString(element.Props, "scene")) ?? element.Props;
-
-        var scene = SceneParser.Parse(props);
-
-        // A scene that will not parse must SAY so. Returning here left the console blank with
-        // nothing on screen and no entry in vector_stats -- only a log line, which is the last
-        // place an author looks. It now draws the same magenta border any other scene problem
-        // does, and the tool names the line that stopped it.
-        if (scene == null)
-        {
-            scene = new VecScene { Id = ReadString(element.Props, "scene") ?? "?" };
-            scene.Problem(SceneText.Rejected ?? "the scene could not be read");
-        }
 
         var graphic = EnsureSurface(host);
 
@@ -165,6 +150,36 @@ internal static class VectorElementPatch
 
             graphic.SetClickTarget(clicks, element.Id);
         }
+
+        // Re-sending the SAME text to the SAME graphic is nothing to do: identical text is
+        // identical geometry, so the scene already standing is this one. Installing it anyway
+        // reset `t` and dropped every `nodes` patch, so a script that re-upserts its structure
+        // each tick -- `set_props` re-upserts the whole element, which makes that an easy shape
+        // to write -- held every animation at t=0 for ever. Parse and rebuild are skipped with
+        // it, which is the larger half of the saving.
+        //
+        // Only the text form: the table form arrives as a tree with nothing cheap to compare,
+        // so it keeps installing on every upsert.
+        if (!string.IsNullOrEmpty(source)
+            && string.Equals(graphic.StructureText, source, StringComparison.Ordinal))
+            return;
+
+        var props = string.IsNullOrEmpty(source)
+            ? element.Props
+            : SceneText.ToProps(source!, ReadString(element.Props, "scene")) ?? element.Props;
+
+        var scene = SceneParser.Parse(props);
+
+        // A scene that will not parse must SAY so. Returning here left the console blank with
+        // nothing on screen and no entry in vector_stats -- only a log line, which is the last
+        // place an author looks. It now draws the same magenta border any other scene problem
+        // does, and the tool names the line that stopped it.
+        if (scene == null)
+        {
+            scene = new VecScene { Id = ReadString(element.Props, "scene") ?? "?" };
+            scene.Problem(SceneText.Rejected ?? "the scene could not be read");
+        }
+
         graphic.SetScene(scene);
         graphic.StructureText = source;
 

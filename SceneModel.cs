@@ -570,7 +570,11 @@ internal static class SceneParser
 
         ParseDefs(PropValue(props, "defs"), scene);
 
-        foreach (var child in ParseNodes(root.Value, scene))
+        // Defaults on the scene root, inherited by everything in it exactly as a `G`'s are.
+        // `fit` is excluded: on the root it means how the viewBox meets the surface, and on a
+        // `T` it means shrink-to-fit, so collecting it here would give every label an autofit
+        // it never asked for. Put a text `fit` default on a `G`.
+        foreach (var child in ParseNodes(root.Value, scene, ParseStyle(props, null, "fit")))
             scene.Root.Add(child);
 
         foreach (var node in scene.Root)
@@ -1022,7 +1026,7 @@ internal static class SceneParser
         "size", "font", "weight", "cspace", "kern", "align", "valign", "fit", "min_size",
     };
 
-    private static SS.UiProp[]? ParseStyle(SS.UiProp[] map, SS.UiProp[]? inherited)
+    private static SS.UiProp[]? ParseStyle(SS.UiProp[] map, SS.UiProp[]? inherited, string? skip = null)
     {
         var style = PropValue(map, "style");
         var declared = style?.Type == SS.UiValueType.Map ? style.Value.Map : null;
@@ -1036,6 +1040,9 @@ internal static class SceneParser
                 continue;
 
             var key = prop.Key;
+
+            if (skip != null && string.Equals(key, skip, StringComparison.Ordinal))
+                continue;
 
             // `s` is stroke colour on a shape and SCALE on a group, so it cannot be
             // inherited from a bare attribute without breaking every scaled group that
@@ -1071,7 +1078,7 @@ internal static class SceneParser
     {
         "op", "id", "c", "style", "click", "press", "xy", "hoverev", "drag", "drop", "blur", "lod",
         "x", "y", "w", "h", "cx", "cy", "rx", "ry", "x1", "y1", "x2", "y2", "y2",
-        "n", "p", "d", "seg", "t", "r", "s", "s_", "a", "o", "clip", "ref", "params", "ch",
+        "n", "p", "d", "seg", "close", "t", "r", "s", "s_", "a", "o", "clip", "ref", "params", "ch",
         "f", "fo", "fo2", "fr", "fea", "fea_edge", "sh",
         "sw", "so", "cap", "join", "ml", "dash", "dofs", "sd", "sdo",
         "grad", "at", "units", "spread", "stops", "fx", "fy",
@@ -1261,6 +1268,12 @@ internal static class SceneParser
                 node.Op = VecOp.Spline;
                 node.Points = Numbers(map, "p");
                 node.RepeatCount = Mathf.Clamp(Mathf.RoundToInt(PropNumber(map, "seg", 8f)), 1, 32);
+
+                // `close` is to `SP` what `Y` is to `L`: the curve wraps through the last span
+                // back to the first point, and the ring it makes can then be filled, shadowed
+                // and blurred like any other closed shape. Without it an `SP` could only ever
+                // be a stroked open curve, so a rounded blob had to be written as a `P`.
+                node.Closed = PropNumber(map, "close", 0f) > 0.5f;
                 break;
 
             case "LS":

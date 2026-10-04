@@ -458,10 +458,12 @@ ignored, so annotations are harmless.
 
 Applied scale → rotate → translate, about `a`. Nests without limit.
 
-**`blur` blurs flat fills only, and only on `R` and `C`.** Each flat fill under the group on a
-rectangle or an ellipse is drawn as its own blurred silhouette, the same geometry a shadow uses, which is
+**`blur` blurs flat fills, on every closed shape.** Each flat fill under the group is drawn as
+its own blurred silhouette, the same geometry a shadow uses, which is
 exactly a Gaussian blur of that one shape. Strokes, gradient fills, pictures and text are drawn
-sharp. Two overlapping shapes are each blurred on their own and then composited, which a browser
+sharp. A `P` blurs its outer contour, so a blurred path with holes blurs as though it had none —
+the same approximation its shadow already makes. Until 0.11.74 only `R` and `C` blurred and
+every other shape came out sharp. Two overlapping shapes are each blurred on their own and then composited, which a browser
 does the other way round; for soft glows, blobs and out-of-focus backdrops the difference does
 not show. Nested blurs combine as Gaussians do, `sqrt(a² + b²)`.
 
@@ -925,8 +927,15 @@ reach for `T` is what a label cannot do at all, not the budget.
 |-----|---------|
 | `p` | flat point array `{x, y, x, y, ...}` |
 | `seg` | segments per span |
+| `close` | `1` wraps the curve into a closed ring, which can then be filled |
 
 Catmull-Rom, so the curve passes **through** its points rather than being pulled toward them.
+
+**`close = 1`** is to `SP` what `Y` is to `L`: the curve runs through one further span, from the
+last point back to the first, and every tangent is taken around the ring, so the seam is as
+smooth as any other point on the curve. A closed spline takes a fill, a shadow and a `blur` like
+any other closed shape. Needs at least three points — two cannot enclose anything, and stay an
+open curve. Since 0.11.74; before it, a rounded blob had to be written as a `P`.
 
 ---
 
@@ -1128,6 +1137,11 @@ end
 
 Outside a repeat it is the bare id, unchanged.
 
+Every shape can be clicked: `R`, `C`, `L`, `Y`, `SP`, `P`, `IMG` and `T`. Until 0.11.74 only
+`R`, `C`, `IMG` and `T` registered a hit area, so `press`, `xy`, `drag` and plain clicks on a
+polyline, a polygon, a spline or a path did nothing at all and reported nothing. A `P` is
+clickable over its outer contour, holes included.
+
 **`press = 1` reports holding as well as clicking**, for a press-and-hold button or a
 hold-to-act control. The node is clickable as with `click = 1`, and the same `on_click` also
 receives:
@@ -1214,8 +1228,8 @@ kept a full-strength halo. The shadow colour's own alpha is separate and unaffec
   sh = { { 0, 3, 8, 0, "#0000001f" }, { 0, 3, 1, 0, "#0000000a" } } }
 ```
 
-Available on **`R`, `C`, a filled closed `Y`, a closed `P`, and `T`.** `SP` is stroke-only: it
-is never marked closed, so it takes no fill and no shadow. Everything but
+Available on **`R`, `C`, a closed `Y`, a closed `P`, an `SP close = 1`, and `T`**: any shape the
+renderer knows the closed outline of. Everything but
 text is drawn as geometry — no offscreen pass, no shader — by stacking contours from `-3σ` to
 `+3σ` carrying the closed-form coverage of a blurred edge, `0.5·erfc(d / (σ√2))`. Ring count
 follows the blur's on-screen size.
@@ -1279,12 +1293,27 @@ shadow composites at the value the design specifies.
 
 ### Inherited defaults — `style`
 
-A `style` map on a `G` supplies defaults for descendants that do not set the key themselves.
-**A `style` on the scene root is not read** — put the defaults on an outermost `G` instead:
+A `style` map on a `G` supplies defaults for descendants that do not set the key themselves:
 
 ```lua
 { op = "G", style = { f = "#5FD9A8", fea = 0, sw = 1 }, c = { ... } }
 ```
+
+**Since 0.11.74 the scene root takes one too**, in either form, and it reaches every node in the
+scene:
+
+```lua
+props = { scene = "panel", w = 200, h = 240, style = { f = "#5FD9A8", fea = 0 }, root = { ... } }
+```
+
+```
+SCENE w=200 h=240 f=#5FD9A8 fea=0
+```
+
+`fit` is the one key the root does not pass down: there it says how the viewBox meets the
+surface, while on a `T` it means shrink-to-fit and on an `IMG` how the picture fills its box.
+Put a text or image `fit` default on a `G`. Before 0.11.74 a root `style` was read by nothing at
+all, silently.
 
 Anything a node states itself wins, which is what makes it a default rather than an override.
 Defaults nest: a child group's `style` is merged onto what it inherited.
@@ -1533,7 +1562,7 @@ Any numeric attribute may be a string beginning with `=`.
 
 | Name | Meaning |
 |------|---------|
-| `t` | seconds since the scene first appeared |
+| `t` | seconds since the scene first appeared. A new structure restarts it; re-sending the **same** `src` does not (0.11.74) — see below |
 | `i` | current repeat index, `0` outside a repeat |
 | `i1`, `i2`, … | enclosing repeat indices, outward |
 | `n` | current repeat count |
