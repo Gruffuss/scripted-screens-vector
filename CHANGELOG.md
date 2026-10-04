@@ -2,6 +2,11 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.71
+
+- Fixed: **a repeating fault grew the problem list without bound.** `Problems` is never cleared, and four call sites appended to it directly instead of going through `Problem()`, bypassing its dedupe and its 16-entry cap. The worst was in the tessellator: an undeclared gradient id appended a problem and logged a warning on **every rebuild**, so an animated scene at 60 Hz added sixty entries a second. All four now go through `Problem()`, which also stops logging a fault it has already reported -- repeating one now costs a list scan and nothing else.
+- Docs: `REFERENCE.md` said a fully transparent `T` is **still placed, deliberately**. It is not: a label whose final alpha is at or below `0.002` is skipped, because TextMeshPro work is main-thread work and the carry-both-states-and-fade-one idiom would otherwise pay for both every frame. Skipping is safe because a pooled label is reassigned every property when taken. Do not rely on an invisible label holding a pool slot.
+
 ## 0.11.70
 
 - Fixed: **a malformed `d` could hang the renderer.** Two inputs consumed nothing per pass and so looped for ever: a number after `Z`, which re-enters the close command through the repeated-command rule while reading no input, and any character `Number()` cannot read -- a stray `)`, `;` or `:` -- which it reports as 0 without advancing. Exactly what a half-typed path looks like. The parser now requires every pass to consume something and otherwise stops and reports where, as SVG specifies for a malformed path. Reported by a reader of the source; confirmed by running the unguarded parser with a timeout and watching it not return.

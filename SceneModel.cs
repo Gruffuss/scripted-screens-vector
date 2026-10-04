@@ -514,11 +514,21 @@ internal sealed class VecScene
     /// </remarks>
     internal readonly List<string?> TextCache = new();
 
+    /// <summary>
+    /// Records a fault once. Safe to call from the tessellator, which runs every rebuild.
+    /// </summary>
+    /// <remarks>
+    /// The list is never cleared, so a caller that fires per rebuild -- an undeclared gradient
+    /// id, say -- used to append on every frame: unbounded growth, and a log line each time.
+    /// Both the entry and the warning are now dropped once the message is already known, so
+    /// repeating a fault costs a list scan and nothing else.
+    /// </remarks>
     internal void Problem(string message)
     {
-        if (Problems.Count < 16 && !Problems.Contains(message))
-            Problems.Add(message);
+        if (Problems.Count >= 16 || Problems.Contains(message))
+            return;
 
+        Problems.Add(message);
         ScriptedScreensVectorPlugin.Log?.LogWarning($"scene \"{Id}\": {message}");
     }
 }
@@ -625,7 +635,7 @@ internal static class SceneParser
 
             if (!scene.Identified.TryGetValue(entry.Key, out var target))
             {
-                scene.Problems.Add($"patch for unknown node id \"{entry.Key}\"");
+                scene.Problem($"patch for unknown node id \"{entry.Key}\"");
                 continue;
             }
 
@@ -1111,7 +1121,7 @@ internal static class SceneParser
                 var reference = PropString(map, "ref");
                 if (string.IsNullOrEmpty(reference) || !scene.Symbols.TryGetValue(reference!, out var symbol))
                 {
-                    scene.Problems.Add($"unknown symbol \"{reference}\"");
+                    scene.Problem($"unknown symbol \"{reference}\"");
                     break;
                 }
 

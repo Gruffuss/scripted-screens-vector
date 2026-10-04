@@ -872,9 +872,12 @@ This is what lets a row fade at the edge of a scroll container:
 ```
 
 Objects are pooled by index and reused across rebuilds; surplus labels are disabled rather
-than destroyed, so a scene alternating between two pages does not churn objects. **A fully
-transparent `T` is still placed**, deliberately: the pool is keyed by placement order, so
-skipping one would hand every later label the wrong text.
+than destroyed, so a scene alternating between two pages does not churn objects. **A `T` whose
+final alpha is at or below `0.002` is not placed at all** — TextMeshPro work happens on the main
+thread, and the common idiom of carrying two states and fading one out would otherwise pay for
+both every frame. Skipping is safe because a pooled label is reassigned every property when it is
+taken, so a shifted placement inherits nothing from whatever used that slot before. Do not rely on
+an invisible label holding its place in the pool.
 
 **One node for a whole list.** `text = "$rows[i]"` inside a repeat takes its string from a
 data array, so thirty rows are one `T` and one array rather than thirty nodes:

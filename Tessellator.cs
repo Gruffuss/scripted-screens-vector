@@ -3843,8 +3843,7 @@ internal static class Tessellator
                 return new Paint(gradient.Sample(at.Evaluate(context)), null, opacity);
             }
 
-            scene.Problems.Add($"unknown gradient \"{name}\"");
-            ScriptedScreensVectorPlugin.Log?.LogWarning($"unknown gradient \"{name}\"");
+            scene.Problem($"unknown gradient \"{name}\"");
 
             // Magenta, for the same reason an unresolved data colour is magenta a few lines
             // below: a dangling @id is a fault, and white is a colour somebody meant to use.

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Collections.Generic;
@@ -146,7 +146,7 @@ internal static class VectorElementPatch
         if (scene == null)
         {
             scene = new VecScene { Id = ReadString(element.Props, "scene") ?? "?" };
-            scene.Problems.Add(SceneText.Rejected ?? "the scene could not be read");
+            scene.Problem(SceneText.Rejected ?? "the scene could not be read");
         }
 
         var graphic = EnsureSurface(host);
