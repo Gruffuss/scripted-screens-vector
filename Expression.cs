@@ -819,6 +819,9 @@ internal sealed class Expression
             return Match('^') ? Binary(Kind.Power, left, ParseUnary()) : left;
         }
 
+        private const int MaxDepth = 64;
+        private int _depth;
+
         private Expression ParsePrimary()
         {
             SkipSpace();
@@ -828,12 +831,29 @@ internal sealed class Expression
 
             if (Match('('))
             {
-                var inner = ParseExpression();
-                SkipSpace();
-                if (!Match(')'))
-                    throw new FormatException("expected ')'");
+                // Each '(' is a stack frame through ParseExpression. A stack overflow cannot
+                // be caught in .NET -- it ends the process, not the parse -- so depth is
+                // capped well above anything writable by hand and reported as an ordinary
+                // malformed expression.
+                if (++_depth > MaxDepth)
+                {
+                    _depth--;
+                    throw new FormatException($"expressions may not nest more than {MaxDepth} deep");
+                }
 
-                return inner;
+                try
+                {
+                    var inner = ParseExpression();
+                    SkipSpace();
+                    if (!Match(')'))
+                        throw new FormatException("expected ')'");
+
+                    return inner;
+                }
+                finally
+                {
+                    _depth--;
+                }
             }
 
             if (Match('$'))

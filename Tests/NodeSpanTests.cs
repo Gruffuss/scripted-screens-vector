@@ -19,7 +19,80 @@ internal static class NodeSpanTests
         ("closed spline", ClosedSpline),
         ("hits on every shape", ShapeHits),
         ("v on a leaf", LeafVisibility),
+        ("recursion caps", RecursionCaps),
     };
+
+    /// <summary>
+    /// Three inputs that recursed without a limit. Unlike the parser hangs, these end the
+    /// PROCESS: a .NET stack overflow cannot be caught, so in game it takes Stationeers down
+    /// rather than stalling a frame. A symbol that uses itself is an ordinary thing to write
+    /// by mistake, which is what makes it worth a guard rather than a note.
+    /// </summary>
+    /// <remarks>
+    /// Like the other guards here, every case KILLS an unguarded build instead of failing, so
+    /// this cannot be watched to fail inside the suite. It was confirmed out of process against
+    /// the unguarded parser: "Stack overflow.", exit 127, for the symbol cases.
+    /// </remarks>
+    private static void RecursionCaps(TestRun run)
+    {
+        // A symbol that uses itself, and two that use each other. Declared in `defs`, which
+        // is the only place `SYM` lives -- the text format has no syntax for it, so a
+        // text-form version of this test reports "op SYM is not supported" and proves nothing.
+        static SS.UiValue Use(string reference) => Map(Prop("op", Str("USE")), Prop("ref", Str(reference)));
+
+        static VecScene Build(SS.UiValue defs, SS.UiValue root) => SceneParser.Parse(new[]
+        {
+            Prop("scene", Str("cycles")), Prop("w", Num(100f)), Prop("h", Num(100f)),
+            Prop("defs", defs), Prop("root", root),
+        })!;
+
+        var self = Build(Arr(Map(Prop("op", Str("SYM")), Prop("id", Str("a")), Prop("c", Arr(Use("a"))))),
+            Arr(Use("a")));
+        run.Check("recursion: a symbol that uses itself is refused, not fatal",
+            self.Problems.Count == 1 && self.Problems[0].Contains("uses itself"),
+            self.Problems.Count > 0 ? self.Problems[0] : "(no problem reported)");
+
+        var cycle = Build(Arr(
+                Map(Prop("op", Str("SYM")), Prop("id", Str("a")), Prop("c", Arr(Use("b")))),
+                Map(Prop("op", Str("SYM")), Prop("id", Str("b")), Prop("c", Arr(Use("a"))))),
+            Arr(Use("a")));
+        run.Check("recursion: a cycle of symbols is refused and names the chain",
+            cycle.Problems.Count == 1 && cycle.Problems[0].Contains("a -> b -> a"),
+            cycle.Problems.Count > 0 ? cycle.Problems[0] : "(no problem reported)");
+
+        // The guard must clear between uses, or the same symbol twice is wrongly refused.
+        var body = Arr(Map(Prop("op", Str("IMG")), Prop("x", Num(0f)), Prop("y", Num(0f)),
+            Prop("w", Num(10f)), Prop("h", Num(10f)), Prop("src", Str("test:span"))));
+        ImageCache.Loaded["test:span"] = (8, 8, null);
+
+        var twice = Build(Arr(Map(Prop("op", Str("SYM")), Prop("id", Str("a")), Prop("c", body))),
+            Arr(Use("a"), Use("a")));
+        run.Check("recursion: the same symbol used twice is not a cycle",
+            twice.Problems.Count == 0 && twice.Root.Count == 2,
+            $"{twice.Root.Count} root node(s), {twice.Problems.Count} problem(s)");
+
+        // Arrays nested past the cap, which recursed through ReadValue.
+        var deep = SceneText.ToProps("SCENE w=10 h=10\nR p=" + new string('[', 2000) + "\n", "deep");
+        run.Check("recursion: arrays nested too deep are refused",
+            deep == null && SceneText.Rejected != null && SceneText.Rejected.Contains("nest"),
+            SceneText.Rejected ?? "(accepted)");
+
+        // A normally nested array must still parse, or the cap is too tight.
+        run.Check("recursion: an ordinary array still parses",
+            SceneText.ToProps("SCENE w=10 h=10\nR p=[1,2,3,4]\n", "deep") != null,
+            SceneText.Rejected ?? "ok");
+
+        // And the expression parser's own parenthesis depth.
+        var nested = Expression.Parse("=" + new string('(', 500) + "1", 42f);
+        run.Check("recursion: an over-nested expression falls back to its default",
+            Mathf.Approximately(nested.Evaluate(new EvalContext()), 42f),
+            $"{nested.Evaluate(new EvalContext())}");
+
+        var fine = Expression.Parse("=((((1+2))))", 0f);
+        run.Check("recursion: ordinary parentheses still evaluate",
+            Mathf.Approximately(fine.Evaluate(new EvalContext()), 3f),
+            $"{fine.Evaluate(new EvalContext())}");
+    }
 
     /// <summary>
     /// `v = 0` was checked in the group case only, so on a shape or a label it parsed, was

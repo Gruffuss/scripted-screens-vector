@@ -272,10 +272,21 @@ internal static class SceneText
         }
     }
 
-    private static SS.UiValue ReadValue(Reader r)
+    /// <summary>
+    /// How deep `[` may nest. Each level is a stack frame in ReadValue, and a stack overflow
+    /// is not catchable in .NET -- it ends the process rather than the parse, so a scene of
+    /// `[[[[[[...` would take the game down with it. Far past anything an author writes: the
+    /// deepest array in any example here is two.
+    /// </summary>
+    private const int MaxArrayDepth = 32;
+
+    private static SS.UiValue ReadValue(Reader r, int depth = 0)
     {
         if (r.At < r.Text.Length && r.Text[r.At] == '[')
         {
+            if (depth >= MaxArrayDepth)
+                throw Fail(r, $"arrays may not nest more than {MaxArrayDepth} deep");
+
             r.At++;
             var items = new List<SS.UiValue>();
 
@@ -307,7 +318,7 @@ internal static class SceneText
                 // letting a line break through would make a missing `]` swallow the rest of the
                 // scene instead of being reported here.
                 var before = r.At;
-                items.Add(ReadValue(r));
+                items.Add(ReadValue(r, depth + 1));
 
                 if (r.At == before)
                     throw Fail(r, "an array must be closed with ] on the same line");

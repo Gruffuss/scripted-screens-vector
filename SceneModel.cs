@@ -545,8 +545,21 @@ internal static class SceneParser
 {
     private const int MaxRepeat = 20000;
 
+    /// <summary>
+    /// The symbols currently being expanded, innermost last, so a `USE` that reaches one of
+    /// them is a cycle. Parsing is main-thread only, but this is `[ThreadStatic]` like every
+    /// other mutable static here so a stray parse elsewhere cannot corrupt it.
+    /// </summary>
+    [System.ThreadStatic] private static List<string>? _expandingSymbols;
+
+    private static List<string> _expanding => _expandingSymbols ??= new List<string>();
+
     internal static VecScene? Parse(SS.UiProp[] props)
     {
+        // A scene that threw or broke out mid-expansion must not leave a symbol marked as
+        // being expanded, or the next parse reports a cycle that is not there.
+        _expanding.Clear();
+
         var root = PropValue(props, "root");
         if (root == null || root.Value.Type != SS.UiValueType.Array)
             return null;
@@ -1126,6 +1139,20 @@ internal static class SceneParser
                 node.ClipRef = PropString(map, "clip");
 
                 var reference = PropString(map, "ref");
+
+                // A symbol that reaches itself -- directly, or round a cycle of symbols --
+                // expanded for ever here. That is not a hang: it is a STACK OVERFLOW, which
+                // .NET cannot catch, so it would take the game's process down rather than
+                // stall a frame. `SYM id=a { USE ref=a }` is an ordinary thing to write by
+                // mistake, so this is reported like any other scene fault and the branch is
+                // simply not expanded.
+                if (!string.IsNullOrEmpty(reference) && _expanding.Contains(reference!))
+                {
+                    scene.Problem($"symbol \"{reference}\" uses itself: "
+                                  + string.Join(" -> ", _expanding) + $" -> {reference}");
+                    break;
+                }
+
                 if (string.IsNullOrEmpty(reference) || !scene.Symbols.TryGetValue(reference!, out var symbol))
                 {
                     scene.Problem($"unknown symbol \"{reference}\"");
@@ -1143,8 +1170,16 @@ internal static class SceneParser
                     Array = Substitute(symbol.Body, args),
                 };
 
-                foreach (var child in ParseNodes(instantiated, scene, inherited))
-                    node.Children.Add(child);
+                _expanding.Add(reference!);
+                try
+                {
+                    foreach (var child in ParseNodes(instantiated, scene, inherited))
+                        node.Children.Add(child);
+                }
+                finally
+                {
+                    _expanding.Remove(reference!);
+                }
 
                 break;
             }

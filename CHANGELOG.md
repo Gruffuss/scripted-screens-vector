@@ -2,6 +2,27 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.77
+
+Three inputs that ended the PROCESS rather than the parse. A .NET stack overflow cannot be
+caught, so where the earlier parser guards turned a hang into a message, these turned a crash
+of the whole game into one. Confirmed out of process against the unguarded parser: "Stack
+overflow.", exit 127, nothing catchable and nothing logged.
+
+- Fixed: **a symbol that uses itself, or a cycle of symbols, crashed the game.** `SYM` expansion
+  recursed with nothing to stop it, so a `SYM` whose body contains a `USE` of itself expanded for
+  ever. It is now reported like any other scene fault, naming the chain (`a -> b -> a`), and that
+  branch is simply not expanded. The same symbol used twice side by side is not a cycle and still
+  works. This is the one of the three a person writes by accident.
+- Fixed: **arrays nested past 32 deep** in scene text, which recursed through the value reader.
+  Refused with a message; the deepest array in any example here is two.
+- Fixed: **expressions nested past 64 parentheses**, which recursed through the expression
+  parser. Refused as a malformed expression, so the attribute falls back to its default as it
+  does for any other.
+
+Reported by the ScriptedScreens console builder, whose own validator already rejected all three
+before generating a scene; these close them for scripts it did not write.
+
 ## 0.11.76
 
 Both of these were found by one test page: a label containing `{=255:%x}` blanked a console.
