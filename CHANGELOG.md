@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.68
+
+- Docs: `REFERENCE.md` now lists **all 23 named colours with their values**, read from the engine binary and derived twice by different routes. Every value is the W3C one; `darkblue` is `#00008B`. Two traps worth knowing: `green` is `#008000`, not `#00FF00` (that is `lime`), and `aqua`/`cyan` and `fuchsia`/`magenta` are each the same colour under two names.
+
 ## 0.11.67
 
 - Docs: corrected the colour-name table. **`transparent` is one of Unity's own 23 names**, not this mod's addition -- only `none` is ours. `InGameTest-colourstrict.lua` could not have shown this, because the data path short-circuits both names before Unity's parser sees them; the engine binary settles it. The full list is now in `REFERENCE.md`, and it confirms from a second source that `gray` is absent and only `grey` exists.

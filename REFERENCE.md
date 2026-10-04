@@ -301,9 +301,20 @@ than taken from Unity's documentation:
 `gray` is the one that catches people. It is a legitimate CSS colour and not a Unity one, so a
 page written in American English gets a magenta shape with no other clue.
 
-Unity's table holds 23 names, read from the engine binary: `yellow purple fuchsia lime silver
-white black grey brown orange green maroon navy olive aqua teal red blue cyan lightblue darkblue
-transparent magenta`. Anything outside that list, `none` excepted, is not a colour.
+Unity's table holds exactly these 23 names and no others, read from the engine binary. Anything
+outside the list, `none` excepted, is not a colour.
+
+| | | | |
+|---|---|---|---|
+| `red` `#FF0000` | `cyan` `#00FFFF` | `blue` `#0000FF` | `darkblue` `#00008B` |
+| `lightblue` `#ADD8E6` | `purple` `#800080` | `yellow` `#FFFF00` | `lime` `#00FF00` |
+| `fuchsia` `#FF00FF` | `white` `#FFFFFF` | `silver` `#C0C0C0` | `grey` `#808080` |
+| `black` `#000000` | `orange` `#FFA500` | `brown` `#A52A2A` | `maroon` `#800000` |
+| `green` `#008000` | `olive` `#808000` | `navy` `#000080` | `teal` `#008080` |
+| `aqua` `#00FFFF` | `magenta` `#FF00FF` | `transparent` fully clear | |
+
+Every value is the W3C one. `aqua` and `cyan` are the same colour, as are `fuchsia` and
+`magenta`. Note `green` is `#008000`, not `#00FF00` — that is `lime`.
 
 ### Dark colours lose a level or two
 
