@@ -2,6 +2,12 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.60
+
+- **Changed: gradient stops interpolate in premultiplied alpha, as CSS does.** A fully transparent stop now contributes its alpha and none of its colour, so `#5FD9A8FF → #00000000` fades exactly like `#5FD9A8FF → #5FD9A800` instead of greying through the middle. This is a visible change to any scene that deliberately ramped to transparent black: those fades keep their hue now and will look lighter in the middle. The workaround the docs used to prescribe -- fade to the same colour -- is no longer needed and has been removed from `README.md` and `QUICKSTART.md`.
+- Fixed: **`inset` written as a Lua boolean in a shadow's 6th field was silently ignored.** ScriptedScreens' `UiValue.FromBool` sets its `Bool` field and leaves `Number` at 0, and the test read `Number`, so only the string `"inset"` or a number ever worked.
+- Fixed: a `weight` of `"700"` was parsed with the current culture rather than the invariant one. Author text is not culture text.
+
 ## 0.11.59
 
 - Added: **`kern` on a `T` node.** `kern=0` turns pair kerning off for that label; absent or `1` leaves it on, which is how a browser behaves -- a page opts out, never in. It is inheritable through a group's `style` like the other text keys. Only a font carrying kerning pairs is affected, so a label on the game's own font renders the same either way.

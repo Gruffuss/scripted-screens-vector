@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 
 namespace ScriptedScreensVector.Tests;
@@ -246,15 +246,17 @@ internal static class GradientTests
     }
 
     /// <summary>
-    /// Alpha interpolates like any other channel, and the RGB you fade *to* matters.
+    /// A stop you fade TO contributes no colour once it is transparent, as in CSS.
     /// </summary>
     /// <remarks>
-    /// UGUI composites with straight (non-premultiplied) alpha, so interpolating between two
-    /// stops blends RGB and A independently. Fading white to transparent *black* therefore
-    /// passes through grey at half alpha — the classic muddy midtone. Fading white to
-    /// transparent *white* keeps the hue and only drops alpha, which is almost always what
-    /// is wanted. Both are asserted here so the difference is a documented fact rather than
-    /// a surprise.
+    /// Stops interpolate in PREMULTIPLIED alpha, as CSS does, so a fully transparent stop
+    /// contributes its alpha and none of its colour. Fading white to transparent black and
+    /// fading white to transparent white therefore give the same thing: white at half alpha.
+    ///
+    /// Before 0.11.60 the mix was a straight lerp and the first case passed through grey -- the
+    /// classic muddy midtone -- which is why the docs used to tell authors to fade to the same
+    /// colour instead. This test asserted that old behaviour; it failing is what proved the
+    /// change had landed.
     /// </remarks>
     internal static void AlphaInterpolation(TestRun run)
     {
@@ -267,19 +269,19 @@ internal static class GradientTests
         // Alpha halves in both cases.
         var alphaOk = Math.Abs(cleanMid.a - 0.5f) < 0.01f && Math.Abs(muddyMid.a - 0.5f) < 0.01f;
 
-        // RGB holds in the first and collapses to grey in the second.
+        // RGB holds in BOTH: the transparent stop's own colour is weightless.
         var cleanRgbOk = cleanMid.r > 0.99f && cleanMid.g > 0.99f && cleanMid.b > 0.99f;
-        var muddyRgbOk = Math.Abs(muddyMid.r - 0.5f) < 0.01f;
+        var muddyRgbOk = muddyMid.r > 0.99f && muddyMid.g > 0.99f && muddyMid.b > 0.99f;
 
         if (alphaOk && cleanRgbOk && muddyRgbOk)
         {
-            run.Pass($"gradient: alpha interpolates (clean mid {Describe(cleanMid)}@{cleanMid.a:F2}, " +
-                     $"muddy mid {Describe(muddyMid)}@{muddyMid.a:F2})");
+            run.Pass($"gradient: a transparent stop adds no colour (to-white {Describe(cleanMid)}@{cleanMid.a:F2}, " +
+                     $"to-black {Describe(muddyMid)}@{muddyMid.a:F2})");
         }
         else
         {
-            run.Fail($"gradient: alpha wrong (clean {Describe(cleanMid)}@{cleanMid.a:F2}, " +
-                     $"muddy {Describe(muddyMid)}@{muddyMid.a:F2})");
+            run.Fail($"gradient: a transparent stop leaked colour (to-white {Describe(cleanMid)}@{cleanMid.a:F2}, " +
+                     $"to-black {Describe(muddyMid)}@{muddyMid.a:F2})");
         }
     }
 

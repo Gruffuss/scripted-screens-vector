@@ -1,4 +1,4 @@
-# ScriptedScreens Vector: brief for AI editors
+﻿# ScriptedScreens Vector: brief for AI editors
 
 Read this before writing or changing a `vector` element. It is the minimum needed to produce a
 scene that works first time; every other resource is linked at the bottom by topic.
@@ -142,7 +142,8 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
 - [ ] `src` strings use `[==[ ... ]==]`, never `[[ ... ]]`.
 - [ ] Unquoted `src` values contain no spaces (`y==64-$f*52`, or quote the whole value).
 - [ ] Gradients on shapes that move or differ in size use `units=bbox`.
-- [ ] Fades go to the **same colour at alpha 0**, not to black or `#00000000`.
+- [ ] Fades may go to `#00000000` or `transparent` freely: stops interpolate premultiplied, as
+      in CSS, so a transparent stop contributes alpha and no colour.
 - [ ] Repeated copies vary through `i` (and `hash(i)` for randomness); spread fewer than ~40
       with `(i + hash(i)) / n`, and seed per block with `hash(i + seed)`.
 - [ ] Sensor data is clamped before it sets a size or position.

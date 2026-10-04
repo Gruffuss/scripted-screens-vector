@@ -1,4 +1,4 @@
-// ---------------------------------------------------------------------------
+﻿// ---------------------------------------------------------------------------
 // ScriptedScreens value types, stubbed so SceneText can be tested headless.
 //
 // Field-for-field with the real ones (verified by compiling a construction
@@ -15,6 +15,10 @@ namespace ScriptedScreens.ScriptableUi
         {
             internal UiValueType Type;
             internal float Number;
+
+            // The real UiValue carries a bool separately: FromBool sets this and leaves Number
+            // at 0, which is why testing Number for a Lua boolean never fired.
+            internal bool Bool;
             internal string? String;
             internal UiValue[]? Array;
             internal UiProp[]? Map;

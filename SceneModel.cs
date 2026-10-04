@@ -1343,7 +1343,9 @@ internal static class SceneParser
                 var weight = PropString(map, "weight");
                 node.Bold = weight != null
                             && (weight.Equals("bold", StringComparison.OrdinalIgnoreCase)
-                                || (float.TryParse(weight, out var numeric) && numeric >= 600f));
+                                || (float.TryParse(weight, System.Globalization.NumberStyles.Float,
+                                        System.Globalization.CultureInfo.InvariantCulture, out var numeric)
+                                    && numeric >= 600f));
 
                 var firstLine = PropString(map, "fl");
                 if (!string.IsNullOrEmpty(firstLine))
@@ -2243,7 +2245,10 @@ internal static class SceneParser
         var inset = parts.Length > 5
                     && ((parts[5].Type == SS.UiValueType.String && string.Equals(parts[5].String, "inset", StringComparison.OrdinalIgnoreCase))
                         || (parts[5].Type == SS.UiValueType.Number && parts[5].Number > 0.5f)
-                        || (parts[5].Type == SS.UiValueType.Bool && parts[5].Number > 0.5f));
+                        // ScriptedScreens' UiValue.FromBool sets Bool and leaves Number at 0,
+                        // so testing Number here could never fire: `inset = true` written from
+                        // Lua was silently ignored for as long as this has existed.
+                        || (parts[5].Type == SS.UiValueType.Bool && parts[5].Bool));
 
         return new VecShadow(Num(parts[0]), Num(parts[1]), Num(parts[2]), Num(parts[3]), colour, inset);
     }

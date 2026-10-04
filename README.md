@@ -1,4 +1,4 @@
-# ScriptedScreens Vector
+﻿# ScriptedScreens Vector
 
 A `vector` element type for ScriptedScreens surfaces. It draws resolution-independent
 artwork as a real mesh instead of a pixel canvas, and **animates it on the client** from
@@ -698,8 +698,9 @@ to make.
 Use **`units = "bbox"`** and the problem disappears — the ramp spans whatever shape references
 it, `0..1`, and follows that shape if it moves or resizes.
 
-**Fade to the same colour, not to black.** Blending is straight (non-premultiplied), so
-`#5FD9A8FF → #00000000` greys out through the middle. Use `#5FD9A8FF → #5FD9A800`.
+**A transparent stop adds no colour, as in CSS.** Gradient stops interpolate in premultiplied
+alpha, so `#5FD9A8FF → #00000000` and `#5FD9A8FF → #5FD9A800` fade identically: the hue holds
+and only alpha falls. Fading to `transparent` is safe and needs no workaround.
 
 **Level of detail is off by default.** Every visible console rebuilds at full rate and full
 detail. A player who runs many animated consoles can switch on Rate LOD (small consoles rebuild

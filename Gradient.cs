@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -260,6 +260,33 @@ internal sealed class Gradient
         return m > 1f ? 2f - m : m;
     }
 
+    /// <summary>
+    /// Mixes two stops the way CSS does: in premultiplied alpha, then un-premultiplied.
+    /// </summary>
+    /// <remarks>
+    /// A straight lerp drags the colour toward whatever an invisible stop happens to carry. Fading
+    /// <c>#5FD9A8FF</c> to <c>#00000000</c> passes through <c>#2F6C54</c> at half alpha, so a ramp
+    /// to transparent greys through its middle -- which is why the docs used to tell authors to
+    /// fade to the same colour instead. CSS avoids it by interpolating premultiplied, where a
+    /// fully transparent stop contributes no colour at all, only its alpha.
+    ///
+    /// Where the mixed alpha is zero there is no colour to recover, so the nearer visible stop's
+    /// hue is carried through. That matches CSS, and it matters because the result is still handed
+    /// to a vertex: an un-premultiplied black would be interpolated across the triangle by the GPU
+    /// and reintroduce exactly the grey this removes.
+    /// </remarks>
+    private static Color MixPremultiplied(Color a, Color b, float t)
+    {
+        var alpha = Mathf.Lerp(a.a, b.a, t);
+        if (alpha <= 0.000001f)
+            return new Color(a.a > 0f ? a.r : b.r, a.a > 0f ? a.g : b.g, a.a > 0f ? a.b : b.b, 0f);
+
+        var r = Mathf.Lerp(a.r * a.a, b.r * b.a, t) / alpha;
+        var g = Mathf.Lerp(a.g * a.a, b.g * b.a, t) / alpha;
+        var bl = Mathf.Lerp(a.b * a.a, b.b * b.a, t) / alpha;
+        return new Color(r, g, bl, alpha);
+    }
+
     /// <summary>The ramp at a parameter, held at its end colours outside 0..1.</summary>
     internal Color SampleWithin(float t)
     {
@@ -278,7 +305,7 @@ internal sealed class Gradient
 
             var span = Positions[i] - Positions[i - 1];
             var local = span < 0.000001f ? 0f : (t - Positions[i - 1]) / span;
-            return Color.Lerp(Colours[i - 1], Colours[i], local);
+            return MixPremultiplied(Colours[i - 1], Colours[i], local);
         }
 
         return Colours[^1];
