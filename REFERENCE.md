@@ -1296,6 +1296,30 @@ builds its own mesh above ours — so a `T` shadow is the SDF shader's underlay 
 Blending is straight source-over on sRGB bytes — the space the colours are written in — so a
 shadow composites at the value the design specifies.
 
+### A colour as an expression
+
+Anywhere a colour is written, a string starting with `=` is evaluated instead, with
+`#RGB`/`#RGBA`/`#RRGGBB`/`#RRGGBBAA` literals as terms. Since 0.11.79, on `f` and `s`:
+
+| form | meaning |
+|------|---------|
+| `f = "=#5FD9A8"` | a literal, the long way round |
+| `f = "=if(down,#A,if(hover,#B,#C))"` | three states in one node, drawn on the client |
+| `f = "=mix(#A,#B,$level)"` | blended by a value |
+| `f = "=mix(#A,#B,(sin(t)+1)/2)"` | a pulse |
+
+**`mix(a, b, t)` blends premultiplied**, as gradient stops do, so a mix towards a transparent
+colour fades out rather than drifting through the other colour's hue: `mix(#FF0000,#00000000,0.5)`
+and `mix(#FF0000,#FF000000,0.5)` are the same colour.
+
+**Colours are not a general type.** Every other value in an expression is a number — a 32-bit
+RGBA does not survive one — so they exist only where a colour is asked for. `if(hover,1,2)` is a
+number. A colour read as a number is `0`. An expression in a colour attribute that does not give
+a colour is reported as a scene problem and drawn magenta.
+
+A literal becomes a colour when the scene is parsed, never later, because Unity's colour parser
+cannot run on the thread that builds the geometry.
+
 ### Inherited defaults — `style`
 
 A `style` map on a `G` supplies defaults for descendants that do not set the key themselves:

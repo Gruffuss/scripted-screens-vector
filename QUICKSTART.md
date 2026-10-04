@@ -99,7 +99,7 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
 | circle, ellipse, dot, lamp | `C` (`cx cy rx ry`) |
 | any outline, icon, arc | `P` (`d` = SVG path data) |
 | open line / closed polygon from points | `L` / `Y` (`p` = flat x,y list) |
-| smooth curve through data points | `SP` |
+| smooth curve through data points | `SP` (`close=1` makes a filled blob) |
 | liquid surface, filled wave, area chart | `YS` (sampled band: `n`, `x`, `y`, `y2` per sample `i`) |
 | line chart, waveform | `LS` (sampled line) |
 | many copies: ticks, rows, motes | `RP` (`n`, children use `i`) |
@@ -118,6 +118,9 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
   **clockwise**, as CSS `rotate()`.
 - Two gradient stops at the same position are a hard edge, and with `spread = "repeat"` that
   tiles into stripes or a grid.
+- Defaults for a whole scene go on the `SCENE` line (or the structure's props): `size`, `f`,
+  `fea`, `sw` and the rest are inherited by every node, like a `G`'s `style`. `fit` is the one
+  key the root keeps to itself.
 - Any number can be an expression: a string starting with `=`.
   - Variables: `t` seconds, `i` repeat index from 0, `n` repeat count, `i1 i2` outer repeat
     indices, `$name` data value, `$arr[k]` array element (0-based), `sy`/`vh` scroll offset
@@ -168,12 +171,18 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
 | a shape missing | self-intersecting `Y` or `P` |
 | picture missing | URL failed; `vector_stats` shows the HTTP error |
 | click does nothing | node lacks `id` or `click = 1`, or the element has no `on_click` |
+| click misses the middle of a shape | it is an OPEN `L`/`SP`/`P`: clickable along its stroke only. Close it (`Y`, `SP close=1`) to claim the inside |
+| animation stuck at the start | the structure is being re-sent with a CHANGE each tick; a changed structure restarts `t`. Re-sending identical text is free and keeps the clock |
 
 ## Events
 
 - Clicks: `on_click = function(nodeId, player)` on the **structure element**. Inside a repeat
   the id is `"id:i"`: `local id, k = nodeId:match("^(.-):(%d+)$")`. A click lands on what is
-  drawn, inside the outline and any clip, last drawn wins.
+  drawn, inside the outline and any clip, last drawn wins. **Every shape takes clicks** --
+  `R`, `C`, `L`, `Y`, `SP`, `P`, `IMG`, `T`. An **open** shape is clickable along its stroke,
+  not across the area it would enclose: an `L` drawing three sides of a box answers on the
+  three lines, not in the middle. A closed shape answers inside its outline, filled or not,
+  which is how you make an invisible hit area.
 - More pointer detail, all opt-in flags beside an `id`, all arriving through the same
   `on_click`: `press = 1` sends `down:id` / `up:id` / `leave:id`; `xy = 1` appends `@fx,fy`
   (where in the node, `0..1` from its top-left); `hoverev = 1` sends `enter:id` / `exit:id`;

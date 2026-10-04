@@ -3917,6 +3917,13 @@ internal static class Tessellator
             return new Paint(Magenta, null, opacity);
         }
 
+        // A colour expression, evaluated per shape like any other attribute: `hover` and
+        // `down` make it a highlight with no round trip to the chip, `t` makes it a pulse,
+        // and `$name` makes it follow data.
+        var colourExpr = stroke ? node.StrokeColourExpr : node.FillColourExpr;
+        if (colourExpr != null && colourExpr.EvaluateColour(context, out var evaluated))
+            return new Paint(evaluated, null, opacity);
+
         // A data-bound colour is re-read every tick, so an alarm can go red without the
         // structure being resent.
         var bound = stroke ? node.StrokeData : node.FillData;

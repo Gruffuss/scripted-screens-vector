@@ -275,7 +275,7 @@ internal sealed class Gradient
     /// to a vertex: an un-premultiplied black would be interpolated across the triangle by the GPU
     /// and reintroduce exactly the grey this removes.
     /// </remarks>
-    private static Color MixPremultiplied(Color a, Color b, float t)
+    internal static Color MixPremultiplied(Color a, Color b, float t)
     {
         var alpha = Mathf.Lerp(a.a, b.a, t);
         if (alpha <= 0.000001f)

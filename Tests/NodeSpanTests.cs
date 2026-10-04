@@ -21,7 +21,39 @@ internal static class NodeSpanTests
         ("v on a leaf", LeafVisibility),
         ("recursion caps", RecursionCaps),
         ("open shapes are clickable on the stroke", OpenShapeHitArea),
+        ("colour expressions", ColourExpressions),
     };
+
+    /// <summary>
+    /// `f = "=if(hover,#A,#B)"` and `"=mix(#A,#B,t)"`. A colour is not a float, so colours are
+    /// not a type in the evaluator: they exist only where a colour is asked for, read by
+    /// EvaluateColour off the same tree.
+    /// </summary>
+    /// <remarks>
+    /// The literal must become a Color at PARSE time. Unity's colour parser is a native ECall
+    /// and tessellation runs on a worker, where an ECall throws -- which is why this test can
+    /// only check the parse side here, in a suite that has no colour parser at all. The
+    /// headless run therefore proves the opposite thing from the in-game one: that nothing
+    /// evaluates a colour STRING.
+    /// </remarks>
+    private static void ColourExpressions(TestRun run)
+    {
+        var ctx = new EvalContext();
+
+        // An expression of numbers is not a colour, and must not claim to be.
+        run.Check("colour expr: a numeric expression is not a colour",
+            !Expression.Parse("=1+2", 0f).IsColour, "claimed to be a colour");
+
+        // `mix` and `if` between colours are, and `if` between numbers is not.
+        run.Check("colour expr: if between numbers is not a colour",
+            !Expression.Parse("=if(t,1,2)", 0f).IsColour, "claimed to be a colour");
+
+        // Anything with a `#` in it cannot be parsed in THIS suite at all: the literal is
+        // turned into a Color at parse time by Unity's parser, which is a native ECall and
+        // throws headless. That is the point of the design -- no colour string survives into
+        // evaluation, so nothing parses one on the tessellation worker. The literal cases live
+        // in the offline probe, which swaps a managed parser in.
+    }
 
     /// <summary>
     /// An open shape has no interior, but its hit outline was the path's own points, which

@@ -501,6 +501,17 @@ internal sealed class Expression
         Modulo,
         Power,
         Call,
+
+        /// <summary>
+        /// A colour literal, `#RGB` to `#RRGGBBAA`. It carries a Color, not a number, and is
+        /// read by <see cref="EvaluateColour"/> rather than <see cref="Evaluate"/>.
+        /// </summary>
+        /// <remarks>
+        /// Parsed to a Color HERE, at parse time, and never re-parsed. Unity's colour parser is
+        /// a native ECall and tessellation runs on a worker thread, where an ECall throws, so
+        /// the string must not survive into evaluation.
+        /// </remarks>
+        Colour,
     }
 
     private static readonly Dictionary<string, int> Arity = new(StringComparer.Ordinal)
@@ -512,11 +523,13 @@ internal sealed class Expression
         ["step"] = 2, ["eq"] = 2, ["lt"] = 2, ["gt"] = 2, ["lte"] = 2, ["gte"] = 2,
         ["and"] = 2, ["or"] = 2, ["hash2"] = 2,
         ["clamp"] = 3, ["lerp"] = 3, ["smoothstep"] = 3, ["if"] = 3,
+        ["mix"] = 3,
         ["pi"] = 0, ["tau"] = 0,
     };
 
     private Kind _kind;
     private float _value;
+    private Color _colour;
     private string _name = string.Empty;
     private int _depth;
     private Expression?[] _args = System.Array.Empty<Expression>();
@@ -605,6 +618,64 @@ internal sealed class Expression
         }
     }
 
+    /// <summary>
+    /// Evaluates this expression as a COLOUR, for an attribute that wants one. Returns false
+    /// when the expression does not describe a colour, so the caller can report it and fall
+    /// back rather than drawing something arbitrary.
+    /// </summary>
+    /// <remarks>
+    /// Colours are not a type in the evaluator -- every other value is a float, and a 32-bit
+    /// RGBA does not survive one. They exist only where a colour is ASKED for: this walks the
+    /// same tree, reading colour literals directly and taking the numeric arguments (a
+    /// condition, a blend factor) through the ordinary float path. Anything else is not a
+    /// colour, including arithmetic on one.
+    /// </remarks>
+    internal bool EvaluateColour(EvalContext context, out Color colour)
+    {
+        switch (_kind)
+        {
+            case Kind.Colour:
+                colour = _colour;
+                return true;
+
+            case Kind.Call when string.Equals(_name, "if", StringComparison.Ordinal):
+            {
+                // `if(cond, a, b)`: the condition is a number, the branches are colours.
+                var chosen = _args.Length == 3 && NonZero(Arg(0, context)) ? _args[1] : _args.Length == 3 ? _args[2] : null;
+                if (chosen != null)
+                    return chosen.EvaluateColour(context, out colour);
+
+                break;
+            }
+
+            case Kind.Call when string.Equals(_name, "mix", StringComparison.Ordinal):
+            {
+                // `mix(a, b, t)`: blended the way a gradient stop is, PREMULTIPLIED, so a mix
+                // towards a transparent colour fades out instead of drifting through its hue.
+                if (_args.Length == 3 && _args[0] != null && _args[1] != null
+                    && _args[0]!.EvaluateColour(context, out var from)
+                    && _args[1]!.EvaluateColour(context, out var to))
+                {
+                    colour = Gradient.MixPremultiplied(from, to, Mathf.Clamp01(Arg(2, context)));
+                    return true;
+                }
+
+                break;
+            }
+        }
+
+        colour = Color.white;
+        return false;
+    }
+
+    /// <summary>True when this expression yields a colour, checked once at parse time.</summary>
+    internal bool IsColour =>
+        _kind == Kind.Colour
+        || (_kind == Kind.Call
+            && (string.Equals(_name, "mix", StringComparison.Ordinal)
+                || (string.Equals(_name, "if", StringComparison.Ordinal)
+                    && _args.Length == 3 && _args[1] != null && _args[1]!.IsColour)));
+
     internal float Evaluate(EvalContext context)
     {
         switch (_kind)
@@ -633,6 +704,11 @@ internal sealed class Expression
             case Kind.Modulo: return Modulo(Arg(0, context), Arg(1, context));
             case Kind.Power: return Mathf.Pow(Arg(0, context), Arg(1, context));
             case Kind.Call: return Invoke(context);
+
+            // A colour is not a number. Reaching here means a colour was written where a
+            // number belongs (`x = "=#FF0000"`), which the parser reports; 0 keeps the shape
+            // on screen instead of moving it somewhere unpredictable.
+            case Kind.Colour: return 0f;
 
             default: return 0f;
         }
@@ -858,6 +934,21 @@ internal sealed class Expression
 
             if (Match('$'))
                 return ParseDataReference();
+
+            // A colour literal. Parsed to a Color NOW: Unity's parser is a native ECall and
+            // evaluation happens on the tessellation worker, where an ECall throws.
+            if (_text[_at] == '#')
+            {
+                var start = _at++;
+                while (_at < _text.Length && Uri.IsHexDigit(_text[_at]))
+                    _at++;
+
+                var text = _text[start.._at];
+                if (!Colours.TryParse(text, out var parsed))
+                    throw new FormatException($"\"{text}\" is not a colour");
+
+                return new Expression { _kind = Kind.Colour, _colour = parsed };
+            }
 
             var c = _text[_at];
             if (char.IsDigit(c) || c == '.')

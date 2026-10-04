@@ -54,6 +54,9 @@ Then read the examples in order — each one introduces exactly one idea and run
 | [`13-src.lua`](examples/13-src.lua) | the same scene as tables and as text, and group defaults |
 | [`14-ztext.lua`](examples/14-ztext.lua) | text in draw order: labels under and over shapes |
 | [`15-effects.lua`](examples/15-effects.lua) | inset shadows, conic gradients, filters, masks, matrices, concave clips |
+| [`16-pointer.lua`](examples/16-pointer.lua) | hold, hover, where you hit, drag and drop — and hover styling with no chip round trip |
+| [`17-pictures.lua`](examples/17-pictures.lua) | `IMG`: the five `fit` modes, `at`, `uv` crops, tiling, nine-slice |
+| [`18-lines.lua`](examples/18-lines.lua) | `cap`, `join`, `ml`, `dash`, and open versus closed curves |
 
 [`Patterns.lua`](Patterns.lua) holds the same building blocks as copy-paste functions.
 
@@ -361,6 +364,24 @@ and needs neither variable.
 
 ### Colour
 
+**A colour can be an expression.** Anywhere a colour is written, a string starting with `=` is
+evaluated instead, with `#RRGGBB` literals as its terms:
+
+```
+R id=btn press=1 f="=if(down,#2E8B6E,if(hover,#6FE3B6,#5FD9A8))"
+R f="=mix(#24405A,#C0392B,$alarm)"
+```
+
+The first is a button with three states in one node, drawn on the client with nothing sent to
+the chip. The second blends between two colours as a value moves. `mix(a, b, t)` blends
+*premultiplied*, the way a gradient stop does, so mixing towards a transparent colour fades out
+instead of drifting through the other colour's hue.
+
+Colours are not a general type: everything else in an expression is a number, so `if(hover,1,2)`
+is a number, not a colour. An expression in a colour attribute that does not give a colour is
+reported and drawn magenta rather than guessed at.
+
+
 Three mechanisms, and picking the right one matters:
 
 | want | use | cost |
@@ -538,6 +559,19 @@ Two smaller conveniences worth knowing in the same breath:
 { op = "R", x = 0, y = 0, w = 60, h = 24, rx = { 12, 12, 0, 0 } }       -- per-corner radii
 ```
 
+**The scene root takes the same defaults**, in either form, and they reach every node:
+
+```lua
+props = { scene = "panel", w = 200, h = 240, style = { f = "#5FD9A8", fea = 0 }, root = { ... } }
+```
+
+```
+SCENE w=200 h=240 f=#5FD9A8 fea=0
+```
+
+`fit` is the one key the root keeps to itself — there it says how the viewBox meets the surface,
+while on a `T` it means shrink-to-fit and on an `IMG` how the picture fills its box.
+
 `style` nests and anything a node states itself wins, so a group of twenty shapes that all
 want `fea = 0` says it once. Corner radii are CSS order, `tl tr br bl`, and a zero corner is a
 sharp point.
@@ -565,7 +599,11 @@ A scene with no clickable node stays transparent to the pointer exactly as befor
 decoration never steals a click from a button underneath it.
 
 A click lands on what is **drawn**: inside the node's own outline and inside any clip it is
-drawn through, in draw order, last match wins. A circle does not take clicks in its corners,
+drawn through, in draw order, last match wins. Every shape can be clicked — `R`, `C`, `L`, `Y`,
+`SP`, `P`, `IMG`, `T`. An **open** shape is clickable along its stroke rather than across the
+area it would enclose, because that area was never drawn: an `L` making three sides of a box
+answers on the three lines, not in the middle. Close it (`Y`, or `SP close = 1`) to claim the
+inside. A circle does not take clicks in its corners,
 a turned shape answers along its own edges, and a list row scrolled out of sight takes
 nothing. An invisible `R` with `fo = 0` and `click = 1` makes a hit area of any size and costs
 no geometry.

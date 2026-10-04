@@ -2,6 +2,15 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.79
+
+- Added: **a colour can be an expression.** `f = "=if(down,#2E8B6E,if(hover,#6FE3B6,#5FD9A8))"` is a button with three states in one node and nothing sent to the chip; `s = "=mix(#24405A,#3A6E8B,hover)"` blends between two. Works on `f` and `s`, with `hover`, `down`, `t`, `$data` or anything else an expression reads.
+  - `mix(a, b, t)` blends **premultiplied**, as gradient stops do, so mixing towards a transparent colour fades out instead of drifting through the other colour's hue -- `mix(#FF0000, #00000000, 0.5)` and `mix(#FF0000, #FF000000, 0.5)` are the same colour.
+  - Colours are not a type in the evaluator: every other value is a float and a 32-bit RGBA does not survive one. They exist only where a colour is asked for. `if(hover, 1, 2)` is a number; a colour read as a number is 0, and an expression that does not give a colour is reported as a scene problem and drawn magenta rather than guessed at.
+  - A `#` literal becomes a `Color` **at parse time**, never later: Unity's colour parser is a native ECall and tessellation runs on a worker thread, where an ECall throws.
+  - Why it was added: it is what both the author of this mod and its docs reached for by instinct, twice in one session, before noticing it was not supported. A format whose natural spelling is an error has the bug.
+- Added: **three examples**, `16-pointer.lua` (hold, hover, `xy`, drag and drop, and hover styling with no chip round trip), `17-pictures.lua` (`IMG`: the five `fit` modes, `at`, `uv` crops, tiling, nine-slice) and `18-lines.lua` (`cap`, `join`, `ml`, `dash`, and open versus closed curves). Between them they cover what had no example at all: the pointer flags, pictures as a subject, and line ends.
+
 ## 0.11.78
 
 - Fixed: **an open shape answered clicks in its empty middle.** A hit region is a polygon, and for an open `L`, `SP` or `P` that polygon was the path's own points, which close implicitly: three sides of a box therefore claimed the whole box, including the middle it had never drawn. A stroked open shape is now clickable along its stroke, as SVG's `visiblePainted` has it. Seen in game on `InGameTest-0.11.74.lua` the moment those shapes became clickable at all (0.11.74).

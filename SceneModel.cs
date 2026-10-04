@@ -202,6 +202,14 @@ internal sealed class VecNode
 
     internal Expression? StrokeIndex;
 
+    /// <summary>
+    /// `f = "=if(hover,#A,#B)"`: the fill colour as an expression. Null unless one was given.
+    /// </summary>
+    internal Expression? FillColourExpr;
+
+    /// <summary>The same for the stroke, from `s = "=..."`.</summary>
+    internal Expression? StrokeColourExpr;
+
     internal bool HasStroke;
     internal string? StrokeGradient;
 
@@ -1656,6 +1664,32 @@ internal static class SceneParser
         if (string.IsNullOrEmpty(fill) || string.Equals(fill, "none", StringComparison.OrdinalIgnoreCase))
             return;
 
+        // An EXPRESSION that yields a colour: `f = "=if(hover,#A,#B)"`, `"=mix(#A,#B,$t)"`.
+        // This is the shape everyone reaches for first, so it is read before anything else.
+        if (fill![0] == '=')
+        {
+            var expression = Expression.Parse(fill, 0f);
+            if (expression.IsColour)
+            {
+                node.HasFill = true;
+                node.FillColourExpr = expression;
+                node.FillOpacity = Attr(map, "fo", 1f);
+                node.Feather = Attr(map, "fea", -1f);
+
+                if (HasKey(map, "fea_edge"))
+                    node.EdgeFeather = Attr(map, "fea_edge", -1f);
+
+                return;
+            }
+
+            // Parsed, but it is not a colour -- `f = "=$level"` is a number. Say which.
+            scene.Problem($"f: \"{fill}\" is an expression but does not give a colour; "
+                          + "use a colour literal, `if(...)` between two, or `mix(a,b,t)`");
+            node.HasFill = true;
+            node.Fill = UnparsedColour;
+            return;
+        }
+
         // Gradient (@name) and data ($name) paints are spec'd but not implemented yet;
         // fall back to white so the shape is visible rather than silently absent.
         if (fill![0] == '@')
@@ -2067,6 +2101,26 @@ internal static class SceneParser
         var stroke = PropString(map, "s");
         if (string.IsNullOrEmpty(stroke) || string.Equals(stroke, "none", StringComparison.OrdinalIgnoreCase))
             return;
+
+        // A colour expression, as for `f`.
+        if (stroke![0] == '=')
+        {
+            var expression = Expression.Parse(stroke, 0f);
+            if (expression.IsColour)
+            {
+                node.HasStroke = true;
+                node.StrokeColourExpr = expression;
+                ReadStrokeStyle(map, node);
+                return;
+            }
+
+            scene.Problem($"s: \"{stroke}\" is an expression but does not give a colour; "
+                          + "use a colour literal, `if(...)` between two, or `mix(a,b,t)`");
+            node.HasStroke = true;
+            node.StrokeColour = UnparsedColour;
+            ReadStrokeStyle(map, node);
+            return;
+        }
 
         // Gradient / data paints are spec'd but unimplemented; white keeps the line visible.
         if (stroke![0] == '@')
