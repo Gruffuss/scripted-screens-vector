@@ -13,7 +13,41 @@ internal static class NodeSpanTests
         ("node spans", Spans),
         ("ver", Version),
         ("path guard", PathGuard),
+        ("scene text guard", TextGuard),
     };
+
+    /// <summary>
+    /// Scene text must never fail to terminate. Inside `[ ]` the reader skips space and tab only,
+    /// so a newline, `{` or `}` was neither skipped nor recognised and ReadValue returned an empty
+    /// token without advancing -- the loop then appended empties until it ran out of memory.
+    /// </summary>
+    /// <remarks>
+    /// Like the path guard, every case here EXHAUSTS MEMORY on an unguarded build rather than
+    /// returning a wrong answer, so it cannot be watched to fail inside the suite.
+    /// `R p=[1,` newline `2]` is an ordinary thing for an author to write.
+    /// </remarks>
+    private static void TextGuard(TestRun run)
+    {
+        const string Head = "SCENE w=10 h=10\n";
+
+        foreach (var (src, what) in new[]
+                 {
+                     (Head + "R p=[1,\n2]\n", "an array spanning a newline"),
+                     (Head + "R p=[1,}]\n", "a brace inside an array"),
+                     (Head + "R p=[1,{]\n", "an open brace inside an array"),
+                     (Head + "R p=[1,2\n", "an array never closed"),
+                 })
+        {
+            var props = SceneText.ToProps(src, "guard");
+            run.Check($"scene text: {what} is refused, not hung",
+                props == null && SceneText.Rejected != null,
+                SceneText.Rejected ?? "(accepted -- the guard did not fire)");
+        }
+
+        // A well-formed array on one line must still parse, or the guard is too eager.
+        var ok = SceneText.ToProps(Head + "R p=[1,2,3,4]\n", "guard");
+        run.Check("scene text: a one-line array still parses", ok != null, SceneText.Rejected ?? "ok");
+    }
 
     /// <summary>
     /// A malformed `d` must stop, not spin. Two shapes of input consumed nothing per pass and so

@@ -174,6 +174,7 @@ internal static class Program
         NodeSpanTests.All[0].Item2(run);
         NodeSpanTests.All[1].Item2(run);
         NodeSpanTests.All[2].Item2(run);
+        NodeSpanTests.All[3].Item2(run);
         RequirementTests.ConicAngles(run);
         RequirementTests.Filters(run);
         RequirementTests.GroupMatrix(run);

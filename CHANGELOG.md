@@ -2,6 +2,10 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.72
+
+- Fixed: **an array spanning a newline exhausted memory instead of parsing or failing.** Inside `[ ]` the reader steps over space and tab only, so a newline -- or a `{` or `}` -- was neither skipped, nor `]`, nor `,`, and the value reader returned an empty token without advancing. The loop then appended empty values until the process died. `R p=[1,` newline `2]` is an ordinary thing for an author to write, so this was reachable by hand. An array must be closed on the line it opens, and saying so is now the error rather than a hang: letting a line break through would make a missing `]` swallow the rest of the scene instead of being reported where it happened.
+
 ## 0.11.71
 
 - Fixed: **a repeating fault grew the problem list without bound.** `Problems` is never cleared, and four call sites appended to it directly instead of going through `Problem()`, bypassing its dedupe and its 16-entry cap. The worst was in the tessellator: an undeclared gradient id appended a problem and logged a warning on **every rebuild**, so an animated scene at 60 Hz added sixty entries a second. All four now go through `Problem()`, which also stops logging a fault it has already reported -- repeating one now costs a list scan and nothing else.

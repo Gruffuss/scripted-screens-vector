@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using SS = ScriptedScreens.ScriptableUi.ScriptedScreensScriptableUiSystem;
 
@@ -297,7 +297,20 @@ internal static class SceneText
                     continue;
                 }
 
+                // EVERY pass must consume something. SkipSpaces steps over space and tab only, so
+                // a newline inside `[ ]` -- or a `{` or `}` -- is not skipped, is not `]`, is not
+                // `,`, and ReadValue returns an empty token without advancing. The loop then
+                // appended empty values until it ran out of memory. `R p=[1,` newline `2]` is an
+                // ordinary thing to write, so this was reachable by hand.
+                //
+                // An array must stay on one line; saying so is better than guessing, because
+                // letting a line break through would make a missing `]` swallow the rest of the
+                // scene instead of being reported here.
+                var before = r.At;
                 items.Add(ReadValue(r));
+
+                if (r.At == before)
+                    throw Fail(r, "an array must be closed with ] on the same line");
             }
 
             return Arr(items);
