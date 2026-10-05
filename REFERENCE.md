@@ -880,14 +880,14 @@ container, where it will be clipped away and look like nothing happened.
 | `fmt` | printf spec for a bound **number**, e.g. `"%.1f"` |
 | `unit` | literal suffix appended after the text |
 | `missing` | what to draw when the name has no value; default `"--"`. An empty string is a value and draws nothing |
-| `size` | font size in scene units; scales with the transform |
-| `f` | colour, as on any shape |
+| `size` | font size in scene units, default `12`; scales with the transform |
+| `f` | colour; **a label with no `f` draws white**, where a shape with no `f` draws no fill |
 | `fo` | opacity `0..1`, as on any shape; multiplied by the enclosing group's `o` |
 | `align` | `left` (default), `center`, `right`, `justified` (extra width goes between words, as CSS) |
 | `valign` | `top` (default), `middle`, `bottom` |
-| `font` | a registered TMP family, e.g. from the companion fonts mod |
-| `weight` | `bold`, or a number ≥ 600 |
-| `cspace` | character spacing |
+| `font` | a registered TMP family, e.g. from the companion fonts mod; omitted draws in the game's own font |
+| `weight` | `bold`, or a number ≥ 600; omitted draws the face's regular weight |
+| `cspace` | character spacing, default `0` |
 | `kern` | `0` turns pair kerning off for this label; on otherwise. Only a font that carries kerning pairs is affected, so a label on the game's own font is unchanged either way |
 | `wrap` | `1` lets the text run to more than one line inside its box |
 | `lh` | line height as a multiple of the font size, CSS style; omitted uses the font's own |
@@ -896,7 +896,7 @@ container, where it will be clipped away and look like nothing happened.
 | `oc` | outline colour: any colour literal (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, a colour name, `transparent` or `none`); default black. A **literal only** — `$name` and `=` are not read, and a value that is not a colour is reported |
 | `fl` | first-line overrides, `"f=#fff size=12 weight=bold font='Name'"` — see below |
 | `fit` | `none` (default), `ellipsis`, `shrink` |
-| `min_size` | floor for `shrink` |
+| `min_size` | floor for `shrink`, in scene units, default `6` |
 
 ```lua
 { op = "T", x = 8, y = 8, w = 120, h = 20, text = "$pressure",
@@ -1031,7 +1031,11 @@ data:set_props({ data = {
 ```
 
 The index is a full expression, not just `i` — `$rows[n-1-i]` reverses a list and
-`$cols[mod(i,4)]` cycles a palette. Out of range draws `missing` rather than failing.
+`$cols[mod(i,4)]` cycles a palette. **An index past the end does not fail, and what it draws
+depends on what was bound**: a string slot draws `missing`, a number slot draws `0` through
+`fmt`, and a colour draws **magenta** — the same signal as an unresolved colour. The array is
+there and only the slot is missing, so **the name is not listed among the unresolved names** —
+except for a string slot, which is listed unless the node declares `missing`.
 
 **Formatting a number, so the chip does no string work.** Most console text is a number with a
 unit, and formatting it in Lua costs a `string.format` per label per tick:
@@ -1471,8 +1475,10 @@ and `mix(#FF0000,#FF000000,0.5)` are the same colour.
 
 **Colours are not a general type.** Every other value in an expression is a number — a 32-bit
 RGBA does not survive one — so they exist only where a colour is asked for. `if(hover,1,2)` is a
-number. A colour read as a number is `0`. An expression in a colour attribute that does not give
-a colour is reported as a scene problem and drawn magenta.
+number. **A colour read as a number is `0`, and nothing is reported** — `x = "=#5FD9A8"` and
+`x = "=mix(#A,#B,0.5)"` both leave the attribute at `0` in silence. The other direction is
+louder: an expression in a colour attribute that does not give a colour is reported as a scene
+problem and drawn magenta.
 
 A literal becomes a colour when the scene is parsed, never later, because Unity's colour parser
 cannot run on the thread that builds the geometry.
@@ -1699,6 +1705,18 @@ USE ref=led x=40 y=20 r=6 col=#E23D3D
 longer string it splices textually, which is what makes it work in expressions —
 `y = "=%top+i*4"`.
 
+**Substitution has no name boundary.** The splice is a plain text replacement, so a parameter
+whose name begins another parameter's name rewrites it: with `w = 10` and `wide` both in play,
+`x = "=%wide*2"` becomes `"=10ide*2"`. Which of two colliding names lands first is the order the
+parameters arrive in, so it is not a thing to rely on. A `%name` that is the *whole* value is
+matched by exact name first and is safe; only the spliced form collides. The names in play
+include ones you never declared: everything the `USE` carries, so `ref`, `x`, `y`, `o` and
+`clip`, and, where the `SYM` has no `params` map, its own `id` and `c` — so a parameter called
+`idx` or `col` collides with one of those. The collision itself is **not reported**: what reaches
+the problem list is whatever the mangled text then fails as, a bad expression falling back to the
+attribute's own default, or a `text` string that draws exactly as it came out. Keep parameter
+names so that none begins another.
+
 Substitution happens once, at parse time, not through a scope in the evaluator: symbol
 parameters are structure, not animation, so an instance costs exactly what writing the nodes
 out would have.
@@ -1776,7 +1794,7 @@ Any numeric attribute may be a string beginning with `=`.
 | `i1`, `i2`, … | enclosing repeat indices, outward; `0` where no repeat reaches that far out. `i0` is `i` |
 | `n` | count of the **innermost** repeat, `0` outside one. There is no `n1`: an outer repeat's count cannot be read from an inner one |
 | `$name` | scalar from the data payload |
-| `$name[expr]` | array element, **0-based**; out of range yields `0` |
+| `$name[expr]` | array element, **0-based**; out of range yields `0`, and is not reported |
 | `sy` | scroll offset of the enclosing scroll view or `SC`, in scene units; `0` when there is none |
 | `vh` | viewport height of that scroll view or `SC`, in scene units; `0` when there is none |
 | `hover` | `1` while the pointer is over a clickable node inside the nearest node with an `id` around this expression (the node itself, or a group), else `0` |
@@ -1851,8 +1869,10 @@ array index rounds the same way, so **`$a[i/2]` is not a floor** — write `$a[f
 `sign(0)` is `1`. `sqrt` of a negative number is `0`. `eq` and `not` compare to within about one
 part in a million, and "non-zero" in `if`, `and` and `or` means not zero for practical purposes,
 so `0.000000001` counts as non-zero. `lt`, `gt`, `lte` and `gte` compare exactly, so `eq(a, b)`
-can be `1` where `lte(a, b)` is `0`. `lerp` does not limit `t`; `mix` does. `smoothstep` with
-equal edges is a hard step at that edge, and with the edges swapped it ramps down.
+can be `1` where `lte(a, b)` is `0`. `lerp` does not limit `t`; `mix` clamps its own to `0..1`.
+**`mix` is a colour function with no numeric form**, so `mix` in a number slot is `0` whatever its
+arguments, and nothing is reported; `lerp(a, b, clamp(t, 0, 1))` is the clamped number blend.
+`smoothstep` with equal edges is a hard step at that edge, and with the edges swapped it ramps down.
 `pulse(x, duty)` is `1` while the fractional part of `x` is below `duty`. `hash` rounds its input
 to the nearest 1/4096 first, so inputs closer than that give the same value, and `hash2(x, y)` is
 `hash(x * 37.19 + y * 91.73)` — one number, not two independent ones.
