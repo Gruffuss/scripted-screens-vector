@@ -153,6 +153,19 @@ in the same payload.
 for 0.15 s and then glides for 0.3 s. Stagger a row of bars by giving each a delay of its
 own — `i * 0.05` — and they set off in sequence from one payload.
 
+**ANY payload to that element restarts the clock, including one that mentions only `nodes`.**
+A flushed payload carries the element's accumulated properties, so a patch sent to change
+geometry brings the element's existing `data` along with it, and every name in that data is
+stamped as having just arrived. An animation driven by `since($name)` therefore restarts each
+time anything is patched on the same element. Send geometry patches from a DIFFERENT element
+than the one carrying the data the animation reads. Measured on a console: a name left alone
+counted up past 35 s, while the same name on an element receiving a `nodes` patch every tick
+never rose above 0.3 s.
+
+A capture cannot show any of this: it rebuilds the surface from the stored elements, which
+re-stamps every data name, so `since()` reads zero in a captured image whatever it reads on
+screen.
+
 **Colours glide too, when asked.** A colour sent as data (`f = "$state"`) changes at once by
 default. Give its name an `ease` entry and it glides from the colour on screen to the new one
 over that time and curve, exactly as a number would: `ease = { state = { 0.4, "ease-out" } }`.
