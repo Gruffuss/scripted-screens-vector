@@ -1100,7 +1100,9 @@ TEXT warnings say so. A text shadow is cast by the letters, not by their outline
 
 Its keys are lower case and exact; any other key is reported. `f` takes the same literals as
 `oc`, `size` is a plain number rather than an expression, and `weight` is `bold` or a number of
-`600` or more — any other word leaves the first line at the label's own weight.
+`600` or more. An explicit `normal`, or a number below `600`, takes bold **off** the first line of
+a label that is itself `weight = "bold"`; omitting `weight` leaves the first line at the label's
+own weight, and any other value is reported.
 
 **`fl` styles the first line**, like CSS `::first-line`: a string of `f`, `size` (scene units,
 scaled like `size`), `weight` and `font`, quoted where a value has spaces. Only the text engine
@@ -2107,9 +2109,10 @@ or no stroke. A missing `$name` is a different case again: it is reported as an 
 and reads `0` where it is used.
 
 Division by zero yields `0`, not infinity — an infinity would poison vertex positions and produce an invisible mesh
-rather than a visible glitch. `%` and `mod(a, 0)` do the same. **`^` has no such guard**: `0^-1`
-is infinity, and a negative base with a fractional exponent is not a number, so keep the base
-positive wherever the exponent can vary.
+rather than a visible glitch. `%`, `mod(a, 0)` and `^` do the same: `0^-1` is `0`, and so is a
+negative base with a fractional exponent — `(-2)^0.5` has no real value, and `0` is what this
+language answers for a number that has none. A power whose result overflows — `2^999` — is `0`
+for the same reason, so a huge power is not a way to write "as large as possible".
 
 `round` takes a half to the **even** neighbour: `round(2.5)` is `2` and `round(3.5)` is `4`. An
 array index rounds the same way, so **`$a[i/2]` is not a floor** — write `$a[floor(i/2)]`.

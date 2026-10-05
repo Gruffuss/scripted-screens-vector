@@ -1070,7 +1070,7 @@ internal static class SceneParser
             // makes `style` a default rather than an override.
             var map = inherited == null ? item.Map : Merge(inherited, item.Map);
 
-            var node = ParseNode(map, scene, inherited);
+            var node = ParseNode(map, scene, inherited, item.Map);
             if (node != null)
                 nodes.Add(node);
         }
@@ -1285,11 +1285,16 @@ internal static class SceneParser
         }
     }
 
-    private static VecNode? ParseNode(SS.UiProp[] map, VecScene scene, SS.UiProp[]? inherited = null)
+    private static VecNode? ParseNode(SS.UiProp[] map, VecScene scene, SS.UiProp[]? inherited = null,
+                                      SS.UiProp[]? own = null)
     {
         var op = PropString(map, "op");
         if (string.IsNullOrEmpty(op))
             return null;
+
+        // What the author wrote on THIS node, before inherited defaults were merged in. Only the
+        // `SC` scroll offset needs it; with no style to inherit the merged map already is it.
+        own ??= map;
 
         var node = new VecNode();
 
@@ -1438,10 +1443,16 @@ internal static class SceneParser
 
                 // A script set scrollTop: `sov` changes, `so` is applied once, and wheel and
                 // drag own the offset again afterwards.
-                if (HasKey(map, "so") && HasKey(map, "sov"))
+                //
+                // Read from the node's OWN map, never the merged one. `so` is stroke opacity on
+                // every other op, so an ancestor `G so=0.5` is merged in here and `SC sov=1`
+                // under it scrolled to 0.5 with nothing on the SC asking for it; the merged map
+                // cannot tell an inherited key from one the author wrote. The other half of the
+                // same collision is the `skip: "so"` on the children's style below.
+                if (HasKey(own, "so") && HasKey(own, "sov"))
                 {
-                    node.ScrollSet = Attr(map, "so", 0f);
-                    node.ScrollSetVersion = Attr(map, "sov", 0f);
+                    node.ScrollSet = Attr(own, "so", 0f);
+                    node.ScrollSetVersion = Attr(own, "sov", 0f);
                 }
                 break;
 
@@ -1614,7 +1625,8 @@ internal static class SceneParser
                 node.Y = Attr(map, "y", 0f);
                 node.W = Attr(map, "w", 0f);
                 node.H = Attr(map, "h", 0f);
-                node.Rx = Attr(map, "rx", 0f);
+                node.CornerRadii = ParseCorners(map);
+                node.Rx = node.CornerRadii != null ? node.CornerRadii[0] : Attr(map, "rx", 0f);
                 node.Ry = HasKey(map, "ry") ? Attr(map, "ry", 0f) : node.Rx;
                 node.Opacity = Attr(map, "o", 1f);
                 node.ImageSource = PropString(map, "src");
@@ -1717,8 +1729,9 @@ internal static class SceneParser
                 break;
 
             default:
-                // Unimplemented ops (P, L, Y) are skipped rather than treated as errors:
-                // the spec defines them, this renderer does not draw them yet.
+                // Every op the format defines has a case above, so reaching here is a typo or
+                // an op from a format newer than this build. Returning null drops the node and
+                // the `c` below it unparsed, so the reported problem is the only trace left.
                 scene.Problem($"op \"{op}\" is not supported");
                 return null;
         }
@@ -1907,8 +1920,10 @@ internal static class SceneParser
             return;
         }
 
-        // Gradient (@name) and data ($name) paints are spec'd but not implemented yet;
-        // fall back to white so the shape is visible rather than silently absent.
+        // Gradient (@name) and data ($name) paints: both are recorded by name here and
+        // resolved while emitting, in ResolvePaint, so an @id DEFS never declares is reported
+        // from there, not from the parse -- and draws magenta rather than white, because white
+        // is a colour somebody meant to use.
         if (fill![0] == '@')
         {
             node.HasFill = true;
@@ -2394,7 +2409,7 @@ internal static class SceneParser
             return;
         }
 
-        // Gradient / data paints are spec'd but unimplemented; white keeps the line visible.
+        // Gradient / data paints, as for `f`: recorded by name here, resolved in ResolvePaint.
         if (stroke![0] == '@')
         {
             node.HasStroke = true;

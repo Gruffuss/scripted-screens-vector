@@ -724,8 +724,17 @@ internal sealed class FirstLineStyle
                     break;
 
                 case "weight":
-                    style.Bold = value.Equals("bold", System.StringComparison.OrdinalIgnoreCase)
-                                 || (float.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var weight) && weight >= 600f);
+                    // Three states, not two: absent inherits the label's weight, `bold` or 600+
+                    // bolds the line, and an explicit `normal` or a lighter number takes bold
+                    // off it. Anything else is reported and left to inherit rather than read as
+                    // `normal`, which would now strip a bold label's first line on a misspelling.
+                    var numeric = float.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var weight);
+                    if (value.Equals("bold", System.StringComparison.OrdinalIgnoreCase) || (numeric && weight >= 600f))
+                        style.Bold = true;
+                    else if (value.Equals("normal", System.StringComparison.OrdinalIgnoreCase) || numeric)
+                        style.Bold = false;
+                    else
+                        scene.Problem($"T fl: weight \"{value}\" is not bold, normal or a number");
                     break;
 
                 case "font":
@@ -742,7 +751,15 @@ internal sealed class FirstLineStyle
     }
 
     /// <summary>The text with rich tags around its first <paramref name="cut"/> characters.</summary>
-    internal string Wrap(string text, int cut, out int prefixLength)
+    /// <remarks>
+    /// A false <see cref="Bold"/> cannot be written as a closing bold tag. TMP seeds its parse
+    /// state from the component's own fontStyle and then ignores a closing tag for a style the
+    /// component itself carries, so on the only label that needs it -- a bold one -- the tag does
+    /// nothing at all. The first line is left plain and the REST of the text is bolded instead,
+    /// which reads right only if the label itself is unbolded: TextLayer.ApplyFirstLine does that
+    /// whenever <paramref name="labelBold"/> meets a false <see cref="Bold"/>.
+    /// </remarks>
+    internal string Wrap(string text, int cut, bool labelBold, out int prefixLength)
     {
         var open = new System.Text.StringBuilder();
         var close = new System.Text.StringBuilder();
@@ -763,6 +780,12 @@ internal sealed class FirstLineStyle
         {
             open.Append("<b>");
             close.Insert(0, "</b>");
+        }
+        else if (Bold == false && labelBold)
+        {
+            // After the closing tags, so the span stays nested: the caller has taken the bold off
+            // the label, and this hands it back to everything past the first line.
+            close.Append("<b>");
         }
 
         if (Colour.HasValue)

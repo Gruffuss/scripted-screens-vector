@@ -400,6 +400,13 @@ internal sealed class TextLayer
             return;
         }
 
+        // `weight=normal` in `fl` has to come off the label, not out of the text: TMP ignores a
+        // closing bold tag for a style the component's own fontStyle carries, so the first line
+        // could not be un-bolded from inside the string. Wrap bolds the rest instead. Ahead of
+        // the cache check, because Show re-bolds this pooled label on every rebuild.
+        if (style.Bold == false && placement.Bold)
+            label.fontStyle = FontStyles.Normal;
+
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
         var key = string.Join("|", placement.Text, style.Colour?.ToString() ?? "", style.Size?.ToString(invariant) ?? "",
             style.Bold?.ToString() ?? "", style.Font ?? "", placement.Rect.width.ToString(invariant), placement.Size.ToString(invariant),
@@ -412,13 +419,13 @@ internal sealed class TextLayer
         }
 
         var cut = FirstLineEnd(label, 0);
-        var wrapped = style.Wrap(placement.Text, cut, out var prefix);
+        var wrapped = style.Wrap(placement.Text, cut, placement.Bold, out var prefix);
         label.text = wrapped;
 
         var moved = FirstLineEnd(label, prefix);
         if (moved >= 0 && moved != cut)
         {
-            wrapped = style.Wrap(placement.Text, moved, out _);
+            wrapped = style.Wrap(placement.Text, moved, placement.Bold, out _);
             label.text = wrapped;
         }
 

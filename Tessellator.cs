@@ -2667,8 +2667,9 @@ internal static class Tessellator
         // The OUTER contour only, which is the largest closed subpath -- the same rule
         // the triangulator uses to tell an outline from its holes. Shadowing every closed
         // subpath would draw a solid shadow behind each hole; punching one out needs the
-        // polygon boolean this renderer does not have, and is the limit already recorded
-        // for holes inside a clipped fill. Blur and the hit area follow the same rule, so a
+        // polygon boolean this renderer does not have. The FILL does keep its holes, bridged
+        // into the triangulation and kept even under a clip, so a path with holes casts a solid
+        // shadow under a fill that is not solid. Blur and the hit area follow the same rule, so a
         // clickable `P` is clickable over its outline, holes included.
         var outer = Outermost(subpaths);
 

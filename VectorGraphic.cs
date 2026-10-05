@@ -22,7 +22,7 @@ namespace ScriptedScreensVector;
 /// time-varying scenes mark themselves dirty in <see cref="Update"/>.
 /// </remarks>
 internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, IScrollHandler, IBeginDragHandler, IDragHandler, IEndDragHandler,
-    IPointerDownHandler, IPointerUpHandler, IPointerExitHandler, IPointerMoveHandler
+    IPointerDownHandler, IPointerUpHandler, IPointerExitHandler, IPointerMoveHandler, ICanvasRaycastFilter
 {
     /// <summary>
     /// Per-surface rebuild cost, reported periodically.
@@ -824,6 +824,29 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         }
 
         return found;
+    }
+
+    /// <summary>Only the pointer over a hit region or a scrollable container is this surface's.</summary>
+    /// <remarks>
+    /// <c>raycastTarget</c> already keeps a purely decorative scene transparent, but ONE clickable
+    /// node made the whole rect opaque: a click on an empty part of the scene hit no node and
+    /// never reached what was underneath either, so a `textinput` behind the element could not be
+    /// focused at all. ScriptedScreens leaves the host's own fallback <see cref="Image"/> at
+    /// <c>raycastTarget = false</c>, so refusing here carries the raycast past the whole element.
+    ///
+    /// A scroll container claims its WHOLE viewport, not only the regions drawn in it, or the
+    /// wheel and drag-to-scroll would die on the empty part of a short list. <see cref="Locate"/>
+    /// decides that, the same test <see cref="OnScroll"/> and <see cref="OnDrag"/> use, so this
+    /// can never take a pointer those two then ignore.
+    ///
+    /// Only the START of a gesture is filtered. Unity runs drag, release and end-drag on the
+    /// object it stored at press time without raycasting again, which is why
+    /// <see cref="OnDrag"/> and <see cref="FinishDrag"/> already re-test the position and cope
+    /// with it being over nothing.
+    /// </remarks>
+    public bool IsRaycastLocationValid(Vector2 screen, Camera eventCamera)
+    {
+        return HitAt(screen, eventCamera, out _) || Locate(screen, eventCamera, out _);
     }
 
     /// <summary>A pointer's position in this surface's canvas space.</summary>

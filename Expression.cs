@@ -882,7 +882,7 @@ internal sealed class Expression
             // coordinate poisons every vertex derived from it, silently. Zero matches what `/`
             // already does and what the docs promise.
             case Kind.Modulo: return Modulo(Arg(0, context), Arg(1, context));
-            case Kind.Power: return Mathf.Pow(Arg(0, context), Arg(1, context));
+            case Kind.Power: return Power(Arg(0, context), Arg(1, context));
             case Kind.Call: return Invoke(context);
 
             // A colour is not a number. Reaching here means a colour was written where a
@@ -1002,6 +1002,18 @@ internal sealed class Expression
     private static float Modulo(float a, float b)
     {
         return Mathf.Approximately(b, 0f) ? 0f : a % b;
+    }
+
+    // Same reason as Divide, and `^` is the one operator that reaches it on ordinary input:
+    // `0^-1` is infinity, and a negative base with a fractional exponent -- `$v^0.5` the frame a
+    // reading dips below zero -- is NaN. Nothing between here and Mesh.SetVertices rejects
+    // either, and the scene is normally ONE mesh whose bounds every vertex feeds, so one
+    // poisoned coordinate takes the whole console rather than the shape that asked for it. Zero
+    // is what `/`, `%`, `mod` and `sqrt` of a negative already answer for a number with no value.
+    private static float Power(float a, float b)
+    {
+        var value = Mathf.Pow(a, b);
+        return float.IsNaN(value) || float.IsInfinity(value) ? 0f : value;
     }
 
     private float Invoke(EvalContext context)
@@ -1575,8 +1587,28 @@ internal sealed class Expression
         private string ReadName()
         {
             var start = _at;
-            while (_at < _text.Length && (char.IsLetterOrDigit(_text[_at]) || _text[_at] == '_'))
-                _at++;
+            while (_at < _text.Length)
+            {
+                var c = _text[_at];
+                if (char.IsLetterOrDigit(c) || c == '_')
+                {
+                    _at++;
+                }
+                else if (char.IsHighSurrogate(c) && _at + 1 < _text.Length && char.IsLowSurrogate(_text[_at + 1]))
+                {
+                    // A name outside the BMP is one TEXT ELEMENT in two UTF-16 units, and
+                    // `char.IsLetterOrDigit` is false for each half on its own: `$name`
+                    // reported "expected a name" for a name that works as an `id` and as a
+                    // label's `$binding`, both of which read the author's text as written. The
+                    // pair is taken whole, and an unpaired half still ends the name, so `_at`
+                    // can never land between the two. The ASCII loop above never reaches here.
+                    _at += 2;
+                }
+                else
+                {
+                    break;
+                }
+            }
 
             if (_at == start)
                 throw new FormatException("expected a name");

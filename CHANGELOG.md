@@ -2,6 +2,69 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.98
+
+Six faults that move pixels or change behaviour, as against 0.11.96 and 0.11.97 which only turned
+silences into reports. Two of them change a scene that is CORRECT today; both are called out below.
+
+### Fixed
+
+- **`^` is guarded like `/` and `%` now.** It was raw `Mathf.Pow`, so `0^-1` was infinity,
+  `(-2)^0.5` was not a number and `2^999` overflowed — and nothing between the expression and
+  `Mesh.SetVertices` rejects either, while a scene is normally ONE mesh whose bounds every vertex
+  feeds. One poisoned coordinate therefore took the whole console rather than the shape that asked
+  for it. All three answer `0` now, which is what `/`, `%`, `mod` and `sqrt` of a negative already
+  answered. Measured: `2^3` = 8, `2^-3` = 0.125 and `-2^2` = -4 unchanged, and a scene with a
+  poisoned `x` emits no non-finite vertex.
+  **This makes the reference's old sentence false, and that sentence was written the same day** —
+  it said `^` had no guard and told authors to keep the base positive. Corrected in the same commit.
+- **An `IMG` ignored the per-corner `rx` list** and drew square corners in silence, where an `R`
+  reads it. Measured: `rx = {12,12,12,12}` and `rx = 12` now both emit 52 vertices, against 4 for
+  square corners.
+- **`fl weight = normal` could not un-bold a bold label's first line.** `weight` was a plain bool,
+  so "absent" and "present and normal" were the same thing; it is nullable now. TMP ignores a
+  closing bold tag for a style the component's own `fontStyle` carries, so the fix takes the bold
+  off the label and lets the wrap bold the REST — `one <b>two` rather than an unclosed tag.
+- **An expression could not hold a supplementary-plane name.** `$<astral>` reported `expected a
+  name` and the attribute fell back to its default, while the same name worked as an `id` and as a
+  label's `$binding`, both of which read the author's text as written. The name lexer tested
+  `char.IsLetterOrDigit` on one UTF-16 unit and each half of a surrogate pair fails it; it reads a
+  text element now. Measured: 1 problem -> 0, with `=plain` still reporting `unknown variable` so
+  the lookup path is untouched.
+- **The element swallowed clicks over its WHOLE rect once anything in it was clickable.** A click
+  on an empty part of the scene hit no node AND never reached what was underneath, so a native
+  `textinput` behind a vector element could not be focused at all. `VectorGraphic` is an
+  `ICanvasRaycastFilter` now, answering for a pointer over a hit region **or over a scrollable
+  container's viewport** — the latter decided by the same `Locate` test `OnScroll` and `OnDrag`
+  use, so the filter can never take a pointer those two then ignore. Only the START of a gesture is
+  filtered; Unity runs drag and release on the object stored at press time without raycasting
+  again, which is why the drag handlers already re-test the position.
+  **Changed, so worth knowing:** a clickable vector element used deliberately as a SHIELD over
+  something behind it stops shielding.
+- **A stroke `so` inherited into an `SC` became its scroll offset.** `so` is stroke opacity on
+  every other op, so `G so=0.5 { SC sov=1 }` scrolled the container to 0.5 with nothing on the
+  `SC` asking for it — the merged map cannot tell an inherited key from one the author wrote. The
+  scroll offset is read from the node's OWN map now. 0.11.92 fixed the other half of the same
+  collision. Measured: the fault 0.500 -> null through both the bare and the `style = {…}` route,
+  while `SC so=0.5 sov=1` still reads 0.500 and an inherited `so` still dims a stroked child
+  inside the container (30 vertices against 24 bare).
+  **Changed, so worth knowing:** a scene relying on an ancestor's `so` to set a scroll position
+  must write `so` on the `SC` itself.
+
+### Held back
+
+- **An `LS` evaluates its paint outside its sample frame**, so `i` there means the enclosing repeat
+  while in a `YS` it means 0. The patch for it is written and NOT applied: moving the paint into
+  the sample scope makes `Index(0)` the sample number, but `EvalContext.Pointer` compares that
+  against the hit region's index, which is the enclosing repeat instance — so `hover` and `down`
+  would stop matching on a clickable `LS`. Fixing an inconsistency by breaking a documented feature
+  is not a trade worth making silently; it needs a design that keeps both.
+
+### Measured
+
+The 17-scene fingerprint is byte-identical to 0.11.97 at all three `t` values, and the unit suite
+passes at 359.
+
 ## 0.11.97
 
 The rest of the silence batch: the `src` reader and the text formatter. The pixel-moving changes
