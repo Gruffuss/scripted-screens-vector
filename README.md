@@ -489,12 +489,11 @@ And on the data element, `keep = 1` makes a payload a patch rather than the whol
 string sent once stays until it is changed. Without it every string on screen has to be resent
 every tick or it disappears.
 
-Three things it cannot do, because TMP builds its own geometry on its own object:
+Two things it cannot do, because TMP builds its own geometry on its own object:
 
 - It updates at the **rebuild rate**, not instantly. In practice that is up to 60 Hz (`MaximumHz`).
 - A clip that is not an axis-aligned rectangle — rounded, elliptical, concave — masks the text
   through the stencil, which is one more draw call per label it touches.
-- It cannot be part of a gradient fill — `f` is a flat colour sampled at the node's origin.
 
 `font` takes any family TMP knows, which is what the companion fonts mod registers. `fit` is
 `ellipsis` or `shrink`, and both are TMP's own overflow modes, so the fitting is done by the

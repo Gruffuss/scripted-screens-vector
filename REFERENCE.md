@@ -13,6 +13,15 @@ in the source repository.
 
 A scene is **two elements** sharing a `scene` name.
 
+They are told apart by what they carry. An element holding `data` or `nodes` is the **data**
+element whatever else it carries — a `root` or `src` on it is ignored. An element holding `root`
+or `src` and neither of those is the **structure** element. One holding only `keep`, `snap` or
+`ease` is neither, and does nothing. `scene` defaults to the element's own `id`. Elements pair
+only within the same console, surface and scene name, so two consoles running one script do not
+share a scene. An empty `src` counts as absent and `root` is used; when `src` is present and
+parses, the viewbox and the defs come from its own `SCENE` and `DEFS` lines, and the element's
+`w`, `h`, `fit` and `defs` are ignored.
+
 ### Structure element
 
 | Prop | Type | Meaning |
@@ -121,8 +130,8 @@ written once keeps arriving with every later payload and every later value snaps
 `snap = 0` to ease again. Measured at 0.11.91 by rebuild rate, which is what reveals a glide: an
 element snapped once sat at 8.7 rebuilds/s against a control gliding at 61.4, and returned to 61.1
 the moment `snap = 0` was sent. The same holds for `ease`, which also persists until replaced.
-Within a payload, snap is recorded per name: names a snapped payload leaves out keep easing. Colours and
-strings never ease anyway. Several data elements may write to one scene, so eased and snapped
+Within a payload, snap is recorded per name: names a snapped payload leaves out keep easing. Strings never ease, and a
+colour eases only when its name has an `ease` entry of its own. Several data elements may write to one scene, so eased and snapped
 values can live on separate elements, each with `keep = 1`:
 
 ```lua
@@ -146,7 +155,14 @@ data:set_props({
 A name with an entry glides for exactly that long, from the moment the payload applies,
 whatever the gap to the next one; give it seconds alone for a straight line. Curves are CSS's:
 `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, `cubic-bezier(a,b,c,d)` and
-`steps(n)`. A duration of 0 or less snaps, and so does `snap = 1`, which wins over any timing
+`steps(n)`, and the names are case-insensitive. `steps(n)` always jumps at the **end** of each
+step, as CSS `jump-end` does; a second argument such as `start` is ignored, and `n` is rounded and
+is at least `1`. In `cubic-bezier(a,b,c,d)` the two x values are held to `0..1` as in CSS, while
+the y values are not, so a curve may overshoot. A curve name not in this list glides in a straight
+line and says so only in the log. A negative delay is `0`. An entry whose first element is not a
+number is skipped, and that name then glides as if it had no entry.
+
+A duration of 0 or less snaps, and so does `snap = 1`, which wins over any timing
 in the same payload.
 
 **A third element delays the start**: `{ 0.3, "ease-in", 0.15 }` holds the value where it is
@@ -191,7 +207,7 @@ name without timing glides it the ordinary way, exactly as one that restates a n
 
 Restating a name mid-glide restarts it **from what is on screen**, so a value that changes
 faster than it can glide keeps moving smoothly instead of jumping back. Number arrays take
-timing the same way. Colours and strings never glide at all.
+timing the same way. Strings never glide at all, and colours only with an `ease` entry.
 
 A payload that arrives while the previous one is still waiting to apply is merged into it
 (`keep = 1`) or replaces it (a full payload), so no patch is lost.
@@ -283,6 +299,11 @@ such limit.
 
 Anything reported also puts a magenta hatched border around the surface, so a broken scene
 looks broken instead of looking switched off. Detail goes to `BepInEx/LogOutput.log`.
+
+A scene keeps at most **16 distinct problems**. Any further new one is dropped from the border,
+from `vector_stats` and from the log alike, so fix the first ones and reload to see the rest. The
+same message is recorded once however often it fires. Unresolved data names are a separate list
+and are not part of that count.
 
 Magenta rather than white for an unresolved colour is deliberate: white is a colour somebody
 meant to use, and magenta is not, so an unresolved binding reads as a fault rather than a
@@ -536,11 +557,16 @@ ignored, so annotations are harmless.
 | `clip` | string | id of a `CP` in `defs` |
 | `m` | `{a, b, c, d, e, f}` | CSS `matrix()`, applied after `t r s` (innermost) |
 | `bri` `con` `sat` `hue` `gray` `sep` `inv` | number/expr | colour filters, CSS `filter()` semantics |
-| `mask` | `"@gradient"` | multiplies every colour under the group by the gradient's alpha |
+| `mask` | `"@gradient"` | multiplies every colour under the group by the gradient's alpha. **The `@` is required** — `mask = "fade"` is ignored without a report, where `clip` takes the bare id |
 | `blur` | number/expr | CSS `filter: blur()`: the Gaussian's standard deviation, in the group's units. Flat closed fills under it draw blurred; see below |
 | `c` | array | child nodes |
 
 Applied scale → rotate → translate, about `a`. Nests without limit.
+
+`t`, `s` and `a` are **pairs**. A bare number is not a pair and is ignored, so `s = 2` does not
+scale — write `s = {2, 2}`. A pair holding one number sets x only and the other keeps its default:
+`0` for `t` and `a`, `1` for `s`. Neither case is reported. The same holds for `at` and `off` on
+an `IMG`.
 
 **`blur` blurs flat fills, on every closed shape.** Each flat fill under the group is drawn as
 its own blurred silhouette, the same geometry a shadow uses, which is
@@ -583,15 +609,24 @@ states that must not overlap.
 **`m` is a CSS matrix**, `x' = a·x + c·y + e`, `y' = b·x + d·y + f`, and it is the innermost
 factor, as in `transform: translate() rotate() scale() matrix()`: points go through the
 matrix first, then the scale, rotation and translation. Stroke widths scale by
-`sqrt(|ad − bc|)`. A matrix of any other length is a problem, not a silent identity.
+`sqrt(|ad − bc|)`. A matrix of any other length is a problem, not a silent identity. **`a` is the
+origin of the whole transform list, `m` included**, as CSS `transform-origin` is: `m = {2, 0, 0,
+2, 0, 0}` with `a = {50, 50}` scales about the point 50,50. `t` is applied outside it.
 
 **Text follows a skew or an uneven scale** from `m` or `s = {sx, sy}`: the letters lean and
-stretch with the group, as CSS transforms them. The viewbox `fit` is not part of that -- with
+stretch with the group, as CSS transforms them. The sizes that travel with the text — `size`,
+`min_size`, `ow`, a text shadow's offset, blur and spread, and the `size` inside `fl` — follow the
+group's **horizontal** scale only (`sx`, and for `m` the square root of `|ad − bc|`), never `sy`.
+Under `s = {1, 3}` they keep their unscaled values and the vertical stretch reaches the glyphs
+only as the stretch just described. The viewbox `fit` is not part of that -- with
 `fit = "stretch"` into a box of another shape, shapes stretch to fill it and text keeps its
 letterforms, as it always has.
 
 **Filters** take CSS's amounts: `bri=1` `con=1` `sat=1` `hue=0` `gray=0` `sep=0` `inv=0` change
-nothing; `gray`, `sep` and `inv` clamp to `0..1`, `hue` is in degrees. Several on one group
+nothing; `gray`, `sep` and `inv` clamp to `0..1`, `hue` is in degrees. `sat` below `0` counts as
+`0`. **`bri` and `con` have no limit on the amount**: a negative `bri` draws black, a negative
+`con` inverts the colours about mid grey, and large values push channels to `0` or `1` and stop
+there. After each filter every channel is held to `0..1`; alpha is never touched. Several on one group
 apply **in the order written**, as a CSS filter list does, and a nested group's filters apply
 before its parent's. They reach fills, strokes, feathers, shadows and text, including text
 shadows. Two limits:
@@ -629,10 +664,20 @@ enclosing index is `i1`, the next out `i2`.
 
 `n` is structural — changing it means resending the structure element.
 
+A `YS` or `LS` counts as a repeat of its `n` samples for `x`, `y` and `y2`, so `i1` there is the
+repeat around it. A `YS` reads `f`, `fo`, `fo2` and `fea_edge` **once**, as sample 0, so an `i` in
+them is `0`. When Count LOD thins a repeat, `n` stays the count you wrote and `i` stops short of
+it: the instances that remain keep their original places and the later ones are simply missing.
+A clickable node, and `hover` on one, carry only the **innermost** index, so a repeat inside a
+repeat cannot say which outer copy was hit — for a grid use one repeat and take `floor(i/cols)`
+and `mod(i, cols)`.
+
 ### `R` — rectangle
 
 `x`, `y`, `w`, `h`, plus optional `rx` / `ry` corner radii. `rx` alone gives circular
-corners. Radii too large for the box shrink as CSS shrinks them: one `rx` to half the
+corners. Given as a list, **write all four**: a missing corner is `0`, not copied from another as
+CSS shorthand copies it, so `{ 10, 10, 10 }` leaves the bottom-left sharp. Corners given that way
+are circular — `ry` is not read when `rx` is a list. Radii too large for the box shrink as CSS shrinks them: one `rx` to half the
 shorter side, and per-corner radii all by the same factor wherever the two along one side add
 up to more than that side. Corners are true arcs.
 
@@ -848,7 +893,7 @@ container, where it will be clipped away and look like nothing happened.
 | `lh` | line height as a multiple of the font size, CSS style; omitted uses the font's own |
 | `sh` | text shadows, several allowed, one of them `inset` — see Shadows |
 | `ow` | outline width in scene units, centred on the glyph edge (CSS `-webkit-text-stroke`); scales with the transform |
-| `oc` | outline colour, `#rrggbb` or `#rrggbbaa`; default black |
+| `oc` | outline colour: any colour literal (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, a colour name, `transparent` or `none`); default black. A **literal only** — `$name` and `=` are not read, and a value that is not a colour is reported |
 | `fl` | first-line overrides, `"f=#fff size=12 weight=bold font='Name'"` — see below |
 | `fit` | `none` (default), `ellipsis`, `shrink` |
 | `min_size` | floor for `shrink` |
@@ -897,6 +942,10 @@ face only: text shadows and the outline keep their own colours.
 and half outside, as CSS `-webkit-text-stroke` does. How wide it can go depends on the font's
 atlas padding; past it the outline is capped at the widest the font allows and the surface's
 TEXT warnings say so. A text shadow is cast by the letters, not by their outline.
+
+Its keys are lower case and exact; any other key is reported. `f` takes the same literals as
+`oc`, `size` is a plain number rather than an expression, and `weight` is `bold` or a number of
+`600` or more — any other word leaves the first line at the label's own weight.
 
 **`fl` styles the first line**, like CSS `::first-line`: a string of `f`, `size` (scene units,
 scaled like `size`), `weight` and `font`, quoted where a value has spaces. Only the text engine
@@ -1113,7 +1162,9 @@ IMG x=10 y=10 w=180 h=60 src=file:///panel.png slice=[12,12,12,12] bw=[6,6,6,6]
 
 ## Paint
 
-Applies to any shape node.
+Applies to every shape node **except `IMG`**, which draws no fill, stroke or shadow of its own —
+its only paint key is `o`. A `T` takes `f`, `fo` and `sh` and is never stroked, and a `YS` is
+filled but never stroked.
 
 ### Fill
 
@@ -1181,6 +1232,15 @@ Joins are a **clamped miter** rather than inserted bevel or round geometry — i
 stroke widths, visible on very wide strokes at sharp corners. `join` is closer to a hint than
 a guarantee.
 
+`dash` and `dofs` are in the shape's **own units**, like `sw`, so they scale with the group. A
+list of odd length is repeated to make an even one, as in SVG: `dash = {10}` is `{10, 10}`, and
+`{5, 3, 2}` runs 5 on, 3 off, 2 on, 5 off, 3 on, 2 off. A list adding up to nothing draws a solid
+line. A closed outline's pattern starts where its outline starts: the top-left corner of a
+square-cornered `R`, the **top edge where the top-right arc begins** on a rounded one, and three
+o'clock on a `C`, always running clockwise on screen. `cap` only shapes the ends of an open run,
+so an undashed closed shape ignores it, while a dashed one gives **every dash** the cap, adding
+`sw/2` to each end of each dash.
+
 ### Clicks — `click`
 
 A node with an `id` and `click = 1` becomes a hit region. The click arrives at the **vector
@@ -1226,8 +1286,9 @@ an `L` drawing three sides of a box answers clicks on those three lines, not in 
 A **closed** shape answers inside its outline whether or not it is filled, which is how a scene
 makes an invisible hit area; so does an open shape with no stroke at all.
 
-**Every drawn SHAPE can be clicked: `R`, `C`, `L`, `Y`, `SP`, `LS` and `P`.** A `P` is clickable
-over its outer contour, holes included.
+**Every drawn shape except `YS` can be clicked: `R`, `C`, `L`, `Y`, `SP`, `LS` and `P`.** A `P` is
+clickable over its outer contour, holes included. **A `YS` records no hit area at all** — put a
+transparent `R` over it when a band has to answer.
 
 **`T` and `IMG` can be clicked from 0.11.93.** Each takes clicks on its own box: a picture
 through the same outline it draws, corner radii included; a label through its rect, the same
@@ -1272,9 +1333,9 @@ the same kind within a quarter of a second arrived as one.
 
 **`xy = 1` reports where the node was hit**, as fractions of its box from its top-left corner:
 `id@fx,fy`, three decimals each, `0,0` top-left and `1,1` bottom-right, measured in the node's
-own space (a turned slider still reads along its own length). Every value the node sends carries
-it -- the click, and `down`/`up` with `press = 1`; a release off the node reads as its nearest
-edge. For a slider or a colour picker:
+own space (a turned slider still reads along its own length). Only the click carries it, and `down`/`up` with `press = 1`; a release off the node reads as its
+nearest edge. `leave`, `enter`, `exit`, `dragstart`, `drop` and `dragend` always send the bare id,
+with no position. For a slider or a colour picker:
 
 ```lua
 on_click = function(value, player)
@@ -1451,7 +1512,12 @@ bands, one accent colour across a control.
 | Key | Meaning |
 |-----|---------|
 | `fea` | edge softness in scene units; omitted means automatic |
-| `fea_edge` | softness for a band's sampled edge only |
+| `fea_edge` | softness of a `YS`'s sampled edge. Omitted, it takes `fea`, and then the automatic width |
+
+**A `YS` feathers its sampled edge and nothing else** — its `y2` edge and its two ends are never
+feathered. On a band `fea` therefore does nothing except supply the default for `fea_edge`:
+`fea = 6` and `fea_edge = 6` draw the same band, and `fea = 6` with `fea_edge = 0` draws a hard
+one.
 
 The default resolves to roughly **1.3 screen pixels**, not a fixed number of scene units,
 because the same scene draws at very different sizes. `0` gives deliberately hard edges; a
@@ -1483,17 +1549,28 @@ Without feathering every edge is hard — UGUI applies no antialiasing of its ow
 | Key | Meaning |
 |-----|---------|
 | `id` | name, referenced as `@id` |
-| `x1`, `y1`, `x2`, `y2` | the ramp axis |
+| `x1`, `y1`, `x2`, `y2` | the ramp axis; default `0,0` to `0,1`, top to bottom under `bbox`. An axis of no length paints the first stop everywhere |
 | `units` | omitted for scene coordinates, `"bbox"` for shape-relative |
 | `stops` | array of `{ position, colour }`, position `0..1` |
 | `spread` | past the ends of the ramp: `pad` (default, hold the end colours), `repeat`, `reflect`, `none` (transparent) |
+
+A radial or conic gradient without `cx`, `cy` is centred on `0,0` — the scene origin, or the
+**top-left corner** of the shape under `bbox`. Write `0.5` for the middle of the box. `units` is
+`bbox` or anything else, which means scene coordinates; `spread` is `repeat`, `reflect` or `none`,
+or anything else, which means `pad`. Both are case-insensitive and **an unknown word is not
+reported**. Stop positions are held to `0..1` and stops out of order are sorted. A stop that is
+not a pair, whose colour is not a string, or whose colour will not parse is dropped **without a
+report**, so `stops = { { 0, "#fff" }, { 1, "bleu" } }` is a flat `#fff`. A gradient with no stops
+paints white, and only the log says so. A stop colour `$name` the payload does not supply draws
+that stop magenta but is not listed among the unresolved names, and `$name[i]` is not read as a
+stop colour at all.
 
 ### `GR` — radial gradient
 
 | Key | Meaning |
 |-----|---------|
 | `id` | name |
-| `cx`, `cy`, `r` | centre and radius |
+| `cx`, `cy`, `r` | centre and radius; defaults `0`, `0`, `1`. A radius of `0` or less becomes `0.0001` |
 | `fx`, `fy` | optional focus, default the centre |
 | `units` | as above |
 | `stops` | as above |
@@ -1573,8 +1650,8 @@ where the subdivided fill grew from 43,000 to 99,000 with size.
 | Key | Meaning |
 |-----|---------|
 | `id` | name |
-| `cx`, `cy` | centre |
-| `a` | start angle, degrees **clockwise from twelve o'clock**, as CSS `conic-gradient(from a)` |
+| `cx`, `cy` | centre; both default `0` |
+| `a` | start angle, degrees **clockwise from twelve o'clock**, as CSS `conic-gradient(from a)`; default `0` |
 | `units` | as above; with `bbox` the centre is a fraction of the shape's box |
 | `stops` | as above, positions `0..1` around the turn |
 
@@ -1658,13 +1735,20 @@ the same group.
 
 Rectangle, rounded rectangle, ellipse, polygon or path — **convex or not**. Outlines are in
 **scene coordinates** and stay put when the referencing group is transformed. A path clips to
-its outer contour.
+its outer contour, and an `L` clips as its closed polygon.
+
+`c` takes **one** shape: `R`, `C`, `L`, `Y` or `P`. If several are written the first with a known
+op is used and the rest are ignored; any other op (`SP`, `YS`, `T`) leaves the clip with no usable
+shape, which is reported.
 
 **A clip's geometry can be a value.** `CP id=track { R x=20 y=20 w="$w" h=16 }` is re-cut
 every rebuild, so a clipped bar, a masked gauge or a list window follows the data payload
 with no new structure. A clip that evaluates to nothing — a width of zero — hides what it
 clips rather than releasing it, which is what an empty window means. A clip written with
-plain numbers is cut once at parse, as before.
+plain numbers is cut once at parse, as before. Only an `R` or a `C` can carry a value that way —
+the points of the others are fixed. A plain-number clip with no area, such as a width of `0`, is
+reported and the content it clips draws **unclipped**; only a clip written as a value, reaching
+zero area, hides its content.
 
 **A concave clip costs more than a convex one.** Clipping stays geometric: the outline is split
 into convex pieces and every shape under the group is emitted once per piece, so an L-shaped
@@ -1689,8 +1773,8 @@ Any numeric attribute may be a string beginning with `=`.
 |------|---------|
 | `t` | seconds since the scene first appeared. A new structure restarts it; re-sending the **same** `src` does not (0.11.74) — see below |
 | `i` | current repeat index, `0` outside a repeat |
-| `i1`, `i2`, … | enclosing repeat indices, outward |
-| `n` | current repeat count |
+| `i1`, `i2`, … | enclosing repeat indices, outward; `0` where no repeat reaches that far out. `i0` is `i` |
+| `n` | count of the **innermost** repeat, `0` outside one. There is no `n1`: an outer repeat's count cannot be read from an inner one |
 | `$name` | scalar from the data payload |
 | `$name[expr]` | array element, **0-based**; out of range yields `0` |
 | `sy` | scroll offset of the enclosing scroll view or `SC`, in scene units; `0` when there is none |
@@ -1758,7 +1842,20 @@ when scanning the function table. An unknown function name throws at parse time 
 evaluating to zero, so it fails loudly, but the scene it is in will not draw.
 
 Division by zero yields `0`, not infinity — an infinity would poison vertex positions and produce an invisible mesh
-rather than a visible glitch.
+rather than a visible glitch. `%` and `mod(a, 0)` do the same. **`^` has no such guard**: `0^-1`
+is infinity, and a negative base with a fractional exponent is not a number, so keep the base
+positive wherever the exponent can vary.
+
+`round` takes a half to the **even** neighbour: `round(2.5)` is `2` and `round(3.5)` is `4`. An
+array index rounds the same way, so **`$a[i/2]` is not a floor** — write `$a[floor(i/2)]`.
+`sign(0)` is `1`. `sqrt` of a negative number is `0`. `eq` and `not` compare to within about one
+part in a million, and "non-zero" in `if`, `and` and `or` means not zero for practical purposes,
+so `0.000000001` counts as non-zero. `lt`, `gt`, `lte` and `gte` compare exactly, so `eq(a, b)`
+can be `1` where `lte(a, b)` is `0`. `lerp` does not limit `t`; `mix` does. `smoothstep` with
+equal edges is a hard step at that edge, and with the edges swapped it ramps down.
+`pulse(x, duty)` is `1` while the fractional part of `x` is below `duty`. `hash` rounds its input
+to the nearest 1/4096 first, so inputs closer than that give the same value, and `hash2(x, y)` is
+`hash(x * 37.19 + y * 91.73)` — one number, not two independent ones.
 
 ### Functions
 
@@ -1807,8 +1904,7 @@ according to `fit`.
 
 | | Why |
 |---|---|
-| blur and backdrop effects | need an offscreen pass or a custom shader. Drop shadows **are** supported — see `sh` |
+| backdrop blur, and `blur` on anything but flat closed fills | a backdrop needs an offscreen pass; `blur` on a group blurs flat fills only, see `G`. Drop shadows **are** supported — see `sh` |
 | horizontal scrolling | `SC` is vertical only |
 | self-intersecting fills | ear clipping is undefined on them; detection costs more than the fill |
-| holes inside a clipped fill | needs boolean subtraction |
 | expressions in a path's `d` | the command string is parsed once; move or scale the path with its group's `t`/`r`/`s`, or draw it as `YS`/`LS` samples |
