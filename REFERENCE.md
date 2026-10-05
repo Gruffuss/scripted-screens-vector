@@ -877,7 +877,7 @@ walk records where each `T` landed and the labels are created and updated when t
 | updates from `data` | **yes** — strings are data values now, so `text = "$name"` works like a number |
 | rich text, registered fonts | **yes** — it is real TMP |
 | clipping | **to the clip's real outline.** An axis-aligned rectangle uses `RectMask2D`; a rounded, elliptical or concave clip masks through the stencil, at one extra draw call per masked label |
-| filters and masks | **yes** — a group's filters and `mask` reach the glyphs' vertex colours |
+| filters and masks | **yes** — a group's filters reach the label's fill, its shadows and its outline; `mask` reaches the glyphs |
 | update rate | at the **rebuild** rate, not instantly |
 
 `ellipsis` and `shrink` are TMP's own overflow modes, so fitting is done by the engine that

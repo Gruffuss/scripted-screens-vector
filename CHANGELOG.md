@@ -2,6 +2,18 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.88
+
+- **Fixed: a group's colour filters skipped a label's outline.** `G gray=1 { T oc=... ow=... }`
+  drew a grey fill with an outline still in its original colour. The fill is filtered through the
+  glyph vertices and the shadow colours are filtered where they are placed, but the outline is the
+  one text colour that is a material property rather than a vertex colour, so nothing downstream
+  ever touched it. Measured before the fix: a red outline stayed at (1.000, 0.000, 0.000) while
+  the fill it belonged to drew at (0.213, 0.213, 0.213). Nested filters compose correctly too.
+
+  The reference said filters "reach the glyphs' vertex colours", which was true and misleading in
+  the same breath; it now names the fill, the shadows and the outline.
+
 ## 0.11.87
 
 Two things 0.11.85 broke and shipped. Its own offline suite had been reporting both; this is the

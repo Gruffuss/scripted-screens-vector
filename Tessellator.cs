@@ -1566,7 +1566,13 @@ internal static class Tessellator
             LineHeight = node.LineHeight,
             Shadow = textShadow,
             OutlineWidth = Mathf.Max(0f, node.TextOutlineWidth?.Evaluate(context) ?? 0f) * frame.Scale,
-            OutlineColour = node.TextOutlineColour,
+            // Filtered like the shadows above, and for the same reason: a group's filters reach
+            // everything drawn under it. The outline is the one text colour that is a MATERIAL
+            // property rather than vertex colour, so the glyph tint never touches it and this is
+            // its only chance to be filtered -- which is also why filtering here cannot apply
+            // twice. A mask is positional and cannot act on a material colour, so only the
+            // filters are applied, exactly as a shadow does it.
+            OutlineColour = vh.Tint?.ApplyFilters(node.TextOutlineColour) ?? node.TextOutlineColour,
             ExtraShadows = extraShadows?.ToArray(),
             InsetShadow = insetShadow,
             ClipRect = clip,
