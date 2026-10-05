@@ -86,8 +86,9 @@ function tick()
 end
 ```
 
-`ui:commit()` between the two makes both arrive, because it delivers the declaration before the
-patch replaces it.
+`ui:commit()` between the two makes both arrive, because it delivers the first payload before the
+second replaces it. Measured at 0.11.91 against a control in the same frame: with the commit both
+names read their values; without it the first reads missing.
 
 **Declaring at load and patching in `tick` is fine on its own** — the execution ends between
 them, and that delivers the declaration without any commit.
