@@ -2,6 +2,46 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.97
+
+The rest of the silence batch: the `src` reader and the text formatter. The pixel-moving changes
+move to 0.11.98.
+
+### Fixed
+
+- **A malformed brace was accepted in silence, both ways.** A scene whose text ended with an
+  unclosed `{` parsed into a complete, plausible tree — every node inside the block had already
+  been attached — and read exactly like a closed one. A stray `}` was worse: it ENDED the scene
+  and discarded every node after it, with nothing reported anywhere, so a page simply stopped
+  halfway. Both are refused now, and the unclosed one names the line that OPENED the block rather
+  than the innocent last line of the scene.
+- **The unquoted-value error never named the character that broke it.** `T text=one,two` rejects
+  the whole scene, and the message talked about spaces, `=` and `;` — never the comma. It now
+  reads `expected an op, found `,``. Message text only; nothing changes what is accepted.
+- **A `]` inside a `{$n:spec}` format spec was silently wrong, and wrong in two different ways.**
+  The placeholder took the LAST `]` as the index's closing bracket, which it is only when the
+  spec holds none. Without an index, `{$n:%.2f]}` made `n:%.2f]` the whole NAME and drew the
+  missing text for a name nobody wrote. WITH an index, `{$arr[0]:%.2f]}` skipped the real colon,
+  handed `0]:%.2f` to the expression parser — which reported a `]` it could not read, a message
+  about nothing the author wrote — and **dropped the format entirely**, so the number printed
+  through the default `0.##`. The colon is now the first one outside the index: both forms apply
+  the format, and a `]` in a spec is the literal that `[` already was.
+- **An unreadable `fmt` printed itself, in silence**, where the reference promised the `missing`
+  text. `%q` drew `%q`, `nonsense` drew `nonsense`, `""` drew no label at all. Printing the
+  author's own spec is the honest half — `missing` would hide the typo — so the silence is what
+  is fixed. **A .NET composite format such as `{0:F1}` still works and still says nothing**: it
+  also comes back unchanged from the printf translator, so "unchanged" alone is not the test, and
+  the check asks whether any conversion reached the formatter at all.
+
+### Measured
+
+The 17-scene fingerprint is byte-identical, every one of the repo's 22 scene-text blocks is still
+accepted, and the unit suite passes at 359. `{$n:%.2f]}` and `{$arr[0]:%.2f]}` both draw `254.60]`
+where they drew `--` and `254.6`; `%q` and `""` report while `%.1f` and `{0:F1}` stay silent.
+
+**`%.1f` would not have shown the format being dropped** — it happens to equal the `0.##` default
+for the value under test. The decimals in the falsification are the whole point of it.
+
 ## 0.11.96
 
 Nine silent failures become reported ones. None of them moves a pixel that was already correct;

@@ -247,24 +247,40 @@ internal static class SceneText
     {
         var root = new List<Node>();
         var enclosing = new Stack<List<Node>>();
+
+        // Where each open `{` is, innermost last, so an unclosed one can name its own line.
+        var opened = new Stack<int>();
         var nodes = root;
 
         while (true)
         {
             SkipTrivia(r);
             if (r.At >= r.Text.Length)
+            {
+                // An unclosed `{` simply ran out of input here, and every node inside it had
+                // already parsed, so a scene missing its `}` was accepted in SILENCE and read
+                // exactly like a closed one. The reader goes back to the `{` so Fail names the
+                // line that OPENED the block instead of the innocent last line of the scene.
+                if (opened.Count > 0)
+                {
+                    r.At = opened.Peek();
+                    throw Fail(r, "a { block was never closed");
+                }
+
                 break;
+            }
 
             if (r.Text[r.At] == '}')
             {
                 r.At++;
 
-                // A `}` with nothing open is a stray one at the top level, and ends the scene
-                // exactly as it did when this was the bottom of the recursion.
+                // A `}` with nothing open used to END the scene, throwing away every node after
+                // it in silence -- a page that stopped halfway and said nothing anywhere.
                 if (enclosing.Count == 0)
-                    break;
+                    throw Fail(r, "a } closes a block that was never opened");
 
                 nodes = enclosing.Pop();
+                opened.Pop();
                 continue;
             }
 
@@ -275,6 +291,10 @@ internal static class SceneText
                 continue;
 
             enclosing.Push(nodes);
+
+            // ParseNode consumes the `{` and returns at once, so it is the character before the
+            // cursor. The end-of-input check above reports this line if it is never closed.
+            opened.Push(r.At - 1);
             nodes = node.Children;
         }
 
@@ -285,9 +305,21 @@ internal static class SceneText
     {
         opensBlock = false;
 
+        // Where the token starts, for the message below: an empty token means ReadToken broke on
+        // the very first character and never moved.
+        var from = r.At;
+
         var node = new Node { Op = ReadToken(r) };
         if (node.Op.Length == 0)
-            throw Fail(r, "expected an op (a value holding spaces, `=` or `;` -- a data: URL, say -- must be quoted)");
+        {
+            // NAME the character that stopped it. `,` `[` `]` `{` and `=` all end a token and none
+            // of them can start one, so "expected an op" on its own sent the author of
+            // `T text=one,two` down the line hunting for a missing quote; the comma is the one
+            // thing they needed to be told.
+            var stopped = from < r.Text.Length ? "`" + r.Text[from] + "`" : "the end of the text";
+            throw Fail(r, $"expected an op, found {stopped} (a value holding it, a space, an `=` "
+                          + "or a `;` -- a data: URL, say -- must be quoted)");
+        }
 
         while (true)
         {

@@ -1537,6 +1537,25 @@ internal static class SceneParser
                 // `fmt` turns the node into a NUMBER formatter: the chip sends the value it
                 // already has in the payload and does no string work at all.
                 node.TextFormat = PropString(map, "fmt");
+
+                // A spec this cannot read reaches `string.Format` unchanged and so PRINTS ITSELF:
+                // `fmt="%q"` drew "%q", `fmt="nonsense"` drew "nonsense", `fmt=""` drew no label
+                // at all -- every one in silence, while REFERENCE promised the `missing` text.
+                // Printing the author's own spec is the honest half, since `missing` would hide
+                // the typo; the silence is the fault.
+                //
+                // `ToNet` handing back its own input is how it says it could not read the spec,
+                // but that alone is NOT the test: a .NET composite format (`{0:F1}`) comes back
+                // unchanged too and formats the number correctly. The second half asks whether
+                // any conversion reached the formatter at all.
+                var net = node.TextFormat == null ? null : Printf.ToNet(node.TextFormat);
+                if (net != null && string.Equals(net, node.TextFormat, StringComparison.Ordinal)
+                    && !Printf.TrySplit(net, out _, out _, out _))
+                {
+                    scene.Problem($"T: fmt \"{node.TextFormat}\" is not a printf conversion, "
+                                  + "so it prints instead of the number");
+                }
+
                 node.TextUnit = PropString(map, "unit");
                 if (node.TextLiteral != null)
                     node.TextParts = TextTemplate(node.TextLiteral, node.TextFormat);
@@ -2499,9 +2518,22 @@ internal static class SceneParser
             }
             else
             {
-                // The format follows the last ':' after any index, so `$rows[i]` may hold anything.
-                var bracket = inner.LastIndexOf(']');
-                var colon = inner.IndexOf(':', Math.Max(bracket, 0));
+                // The format follows the first ':' OUTSIDE the index, so `$rows[i]:%d` splits at
+                // the colon past the `]` while the index itself may hold anything.
+                //
+                // This took the LAST `]` as the index's, which it is only when the SPEC holds
+                // none. `{$n:%.1f]}` has no index at all, so the colon was sought past the `]` in
+                // the spec, never found, and `n:%.1f]` became the NAME -- the label drew the
+                // missing text for a name nobody wrote. `{$arr[0]:%.2f]}` broke the other way:
+                // the real colon was skipped too, `0]:%.2f` went to the expression parser (which
+                // reported the `]` it could not read) and the format was DROPPED, so the number
+                // printed through the default "0.##" instead.
+                // The start index keeps the analyser happy: `IndexOf(char)` alone is CA1307,
+                // `IndexOf(char, int)` is not, which is why the lines around here already use it.
+                var colon = inner.IndexOf(':', 0);
+                var bracket = inner.IndexOf('[', 0);
+                if (bracket >= 0 && (colon < 0 || bracket < colon))
+                    colon = inner.IndexOf(':', inner.IndexOf(']', bracket) + 1);
                 var bound = SplitBinding(colon < 0 ? inner : inner[..colon]);
                 parts.Add(TextPart.Binding(bound.Name, bound.Index, colon < 0 ? fallbackFormat : inner[(colon + 1)..]));
             }
