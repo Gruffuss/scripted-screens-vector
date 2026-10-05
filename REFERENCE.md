@@ -43,11 +43,12 @@ data:set_props({ nodes = { hv_bar = { w = 42, f = "#E23D3D" } } })
 
 The patch is **merged onto the node's original props and the node re-parsed**, so keys the
 patch does not mention keep their values — a partial apply would reset them to defaults.
-Children are kept when the patch does not mention them, but the re-parse walks the **whole merged
-subtree**, so patching a group is not free for what it holds. Two consequences worth knowing:
-a patch that does carry `c` **replaces** the children rather than merging into them, and a
-descendant re-parsed this way keeps only the inherited keys on the whitelist -- anything inherited
-outside it is lost. Patch the leaf you mean rather than a group above it.
+**Children are never patched.** They are kept as they were whether or not the patch mentions
+them: a `c` carried by a patch is **dropped**, not applied and not merged, so a patched `USE`
+does not re-expand and a group default changed by a patch does not reach what is under it. A
+descendant also keeps only the inherited keys on the whitelist -- anything inherited outside it
+is lost. Patch the leaf you mean rather than a group above it, and send a new structure when the
+children themselves have to change.
 
 Use it for a change no expression can express — a different op, a new gradient reference, a
 count. For anything that is only a *value*, prefer `data` and an expression: that path needs
@@ -1212,10 +1213,16 @@ an `L` drawing three sides of a box answers clicks on those three lines, not in 
 A **closed** shape answers inside its outline whether or not it is filled, which is how a scene
 makes an invisible hit area; so does an open shape with no stroke at all.
 
-Every shape can be clicked: `R`, `C`, `L`, `Y`, `SP`, `P`, `IMG` and `T`. Until 0.11.74 only
-`R`, `C`, `IMG` and `T` registered a hit area, so `press`, `xy`, `drag` and plain clicks on a
-polyline, a polygon, a spline or a path did nothing at all and reported nothing. A `P` is
-clickable over its outer contour, holes included.
+**Every drawn SHAPE can be clicked: `R`, `C`, `L`, `Y`, `SP`, `LS` and `P`.** A `P` is clickable
+over its outer contour, holes included.
+
+**`T` and `IMG` cannot.** A label or a picture with `click = 1` registers no hit area, does
+nothing and reports nothing; put a transparent `R` over it when you need one to be clickable.
+This has always been so -- the doc previously claimed otherwise, and claimed they worked before
+0.11.74, but a hit area has only ever been recorded where a shape's outline is built.
+
+Until 0.11.74 only the closed shapes registered one, so `press`, `xy`, `drag` and plain clicks on
+a polyline, a polygon, a spline or a path did nothing at all and reported nothing.
 
 **`press = 1` reports holding as well as clicking**, for a press-and-hold button or a
 hold-to-act control. The node is clickable as with `click = 1`, and the same `on_click` also
