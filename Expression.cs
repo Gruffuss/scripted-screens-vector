@@ -650,36 +650,81 @@ internal sealed class Expression
     /// </remarks>
     internal bool EvaluateColour(EvalContext context, out Color colour)
     {
-        switch (_kind)
+        // An explicit stack, like every other walk here. `if` is a TAIL position -- the branch
+        // taken is the whole answer -- so only `mix` leaves work behind, marked by a null on
+        // the work stack and completed once both its ends are resolved.
+        var work = new Stack<Expression?>();
+        var blends = new Stack<Expression>();
+        var done = new Stack<Color>();
+        var failed = false;
+
+        work.Push(this);
+
+        while (work.Count > 0)
         {
-            case Kind.Colour:
-                colour = _colour;
-                return true;
+            var node = work.Pop();
 
-            case Kind.Call when string.Equals(_name, "if", StringComparison.Ordinal):
+            if (node == null)
             {
-                // `if(cond, a, b)`: the condition is a number, the branches are colours.
-                var chosen = _args.Length == 3 && NonZero(Arg(0, context)) ? _args[1] : _args.Length == 3 ? _args[2] : null;
-                if (chosen != null)
-                    return chosen.EvaluateColour(context, out colour);
-
-                break;
+                // `to` was pushed after `from`, so it pops first.
+                var blend = blends.Pop();
+                var to = done.Pop();
+                var from = done.Pop();
+                done.Push(Gradient.MixPremultiplied(from, to, Mathf.Clamp01(blend.Arg(2, context))));
+                continue;
             }
 
-            case Kind.Call when string.Equals(_name, "mix", StringComparison.Ordinal):
+            if (node._kind == Kind.Colour)
             {
-                // `mix(a, b, t)`: blended the way a gradient stop is, PREMULTIPLIED, so a mix
-                // towards a transparent colour fades out instead of drifting through its hue.
-                if (_args.Length == 3 && _args[0] != null && _args[1] != null
-                    && _args[0]!.EvaluateColour(context, out var from)
-                    && _args[1]!.EvaluateColour(context, out var to))
+                done.Push(node._colour);
+                continue;
+            }
+
+            if (node._kind == Kind.Call && node._args.Length == 3)
+            {
+                if (string.Equals(node._name, "if", StringComparison.Ordinal))
                 {
-                    colour = Gradient.MixPremultiplied(from, to, Mathf.Clamp01(Arg(2, context)));
-                    return true;
+                    // The condition is a number and ONLY the branch taken is evaluated, as
+                    // before: the other one is never asked whether it is a colour.
+                    var chosen = NonZero(node.Arg(0, context)) ? node._args[1] : node._args[2];
+                    if (chosen == null)
+                    {
+                        failed = true;
+                        break;
+                    }
+
+                    work.Push(chosen);
+                    continue;
                 }
 
-                break;
+                if (string.Equals(node._name, "mix", StringComparison.Ordinal))
+                {
+                    // `mix(a, b, t)`: blended the way a gradient stop is, PREMULTIPLIED, so a
+                    // mix towards a transparent colour fades out instead of drifting through
+                    // its hue. `t` is read at the combine, after both ends, as it was.
+                    if (node._args[0] == null || node._args[1] == null)
+                    {
+                        failed = true;
+                        break;
+                    }
+
+                    blends.Push(node);
+                    work.Push(null);
+                    work.Push(node._args[1]);
+                    work.Push(node._args[0]);
+                    continue;
+                }
             }
+
+            // Anything else is not a colour, including arithmetic on one.
+            colour = Color.white;
+            return false;
+        }
+
+        if (!failed && done.Count == 1)
+        {
+            colour = done.Pop();
+            return true;
         }
 
         colour = Color.white;
@@ -701,29 +746,49 @@ internal sealed class Expression
     {
         get
         {
-            if (_kind == Kind.Colour)
-                return true;
+            // Every branch that can be returned has to be a colour, so this is a pure
+            // conjunction: push what must hold, fail on the first thing that does not, and
+            // succeed when the stack empties. Iterative for the same reason as everything
+            // else here -- the parser builds trees far deeper than the stack would take.
+            var stack = new Stack<Expression>();
+            stack.Push(this);
 
-            if (_kind != Kind.Call)
+            while (stack.Count > 0)
+            {
+                var node = stack.Pop();
+
+                if (node._kind == Kind.Colour)
+                    continue;
+
+                if (node._kind != Kind.Call || node._args.Length != 3)
+                    return false;
+
+                // `if(cond, a, b)`: the condition is a number, both OUTCOMES must be colours.
+                if (string.Equals(node._name, "if", StringComparison.Ordinal))
+                {
+                    if (node._args[1] == null || node._args[2] == null)
+                        return false;
+
+                    stack.Push(node._args[1]!);
+                    stack.Push(node._args[2]!);
+                    continue;
+                }
+
+                // `mix(a, b, t)`: both ENDS must be colours; `t` is a number.
+                if (string.Equals(node._name, "mix", StringComparison.Ordinal))
+                {
+                    if (node._args[0] == null || node._args[1] == null)
+                        return false;
+
+                    stack.Push(node._args[0]!);
+                    stack.Push(node._args[1]!);
+                    continue;
+                }
+
                 return false;
-
-            // `if(cond, a, b)`: the condition is a number, both OUTCOMES must be colours.
-            if (string.Equals(_name, "if", StringComparison.Ordinal))
-            {
-                return _args.Length == 3
-                       && _args[1] is { IsColour: true }
-                       && _args[2] is { IsColour: true };
             }
 
-            // `mix(a, b, t)`: both ENDS must be colours; `t` is a number.
-            if (string.Equals(_name, "mix", StringComparison.Ordinal))
-            {
-                return _args.Length == 3
-                       && _args[0] is { IsColour: true }
-                       && _args[1] is { IsColour: true };
-            }
-
-            return false;
+            return true;
         }
     }
 

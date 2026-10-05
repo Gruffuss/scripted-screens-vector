@@ -73,7 +73,7 @@ internal static class SceneText
         List<Node> nodes;
         try
         {
-            nodes = ParseBlock(new Reader(text), 0);
+            nodes = ParseBlock(new Reader(text));
         }
         catch (FormatException ex)
         {
@@ -142,23 +142,61 @@ internal static class SceneText
         internal readonly List<Node> Children = new();
     }
 
-    private static SS.UiValue ToValue(Node node)
+    /// <summary>
+    /// The node tree becomes props bottom-up on an explicit stack.
+    /// </summary>
+    /// <remarks>
+    /// This was the limit hiding BEHIND the 32-level block cap: with the cap in place a scene
+    /// could never get deep enough to reach it. Removing the cap without converting this
+    /// turned a refusal into a stack overflow -- measurably, 5000 nested blocks died after
+    /// 1527 frames -- which is strictly worse, because a .NET overflow is not catchable and
+    /// takes the game's process with it.
+    /// </remarks>
+    private static SS.UiValue ToValue(Node root)
     {
-        var props = new List<SS.UiProp> { Prop("op", Str(node.Op)) };
+        var pending = new Stack<Node>();
+        var taken = new Stack<int>();
+        var built = new Stack<SS.UiValue>();
 
-        foreach (var pair in node.Props)
-            props.Add(Prop(pair.Key, pair.Value));
+        pending.Push(root);
+        taken.Push(0);
 
-        if (node.Children.Count > 0)
+        while (pending.Count > 0)
         {
-            var children = new List<SS.UiValue>(node.Children.Count);
-            foreach (var child in node.Children)
-                children.Add(ToValue(child));
+            var node = pending.Peek();
+            var next = taken.Pop();
 
-            props.Add(Prop("c", Arr(children)));
+            // Descend into the next child that has not been built yet.
+            if (next < node.Children.Count)
+            {
+                taken.Push(next + 1);
+                pending.Push(node.Children[next]);
+                taken.Push(0);
+                continue;
+            }
+
+            pending.Pop();
+
+            var props = new List<SS.UiProp> { Prop("op", Str(node.Op)) };
+
+            foreach (var pair in node.Props)
+                props.Add(Prop(pair.Key, pair.Value));
+
+            if (node.Children.Count > 0)
+            {
+                // Every child of this node is finished and sitting on `built` in order, so
+                // the last one pops first.
+                var ordered = new SS.UiValue[node.Children.Count];
+                for (var i = ordered.Length - 1; i >= 0; i--)
+                    ordered[i] = built.Pop();
+
+                props.Add(Prop("c", Arr(new List<SS.UiValue>(ordered))));
+            }
+
+            built.Push(new SS.UiValue { Type = SS.UiValueType.Map, Map = props.ToArray() });
         }
 
-        return new SS.UiValue { Type = SS.UiValueType.Map, Map = props.ToArray() };
+        return built.Pop();
     }
 
     // ---------------------------------------------------------------- reader
@@ -173,8 +211,6 @@ internal static class SceneText
             Text = text;
         }
     }
-
-    private const int MaxDepth = 32;
 
     /// <summary>
     /// A parse failure that says WHERE. "expected an op" on its own sent a session hunting
@@ -201,12 +237,17 @@ internal static class SceneText
         return new FormatException($"{what}, line {line}: {text}");
     }
 
-    private static List<Node> ParseBlock(Reader r, int depth)
+    /// <summary>
+    /// Blocks nest on an explicit stack. A scene generated from a document nests further than
+    /// a person types, so the 32-level cap this replaces refused valid input -- and it could
+    /// not simply be raised, because a .NET stack overflow is not catchable: the recursion
+    /// underneath it ended the game PROCESS rather than the parse.
+    /// </summary>
+    private static List<Node> ParseBlock(Reader r)
     {
-        if (depth > MaxDepth)
-            throw Fail(r, "nesting too deep");
-
-        var nodes = new List<Node>();
+        var root = new List<Node>();
+        var enclosing = new Stack<List<Node>>();
+        var nodes = root;
 
         while (true)
         {
@@ -217,17 +258,33 @@ internal static class SceneText
             if (r.Text[r.At] == '}')
             {
                 r.At++;
-                break;
+
+                // A `}` with nothing open is a stray one at the top level, and ends the scene
+                // exactly as it did when this was the bottom of the recursion.
+                if (enclosing.Count == 0)
+                    break;
+
+                nodes = enclosing.Pop();
+                continue;
             }
 
-            nodes.Add(ParseNode(r, depth));
+            var node = ParseNode(r, out var opensBlock);
+            nodes.Add(node);
+
+            if (!opensBlock)
+                continue;
+
+            enclosing.Push(nodes);
+            nodes = node.Children;
         }
 
-        return nodes;
+        return root;
     }
 
-    private static Node ParseNode(Reader r, int depth)
+    private static Node ParseNode(Reader r, out bool opensBlock)
     {
+        opensBlock = false;
+
         var node = new Node { Op = ReadToken(r) };
         if (node.Op.Length == 0)
             throw Fail(r, "expected an op (a value holding spaces, `=` or `;` -- a data: URL, say -- must be quoted)");
@@ -247,7 +304,7 @@ internal static class SceneText
             if (c == '{')
             {
                 r.At++;
-                node.Children.AddRange(ParseBlock(r, depth + 1));
+                opensBlock = true;
                 return node;
             }
 
@@ -273,60 +330,73 @@ internal static class SceneText
     }
 
     /// <summary>
-    /// How deep `[` may nest. Each level is a stack frame in ReadValue, and a stack overflow
-    /// is not catchable in .NET -- it ends the process rather than the parse, so a scene of
-    /// `[[[[[[...` would take the game down with it. Far past anything an author writes: the
-    /// deepest array in any example here is two.
+    /// `[` nests on an explicit stack, for the same reason blocks do: the cap this replaces
+    /// refused valid input, and the recursion under it would have ended the process.
     /// </summary>
-    private const int MaxArrayDepth = 32;
-
-    private static SS.UiValue ReadValue(Reader r, int depth = 0)
+    private static SS.UiValue ReadValue(Reader r)
     {
-        if (r.At < r.Text.Length && r.Text[r.At] == '[')
+        if (r.At >= r.Text.Length || r.Text[r.At] != '[')
+            return ReadScalar(r);
+
+        var enclosing = new Stack<List<SS.UiValue>>();
+        var items = new List<SS.UiValue>();
+        r.At++;
+
+        while (true)
         {
-            if (depth >= MaxArrayDepth)
-                throw Fail(r, $"arrays may not nest more than {MaxArrayDepth} deep");
+            SkipSpaces(r);
+            if (r.At >= r.Text.Length)
+                throw Fail(r, "unterminated [");
 
-            r.At++;
-            var items = new List<SS.UiValue>();
+            var c = r.Text[r.At];
 
-            while (true)
+            if (c == ']')
             {
-                SkipSpaces(r);
-                if (r.At >= r.Text.Length)
-                    throw Fail(r, "unterminated [");
+                r.At++;
+                var closed = Arr(items);
 
-                if (r.Text[r.At] == ']')
-                {
-                    r.At++;
-                    break;
-                }
+                if (enclosing.Count == 0)
+                    return closed;
 
-                if (r.Text[r.At] == ',')
-                {
-                    r.At++;
-                    continue;
-                }
-
-                // EVERY pass must consume something. SkipSpaces steps over space and tab only, so
-                // a newline inside `[ ]` -- or a `{` or `}` -- is not skipped, is not `]`, is not
-                // `,`, and ReadValue returns an empty token without advancing. The loop then
-                // appended empty values until it ran out of memory. `R p=[1,` newline `2]` is an
-                // ordinary thing to write, so this was reachable by hand.
-                //
-                // An array must stay on one line; saying so is better than guessing, because
-                // letting a line break through would make a missing `]` swallow the rest of the
-                // scene instead of being reported here.
-                var before = r.At;
-                items.Add(ReadValue(r, depth + 1));
-
-                if (r.At == before)
-                    throw Fail(r, "an array must be closed with ] on the same line");
+                items = enclosing.Pop();
+                items.Add(closed);
+                continue;
             }
 
-            return Arr(items);
-        }
+            if (c == ',')
+            {
+                r.At++;
+                continue;
+            }
 
+            if (c == '[')
+            {
+                r.At++;
+                enclosing.Push(items);
+                items = new List<SS.UiValue>();
+                continue;
+            }
+
+            // EVERY pass must consume something. SkipSpaces steps over space and tab only, so
+            // a newline inside `[ ]` -- or a `{` or `}` -- is not skipped, is not `]`, is not
+            // `,`, and ReadScalar returns an empty token without advancing. The loop then
+            // appended empty values until it ran out of memory. `R p=[1,` newline `2]` is an
+            // ordinary thing to write, so this was reachable by hand.
+            //
+            // An array must stay on one line; saying so is better than guessing, because
+            // letting a line break through would make a missing `]` swallow the rest of the
+            // scene instead of being reported here.
+            var before = r.At;
+            items.Add(ReadScalar(r));
+
+            if (r.At == before)
+                throw Fail(r, "an array must be closed with ] on the same line");
+        }
+    }
+
+    /// <summary>One value that is not an array.</summary>
+    private static SS.UiValue ReadScalar(Reader r)
+    {
         // An expression is read to whitespace and nothing else. The ordinary token rule
         // breaks on ',' '[' ']', and expressions are full of all three -- `clamp($x,0,1)`,
         // `$name[i]`. Consequence, and the one rule the format imposes: an unquoted

@@ -2,6 +2,31 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.86
+
+The 0.11.85 sweep removed the nesting limits from the scene parser, the expression parser and
+the tessellator, but five recursions survived it -- two still capped at 32, three uncapped and
+able to end the game's process. All five are explicit stacks now, so the claim that nothing
+nests too deep is true of the text format and of colour expressions as well.
+
+- **Scene text no longer stops at 32 levels.** Blocks (`G { G { ... } }`) and arrays
+  (`p=[[[...]]]`) each had a 32-deep cap that refused the scene. A scene built by a tool nests
+  further than one written by hand, and the text form was the only export path a deep scene
+  had: the table form dies inside ScriptedScreens' own Lua-table conversion at about 2000
+  levels. 5000 levels of each now parse.
+- **Fixed: a deep scene could end the game's process.** Under the block parser sat a further
+  recursion -- the step that turns parsed nodes into properties -- which the 32-deep cap had
+  been hiding, since no scene could get deep enough to reach it. Without it a deep scene stopped being refused and started
+  overflowing the stack instead, which is not catchable in .NET and takes the process with it.
+  Measured at 1527 levels before the fix.
+- **Fixed: a deeply nested colour expression could end the game's process.** Both the check
+  that decides whether an expression yields a colour and the evaluator that produces it walked
+  the expression tree recursively, while the parser that builds that tree does not. So
+  `mix(mix(mix(...)))` parsed happily and then overflowed. 5000 levels now evaluate.
+
+No change to what any existing scene draws: every scene in the repo's corpus produces an
+identical mesh, vertex for vertex, except the one that was being refused outright.
+
 ## 0.11.85
 
 **The depth limits are gone, because the recursion is gone.** 0.11.77-0.11.84 capped expression

@@ -224,9 +224,11 @@ nest as deep as you like: a scene 100,000 levels deep parses and draws. Nothing 
 the parsers, the evaluator and the tessellator's traversal all use explicit stacks — so depth
 costs memory and nothing else.
 
-Until 0.11.85 there were caps, at 32 and 64, added after unbounded recursion overflowed the stack
+Until 0.11.86 there were caps, at 32 and 64, added after unbounded recursion overflowed the stack
 and ended the game's *process*. They were the wrong answer: a scene generated from a document
-nests further than a person types, so refusing it was a limitation rather than a fix.
+nests further than a person types, so refusing it was a limitation rather than a fix. The text
+format was the last to lose them -- 0.11.85 freed the scene and expression parsers, and 0.11.86
+the `src` text parser and the colour expressions.
 
 **A symbol that uses itself is different and is still refused**, because it has no finite
 expansion at all — that input is wrong rather than deep.
