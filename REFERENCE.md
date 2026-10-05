@@ -114,9 +114,13 @@ and it is silent, because a name that never arrived looks the same as a name nev
 **`snap = 1` turns easing off for one payload.** Numbers normally glide from the value on
 screen to the new one over the gap between payloads, which is right for a gauge and wrong for
 a value that must change at once: a mode switch, a jump to a new item, or the constants
-inside a running animation expression, which would otherwise drift mid-animation. Snap is
-recorded per name: the latest payload that mentions a name decides, so a later payload without
-`snap` eases that name again, and names a snapped payload leaves out keep easing. Colours and
+inside a running animation expression, which would otherwise drift mid-animation. **`snap` STAYS ON until you turn it off.**
+It is an ordinary property, and properties persist on an element between payloads, so a `snap = 1`
+written once keeps arriving with every later payload and every later value snaps. Write
+`snap = 0` to ease again. Measured at 0.11.91 by rebuild rate, which is what reveals a glide: an
+element snapped once sat at 8.7 rebuilds/s against a control gliding at 61.4, and returned to 61.1
+the moment `snap = 0` was sent. The same holds for `ease`, which also persists until replaced.
+Within a payload, snap is recorded per name: names a snapped payload leaves out keep easing. Colours and
 strings never ease anyway. Several data elements may write to one scene, so eased and snapped
 values can live on separate elements, each with `keep = 1`:
 
