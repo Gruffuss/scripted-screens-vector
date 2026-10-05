@@ -667,7 +667,7 @@ ignored, so annotations are harmless.
 | `clip` | string | id of a `CP` in `defs` |
 | `m` | `{a, b, c, d, e, f}` | CSS `matrix()`, applied after `t r s` (innermost) |
 | `bri` `con` `sat` `hue` `gray` `sep` `inv` | number/expr | colour filters, CSS `filter()` semantics |
-| `mask` | `"@gradient"` | multiplies every colour under the group by the gradient's alpha. **The `@` is required** — `mask = "fade"` is ignored without a report, where `clip` takes the bare id |
+| `mask` | `"@gradient"` | multiplies every colour under the group by the gradient's alpha. **The `@` is required** — `mask = "fade"` is reported (0.11.96; before that it was ignored without a word), where `clip` takes the bare id. An EMPTY `mask` means "no mask" and stays silent, which is how a `nodes` patch turns one off |
 | `blur` | number/expr | CSS `filter: blur()`: the Gaussian's standard deviation, in the group's units. Flat closed fills under it draw blurred; see below |
 | `c` | array | child nodes |
 
@@ -1547,8 +1547,9 @@ shadow may be written unwrapped.
 **An entry needs four numbers and a colour.** `dx`, `dy`, `blur` and `spread`, then a colour
 string that parses, and optionally the sixth field below. An `sh` that is not a list at all, an
 entry with fewer than five values, and one whose fifth value is not a colour string are each
-**dropped without a word** — a mistyped `"#0000O01f"` leaves the card with no shadow and nothing
-to read. Which form `sh` is in is decided by its **first** element alone, so a list that mixes
+**dropped and reported** since 0.11.96 — before that a mistyped `"#0000O01f"` left the card with
+no shadow and nothing to read. A `USE`'s attributes are symbol parameters and may be named
+anything, `sh` included, so a `USE` is exempt. Which form `sh` is in is decided by its **first** element alone, so a list that mixes
 them — an unwrapped shadow with a second one wrapped after it — reads as the unwrapped one
 carrying the second as its sixth field, and the second is discarded.
 
