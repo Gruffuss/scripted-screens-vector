@@ -41,7 +41,50 @@ it renders. The remaining explanations are about ScriptedScreens' own capture, n
 graphic: either the object that is rendered is not the one we are presenting to, or the render
 happens before any of our hooks. Both are answerable only by reading what the host actually does.
 
-**Next thing to try, and it is the first thing now rather than more guessing:** read
+**THE HOST'S CAPTURE, read from the decompile (`ScriptedScreensScriptableUiSystem.cs`).** This is
+the sequence, and it rules out most of what was guessed:
+
+```
+RebuildSurfaceFromModel(...)          // recreates the hosts: new graphics
+Canvas.ForceUpdateCanvases()          // our inline build runs here
+clone = Instantiate(surfaceRoot)      // the clone
+StripCaptureOnlyComponents(clone)     // destroys forwarders, raycasters, audio, colliders --
+                                      //   NOTHING of ours
+ConfigureCaptureClone(clone, camera)  // stretches the root, repoints canvases at the capture
+                                      //   camera, then ForceRebuildLayoutImmediate on EVERY
+                                      //   child RectTransform
+Canvas.ForceUpdateCanvases()          // a SECOND rebuild pass, clone included
+camera.Render()                       // ARGB32, no HDR, no MSAA
+ReadPixels -> PNG
+```
+
+So the clone DOES get two rebuild passes before it renders, `Capturing` is still true through
+both, and nothing of ours is stripped. A capture is a camera render of a cloned tree, not a
+read-back of the live screen.
+
+**EIGHT hypotheses, eight wrong** (1-3 above, then):
+
+4. Setting the clone's MATERIAL as well as its mesh -- Instantiate copies neither. No change.
+5. `maskable = false` on the clone, in case the surface's `RectMask2D` clipped a correct mesh.
+6. Presenting from `OnEnable` rather than `UpdateGeometry`, in case presentation landed late.
+7. Giving the clone its OWN copy of the mesh, since `_mesh` is `[SerializeField]` and the clone
+   shares the instance -- the live graphic builds again during those two extra passes and could
+   have been emptying the very mesh the clone renders. No change.
+8. The `CanvasUpdateRegistry` refusing the clone's material request inside the rebuild loop,
+   which is exactly why `VectorSlice` overrides `SetVerticesDirty`/`SetMaterialDirty`. The log
+   has ZERO such refusals, so it is not happening.
+
+**What is still true and unexplained:** the clone is handed the right mesh (logged, right vertex
+count), with a material, unmasked, at enable time, through the same `canvasRenderer.SetMesh` call
+that `VectorSlice` uses successfully in the same clone -- and renders nothing, unless the scene
+contains a text node.
+
+**The one experiment not yet run:** make `VectorGraphic` present through UGUI's own
+`OnPopulateMesh`/`VertexHelper` path for a clone, the way the `Image` that DOES render in the
+same clone does, instead of `SetMesh`. It is the only mechanism left that differs between the
+thing that works and the thing that does not.
+
+**Superseded, kept for the record:** read
 `TryCaptureSurfaceShared` in `decompiled/ScriptedScreens/` and establish, from its code, what it
 clones, what it renders and in what order. Every hypothesis above was formed from the outside and
 five of five were wrong; the host's source will say in minutes what a day of probing has not.
