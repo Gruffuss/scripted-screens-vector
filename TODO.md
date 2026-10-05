@@ -1,95 +1,29 @@
-﻿## Open: a scene with no `T` captures blank (2026-10-05, 0.11.81)
+﻿## CLOSED: a scene with no `T` captured blank (2026-10-05, fixed in 0.11.83)
 
-**Reproduction, deterministic.** Push any of examples 01-07 to a console and capture: 7,327 bytes,
-one flat image of the ScriptedScreens panel behind the scene, byte-identical across all seven.
-Push 08-18 and the capture has content. Add ONE `T` node to `01-hello` and its capture goes from
-7,327 to 72,329 bytes. The split is exactly "has a text node" -- 01-07 have none.
+**Cause: the capture canvas does not upload `TEXCOORD1`, and the dither shader multiplies alpha
+by it.** `UIDither` carries a blur's coverage in TEXCOORD1 and the fragment does
+`color.a *= IN.coverage.x`. A UGUI canvas uploads ONLY the vertex streams named in
+`Canvas.additionalShaderChannels`; everything else arrives as zero. ScriptedScreens' capture
+builds its own `[ScriptedScreens-McpCaptureCanvas]` and never sets that property, so coverage
+arrived as 0 and every vector pixel drew at alpha 0. The clone was never wrong -- it rendered
+exactly what it was told, fully transparent.
 
-Nothing is wrong with the scenes. They draw correctly on a console, `vector_stats` reports the
-shapes and verts, and the mod's own log says `vector capture: "hello" built inline, 568 verts
-across 1 mesh(es)` for the blank ones. The geometry is built; it does not reach the picture.
+**Why text looked like the discriminator:** TextMeshPro sets `TexCoord1 | Normal | Tangent` on
+whatever canvas its labels sit on. Any `T` in the scene turned the channel on for the capture
+canvas and the geometry rode along. The mod had been free-riding on TMP since the dither
+material shipped. Live consoles were never affected: the game's own surface canvas already has
+the channel.
 
-**What the capture-dump tree shows.** A page with text has `VectorSlice` children under
-`VectorSurface`; a page without has none, because `ApplySlices` only creates children for slices
-1..n and slice 0 rides on the graphic's own `CanvasRenderer`. Text is what splits a scene across
-slices, which is why it correlates.
+**The fix** is `VectorGraphic.EnsureCoverageChannel()`, called from `UpdateGeometry`: it ORs
+`TexCoord1` into its canvas's channels once per canvas. It closes a class rather than a symptom
+-- any canvas this mod ever lands on without a TMP label would have drawn nothing, silently.
 
-**THE DECISIVE FACT (2026-10-05, logged):** the capture clone's `UpdateGeometry` DOES run, and it
-DOES present the right mesh -- `vector capture: clone presented "?" with 568 verts`, matching the
-`built inline, 568 verts` from the same capture. So the clone exists, shares the mesh (`_mesh` is
-already `[SerializeField]`), and hands over correct geometry. The picture is still blank. Whatever
-is wrong is NOT that the geometry is missing from the clone.
-
-**Five fixes tried, none worked** -- so the structural explanation above is not sufficient on
-its own, and the cause is more likely to be WHEN the clone is taken than WHERE the mesh sits:
-
-1. Marking every live surface dirty in the capture prefix, so `UpdateGeometry` is called.
-2. Leaving the clone's renderer untouched when it has no scene (`_mesh` is already
-   `[SerializeField]`, so the clone does share the mesh -- that was not the gap).
-3. Putting every slice on a `VectorSlice` child during a capture, including slice 0.
-
-4. Setting the clone's MATERIAL as well as its mesh (Instantiate copies neither). The clone had
-   no material; giving it one changed nothing.
-5. `maskable = false` on the clone, in case the surface's `RectMask2D` was clipping a correct
-   mesh away because the mask's clip rect is pushed during a canvas update the clone misses.
-6. Presenting mesh and material from `OnEnable` instead of `UpdateGeometry`, in case the
-   presentation was simply landing after the capture had read its picture.
-
-**What that leaves.** The clone we can see and touch is given the right geometry, a material and
-no mask, at enable time, and the render still shows nothing -- while a scene with one text node in
-it renders. The remaining explanations are about ScriptedScreens' own capture, not about this
-graphic: either the object that is rendered is not the one we are presenting to, or the render
-happens before any of our hooks. Both are answerable only by reading what the host actually does.
-
-**THE HOST'S CAPTURE, read from the decompile (`ScriptedScreensScriptableUiSystem.cs`).** This is
-the sequence, and it rules out most of what was guessed:
-
-```
-RebuildSurfaceFromModel(...)          // recreates the hosts: new graphics
-Canvas.ForceUpdateCanvases()          // our inline build runs here
-clone = Instantiate(surfaceRoot)      // the clone
-StripCaptureOnlyComponents(clone)     // destroys forwarders, raycasters, audio, colliders --
-                                      //   NOTHING of ours
-ConfigureCaptureClone(clone, camera)  // stretches the root, repoints canvases at the capture
-                                      //   camera, then ForceRebuildLayoutImmediate on EVERY
-                                      //   child RectTransform
-Canvas.ForceUpdateCanvases()          // a SECOND rebuild pass, clone included
-camera.Render()                       // ARGB32, no HDR, no MSAA
-ReadPixels -> PNG
-```
-
-So the clone DOES get two rebuild passes before it renders, `Capturing` is still true through
-both, and nothing of ours is stripped. A capture is a camera render of a cloned tree, not a
-read-back of the live screen.
-
-**EIGHT hypotheses, eight wrong** (1-3 above, then):
-
-4. Setting the clone's MATERIAL as well as its mesh -- Instantiate copies neither. No change.
-5. `maskable = false` on the clone, in case the surface's `RectMask2D` clipped a correct mesh.
-6. Presenting from `OnEnable` rather than `UpdateGeometry`, in case presentation landed late.
-7. Giving the clone its OWN copy of the mesh, since `_mesh` is `[SerializeField]` and the clone
-   shares the instance -- the live graphic builds again during those two extra passes and could
-   have been emptying the very mesh the clone renders. No change.
-8. The `CanvasUpdateRegistry` refusing the clone's material request inside the rebuild loop,
-   which is exactly why `VectorSlice` overrides `SetVerticesDirty`/`SetMaterialDirty`. The log
-   has ZERO such refusals, so it is not happening.
-
-**What is still true and unexplained:** the clone is handed the right mesh (logged, right vertex
-count), with a material, unmasked, at enable time, through the same `canvasRenderer.SetMesh` call
-that `VectorSlice` uses successfully in the same clone -- and renders nothing, unless the scene
-contains a text node.
-
-**The one experiment not yet run:** make `VectorGraphic` present through UGUI's own
-`OnPopulateMesh`/`VertexHelper` path for a clone, the way the `Image` that DOES render in the
-same clone does, instead of `SetMesh`. It is the only mechanism left that differs between the
-thing that works and the thing that does not.
-
-**Superseded, kept for the record:** read
-`TryCaptureSurfaceShared` in `decompiled/ScriptedScreens/` and establish, from its code, what it
-clones, what it renders and in what order. Every hypothesis above was formed from the outside and
-five of five were wrong; the host's source will say in minutes what a day of probing has not.
-
-**Workaround for anyone needing a capture now:** put a text node in the scene, even an empty one.
+**The lesson, which cost nine wrong hypotheses:** every one of them asked "why is the geometry
+missing?" The geometry was never missing. A blank clone and a working one printed IDENTICAL
+component state -- mesh, material, cull, clip, alpha, layer, canvas -- and the only field that
+differed was the canvas's channel mask. When two cases are indistinguishable in everything you
+have looked at, the answer is in something you have not looked at; dump both sides and diff them
+rather than forming another hypothesis about the side you can see.
 
 # Open items
 
