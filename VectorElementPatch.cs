@@ -290,7 +290,15 @@ internal static class VectorElementPatch
             // The payload's DATA waits below, and the `nodes` patch used to be dropped here --
             // so a script that sent its geometry patch ahead of the structure lost it with
             // nothing reported. It waits with the data and is applied in the same order.
-            PendingPatches[key] = element.Props;
+            //
+            // MERGED, not assigned. This used to overwrite, which dropped the earlier of two
+            // patches queued before the structure arrived -- the same fault the data path
+            // below was written to avoid, in the branch directly above it. Two patches in one
+            // tick is ordinary: the host appends one op per upsert and never coalesces them,
+            // and it flushes at the end of every Execute whether or not a commit was called.
+            PendingPatches[key] = PendingPatches.TryGetValue(key, out var queued)
+                ? MergeProps(queued, element.Props)
+                : element.Props;
         }
 
         if (graphic != null)
@@ -408,6 +416,34 @@ internal static class VectorElementPatch
         }
 
         return deepest;
+    }
+
+    /// <summary>Two prop sets as one, later winning per key -- the host's own `set_props` rule.</summary>
+    private static SS.UiProp[] MergeProps(SS.UiProp[] earlier, SS.UiProp[] later)
+    {
+        if (earlier == null || earlier.Length == 0)
+            return later;
+
+        if (later == null || later.Length == 0)
+            return earlier;
+
+        var byKey = new Dictionary<string, SS.UiProp>(earlier.Length + later.Length, StringComparer.Ordinal);
+
+        foreach (var prop in earlier)
+        {
+            if (!string.IsNullOrEmpty(prop.Key))
+                byKey[prop.Key] = prop;
+        }
+
+        foreach (var prop in later)
+        {
+            if (!string.IsNullOrEmpty(prop.Key))
+                byKey[prop.Key] = prop;
+        }
+
+        var merged = new SS.UiProp[byKey.Count];
+        byKey.Values.CopyTo(merged, 0);
+        return merged;
     }
 
     private static SS.UiValue? Find(SS.UiProp[] props, string key)

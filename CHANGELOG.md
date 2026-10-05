@@ -2,6 +2,20 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.89
+
+- **Fixed: a geometry patch sent before the structure could drop an earlier one.** When a
+  `nodes` patch arrives for a scene whose graphic does not exist yet -- the structure has not
+  come through, or the surface is mid-rebuild -- it waits. Two patches waiting for the same
+  scene overwrote rather than combined, so the first was lost with nothing reported. The data
+  travelling beside it had always merged, with a comment explaining why; the patch beside it did
+  not. They now both merge, later winning per key, which is what ScriptedScreens itself does
+  when it combines properties.
+
+  Two patches in one tick is ordinary rather than exotic: the host queues one operation per
+  update and never combines them, and it delivers at the end of every chip execution whether or
+  not the script asked it to.
+
 ## 0.11.88
 
 - **Fixed: a group's colour filters skipped a label's outline.** `G gray=1 { T oc=... ow=... }`

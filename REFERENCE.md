@@ -65,26 +65,32 @@ props = { scene = "log", keep = 1, data = { … } }
 Off by default, deliberately. With merging always on there would be no way to clear a value,
 and the missing-name diagnostic would go quiet for any name ever sent once.
 
-**Commit between declaring the element and the first `set_props`, or the declaration is lost.**
-ScriptedScreens merges successive upserts of the same element id into **one** before the mod is
-called, and `data` is replaced whole rather than merged. So this sends only the tick's payload,
-and `long` never arrives at all:
+**Declaring an element and patching it in the SAME chip execution loses the declaration's
+data.** ScriptedScreens delivers pending changes at the end of **every** chip execution, whether
+or not the script calls `ui:commit()`. Within one execution only the **last** payload for an
+element survives, and `data` is a single property, so a later payload's `data` replaces the
+earlier one whole rather than adding to it:
 
 ```lua
-local data = ui:element({ id = "d", type = "vector",
-    props = { scene = "log", keep = 1, data = { long = "set once, never resent" } } })
+function tick()
+    local d = ui:element({ id = "d", type = "vector",
+        props = { scene = "log", keep = 1, data = { long = "set once, never resent" } } })
 
-function tick()                            -- no commit in between
-    data:set_props({ scene = "log", keep = 1, data = { pct = 42 } })
-    ui:commit()
+    d:set_props({ scene = "log", keep = 1, data = { pct = 42 } })   -- `long` never arrives
 end
 ```
 
-Add `ui:commit()` after the declaration and both arrive. Measured, one variable apart: without
-it the declared name reads `--`, with it the value is there. This bites exactly the values a
-`keep = 1` element exists for — the ones set once and never resent — and it is silent, because a
-name that never arrived looks the same as a name never sent. `examples/10-text.lua` and
-`12-click.lua` had this bug until 0.11.82.
+`ui:commit()` between the two makes both arrive, because it delivers the declaration before the
+patch replaces it.
+
+**Declaring at load and patching in `tick` is fine on its own** — the execution ends between
+them, and that delivers the declaration without any commit.
+
+Measured in game at 0.11.89, one variable apart: declared and patched in one execution, the
+declared name reads `LOST`; declared at load and patched in `tick`, it reads `SURVIVED`. This
+bites exactly the values a `keep = 1` element exists for — the ones set once and never resent —
+and it is silent, because a name that never arrived looks the same as a name never sent.
+`examples/10-text.lua` and `12-click.lua` had this bug until 0.11.82.
 
 **`snap = 1` turns easing off for one payload.** Numbers normally glide from the value on
 screen to the new one over the gap between payloads, which is right for a gauge and wrong for
