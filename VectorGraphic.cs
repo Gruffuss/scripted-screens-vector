@@ -2279,12 +2279,26 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
     private static void CollectForcedScrolls(List<VecNode> nodes, List<VecNode> into)
     {
-        foreach (var node in nodes)
-        {
-            if (node.Op == VecOp.Scroll && node.ScrollSetVersion != null && !string.IsNullOrEmpty(node.Id))
-                into.Add(node);
+        // Iterative, and in source order: children are pushed in reverse so they come back off
+        // the stack the way they were written, which is the order the scrolls are applied in.
+        var pending = new Stack<List<VecNode>>();
+        pending.Push(nodes);
 
-            CollectForcedScrolls(node.Children, into);
+        while (pending.Count > 0)
+        {
+            var level = pending.Pop();
+
+            for (var i = level.Count - 1; i >= 0; i--)
+            {
+                if (level[i].Children.Count > 0)
+                    pending.Push(level[i].Children);
+            }
+
+            foreach (var node in level)
+            {
+                if (node.Op == VecOp.Scroll && node.ScrollSetVersion != null && !string.IsNullOrEmpty(node.Id))
+                    into.Add(node);
+            }
         }
     }
 

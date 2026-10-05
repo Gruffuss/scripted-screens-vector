@@ -559,16 +559,34 @@ internal static class SceneParser
     /// other mutable static here so a stray parse elsewhere cannot corrupt it.
     /// </summary>
     /// <summary>
-    /// How deep nodes may nest. The TEXT form is bounded before it gets here -- `SceneText`
-    /// caps `{` nesting -- but the table form arrives as a tree and reaches ParseNodes
-    /// directly, so `c = { { op = "G", c = { ... } } }` built by a Lua loop recursed with
-    /// nothing to stop it. Measured: 10 levels fine, 1,000 levels "Stack overflow." and exit
-    /// 127, which in game is the whole process. The tessellator recurses per level too, so
-    /// capping it here covers both.
+    /// A group's children, waiting to be parsed. Queued rather than descended into, so the
+    /// depth of a scene is bounded by memory instead of by the call stack.
     /// </summary>
-    private const int MaxNodeDepth = 64;
+    private readonly struct PendingChildren
+    {
+        internal readonly VecNode Parent;
+        internal readonly SS.UiValue Array;
+        internal readonly SS.UiProp[]? Inherited;
 
-    [System.ThreadStatic] private static int _nodeDepth;
+        /// <summary>
+        /// The symbols being expanded above this point. It rides on the work item because the
+        /// call stack used to carry it, and a cycle is still a fault: a symbol that reaches
+        /// itself has NO finite expansion, which is wrong input rather than deep input.
+        /// </summary>
+        internal readonly List<string> Chain;
+
+        internal PendingChildren(VecNode parent, SS.UiValue array, SS.UiProp[]? inherited, List<string> chain)
+        {
+            Parent = parent;
+            Array = array;
+            Inherited = inherited;
+            Chain = chain;
+        }
+    }
+
+    [System.ThreadStatic] private static Queue<PendingChildren>? _pendingChildren;
+
+    private static Queue<PendingChildren> Pending => _pendingChildren ??= new Queue<PendingChildren>();
 
     [System.ThreadStatic] private static List<string>? _expandingSymbols;
 
@@ -579,7 +597,6 @@ internal static class SceneParser
         // A scene that threw or broke out mid-expansion must not leave a symbol marked as
         // being expanded, or the next parse reports a cycle that is not there.
         _expanding.Clear();
-        _nodeDepth = 0;
 
         var root = PropValue(props, "root");
         if (root == null || root.Value.Type != SS.UiValueType.Array)
@@ -929,33 +946,59 @@ internal static class SceneParser
 
     private static void Reindex(VecScene scene, List<VecNode> list)
     {
-        for (var i = 0; i < list.Count; i++)
+        // Iterative so a deep scene cannot overflow the stack. Source order is preserved by
+        // pushing each level's children in reverse, which is what decides the winner when two
+        // nodes share an id.
+        var pending = new Stack<List<VecNode>>();
+        pending.Push(list);
+
+        while (pending.Count > 0)
         {
-            var node = list[i];
+            var level = pending.Pop();
 
-            if (!string.IsNullOrEmpty(node.Id) && node.SourceProps != null)
-                scene.Identified[node.Id!] = (list, i, node.SourceProps);
+            for (var i = 0; i < level.Count; i++)
+            {
+                var node = level[i];
 
-            if (node.Children.Count > 0)
-                Reindex(scene, node.Children);
+                if (!string.IsNullOrEmpty(node.Id) && node.SourceProps != null)
+                    scene.Identified[node.Id!] = (level, i, node.SourceProps);
+            }
+
+            for (var i = level.Count - 1; i >= 0; i--)
+            {
+                if (level[i].Children.Count > 0)
+                    pending.Push(level[i].Children);
+            }
         }
     }
 
+    /// <summary>Parses an array of nodes and everything beneath it, without recursing.</summary>
     private static List<VecNode> ParseNodes(SS.UiValue array, VecScene scene, SS.UiProp[]? inherited = null)
+    {
+        var pending = Pending;
+        pending.Clear();
+        _expandingSymbols = new List<string>();
+
+        var nodes = ParseLevel(array, scene, inherited);
+
+        // Each level queues the next. Children are attached in source order, level by level,
+        // and the whole tree is built before this returns.
+        while (pending.Count > 0)
+        {
+            var item = pending.Dequeue();
+            _expandingSymbols = item.Chain;
+            item.Parent.Children.AddRange(ParseLevel(item.Array, scene, item.Inherited));
+        }
+
+        return nodes;
+    }
+
+    /// <summary>One level of nodes. Anything with children queues them rather than descending.</summary>
+    private static List<VecNode> ParseLevel(SS.UiValue array, VecScene scene, SS.UiProp[]? inherited)
     {
         var nodes = new List<VecNode>();
         if (array.Array == null)
             return nodes;
-
-        if (_nodeDepth >= MaxNodeDepth)
-        {
-            scene.Problem($"nodes may not nest more than {MaxNodeDepth} deep");
-            return nodes;
-        }
-
-        _nodeDepth++;
-        try
-        {
 
         foreach (var item in array.Array)
         {
@@ -969,12 +1012,6 @@ internal static class SceneParser
             var node = ParseNode(map, scene, inherited);
             if (node != null)
                 nodes.Add(node);
-        }
-
-        }
-        finally
-        {
-            _nodeDepth--;
         }
 
         return nodes;
@@ -1207,16 +1244,10 @@ internal static class SceneParser
                     Array = Substitute(symbol.Body, args),
                 };
 
-                _expanding.Add(reference!);
-                try
-                {
-                    foreach (var child in ParseNodes(instantiated, scene, inherited))
-                        node.Children.Add(child);
-                }
-                finally
-                {
-                    _expanding.Remove(reference!);
-                }
+                // The chain is copied with this symbol on the end, so the cycle test below
+                // sees exactly what the call stack used to show it.
+                var chain = new List<string>(_expanding) { reference! };
+                Pending.Enqueue(new PendingChildren(node, instantiated, inherited, chain));
 
                 break;
             }
@@ -1569,8 +1600,7 @@ internal static class SceneParser
             // whatever it inherited itself, so defaults nest.
             var style = ParseStyle(map, inherited);
 
-            foreach (var child in ParseNodes(children.Value, scene, style))
-                node.Children.Add(child);
+            Pending.Enqueue(new PendingChildren(node, children.Value, style, _expanding));
         }
 
         // `v` on every node, not only a `G`. It was read in the group case alone, so on a shape
@@ -1610,7 +1640,20 @@ internal static class SceneParser
 
     private static bool HoldsText(VecNode node)
     {
-        return node.Op == VecOp.Text || node.Children.Exists(HoldsText);
+        var pending = new Stack<VecNode>();
+        pending.Push(node);
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            if (current.Op == VecOp.Text)
+                return true;
+
+            foreach (var child in current.Children)
+                pending.Push(child);
+        }
+
+        return false;
     }
 
     private static bool NodeUsesTime(VecNode node, bool withOpacity = true)

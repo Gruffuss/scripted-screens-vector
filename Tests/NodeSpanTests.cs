@@ -62,10 +62,17 @@ internal static class NodeSpanTests
         run.Check("nesting: an ordinary tree is untouched",
             shallow.Problems.Count == 0, shallow.Problems.Count > 0 ? shallow.Problems[0] : "");
 
+        // NO DEPTH LIMIT. This was capped at 64 and refused, which was a mitigation rather
+        // than a fix -- the tree is only deep, and a scene generated from a document nests
+        // further than a person would type. Parsing no longer recurses, so it is built in full.
         var deep = Build(500);
-        run.Check("nesting: a table-form tree past the cap is refused, not fatal",
-            deep.Problems.Count == 1 && deep.Problems[0].Contains("nest"),
-            deep.Problems.Count > 0 ? deep.Problems[0] : "(nothing reported)");
+        var levels = 0;
+        for (var node = deep.Root[0]; node != null; node = node.Children.Count > 0 ? node.Children[0] : null)
+            levels++;
+
+        run.Check("nesting: a 500-deep table-form tree is built in full, with no problems",
+            deep.Problems.Count == 0 && levels == 501,
+            $"{levels} levels, {deep.Problems.Count} problem(s)");
 
         // A build starts from clean state even when the last one left some behind. Corrupting
         // the context directly stands in for the throw that would have done it.
@@ -284,48 +291,32 @@ internal static class NodeSpanTests
             Mathf.Approximately(fine.Evaluate(new EvalContext()), 3f),
             $"{fine.Evaluate(new EvalContext())}");
 
-        // `(` was not the only recursion. A run of prefix `-` descends once per sign, and a
-        // chain of `^` once per operator; 0.11.77 counted neither, and both killed the process
-        // at 100,000 (measured out of process: "Stack overflow.", exit 127). They share one
-        // depth counter now.
+        // NO DEPTH LIMIT. These were capped at 64 and refused, which was a mitigation against
+        // a stack overflow rather than a fix: the input is merely deep, not wrong, and a scene
+        // generated from a document nests further than a person would type. The parser no
+        // longer recurses, so each of these parses and evaluates correctly.
         //
-        // The bare form matters most: a value needs no leading `=` to be parsed as an
-        // expression, so these arrive through ANY numeric attribute, not only `=`-prefixed ones.
-        foreach (var (what, text) in new[]
+        // An even number of minus signs cancels, a chain of `1^1^...` is 1, `abs` of 1 is 1,
+        // and an index into data that was never sent reads 0.
+        foreach (var (what, text, expected) in new[]
                  {
-                     ("a run of prefix -", "=" + new string('-', 500) + "1"),
-                     ("a chain of ^", "=" + string.Join("^", new string('1', 500).ToCharArray())),
-                     ("the same with no leading =", new string('-', 500) + "1"),
+                     ("a run of 500 prefix -", "=" + new string('-', 500) + "1", 1f),
+                     ("a chain of 500 ^", "=" + string.Join("^", new string('1', 500).ToCharArray()), 1f),
+                     ("500 minus signs with no leading =", new string('-', 500) + "1", 1f),
+                     ("400 nested function calls",
+                         "=" + string.Concat(System.Linq.Enumerable.Repeat("abs(", 400)) + "1" + new string(')', 400), 1f),
+                     ("400 nested data indices",
+                         "=" + string.Concat(System.Linq.Enumerable.Repeat("$a[", 400)) + "0" + new string(']', 400), 0f),
+                     ("2000 nested parentheses",
+                         "=" + new string('(', 2000) + "7" + new string(')', 2000), 7f),
                  })
         {
-            var guarded = Expression.Parse(text, 42f);
-            run.Check($"recursion: {what} falls back to the attribute default",
-                Mathf.Approximately(guarded.Evaluate(new EvalContext()), 42f),
-                $"{guarded.Evaluate(new EvalContext())}");
+            var parsed = Expression.Parse(text, -999f);
+            var value = parsed.Evaluate(new EvalContext());
+            run.Check($"depth: {what} parses and evaluates", Mathf.Approximately(value, expected),
+                $"{value}, expected {expected}");
         }
 
-        // A function call's arguments and a `$name[...]` index recurse as well, and the cap
-        // reached neither until 0.11.84: `abs(abs(abs(...)))` and `$a[$a[$a[...]]]` at 20,000
-        // both ended the process (measured out of process, exit 127).
-        foreach (var (what, text) in new[]
-                 {
-                     ("a nest of function calls",
-                         "=" + string.Concat(System.Linq.Enumerable.Repeat("abs(", 400)) + "1" + new string(')', 400)),
-                     ("a nest of data indices",
-                         "=" + string.Concat(System.Linq.Enumerable.Repeat("$a[", 400)) + "0" + new string(']', 400)),
-                 })
-        {
-            var guarded = Expression.Parse(text, 42f);
-            run.Check($"recursion: {what} falls back to the attribute default",
-                Mathf.Approximately(guarded.Evaluate(new EvalContext()), 42f),
-                $"{guarded.Evaluate(new EvalContext())}");
-        }
-
-        run.Check("recursion: abs(abs(abs(1))) is still 1",
-            Mathf.Approximately(Expression.Parse("=abs(abs(abs(1)))", 0f).Evaluate(new EvalContext()), 1f),
-            $"{Expression.Parse("=abs(abs(abs(1)))", 0f).Evaluate(new EvalContext())}");
-
-        // And short runs of both must still evaluate, or the cap is too tight.
         run.Check("recursion: ---1 is still -1",
             Mathf.Approximately(Expression.Parse("=---1", 0f).Evaluate(new EvalContext()), -1f),
             $"{Expression.Parse("=---1", 0f).Evaluate(new EvalContext())}");

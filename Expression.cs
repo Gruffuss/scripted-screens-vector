@@ -541,6 +541,12 @@ internal sealed class Expression
     private Kind _kind;
     private float _value;
     private Color _colour;
+
+    /// <summary>
+    /// How deep this tree is, measured once when it is parsed. Only the root's value is used,
+    /// and only to choose between the recursive evaluator and the iterative one.
+    /// </summary>
+    private int _treeDepth;
     private string _name = string.Empty;
     private int _depth;
     private Expression?[] _args = System.Array.Empty<Expression>();
@@ -619,6 +625,7 @@ internal sealed class Expression
             var parser = new Parser(source);
             var expression = parser.ParseExpression();
             parser.ExpectEnd();
+            expression._treeDepth = MeasureDepth(expression);
             return expression;
         }
         catch (FormatException ex)
@@ -720,8 +727,30 @@ internal sealed class Expression
         }
     }
 
+    /// <summary>
+    /// Past this depth, evaluation stops recursing and walks the tree with an explicit stack.
+    /// Chosen far above anything a scene produces -- a real expression is three or four deep --
+    /// and far below where the call stack gives out, so neither path is ever close to a limit.
+    /// </summary>
+    private const int DeepTree = 256;
+
+    /// <summary>Values of the nodes already evaluated, while the iterative path is running.</summary>
+    /// <remarks>
+    /// `[ThreadStatic]` because tessellation runs on a worker and captures evaluate on the main
+    /// thread; null except inside <see cref="EvaluateDeep"/>, which is what makes
+    /// <see cref="Arg"/> a single predictable branch for every ordinary expression.
+    /// </remarks>
+    [ThreadStatic] private static Dictionary<Expression, float>? _memo;
+
     internal float Evaluate(EvalContext context)
     {
+        // A tree deep enough to overflow the stack is walked rather than recursed. The limit
+        // this replaces was a cap that REFUSED such an expression, which is not a fix: the
+        // input is merely deep, and a scene generated from a document nests further than a
+        // person would type.
+        if (_treeDepth > DeepTree && _memo == null)
+            return EvaluateDeep(context);
+
         switch (_kind)
         {
             case Kind.Constant: return _value;
@@ -761,7 +790,99 @@ internal sealed class Expression
     private float Arg(int index, EvalContext context)
     {
         var argument = _args[index];
-        return argument?.Evaluate(context) ?? 0f;
+        if (argument == null)
+            return 0f;
+
+        // While the iterative evaluator is running every child has already been computed, so
+        // this reads a value instead of descending into one. That is the whole trick: the
+        // switch above needs no second implementation.
+        var memo = _memo;
+        if (memo != null)
+            return memo.TryGetValue(argument, out var known) ? known : 0f;
+
+        return argument.Evaluate(context);
+    }
+
+    /// <summary>Depth of a tree, counted without recursing.</summary>
+    private static int MeasureDepth(Expression root)
+    {
+        var deepest = 0;
+        var stack = new Stack<(Expression Node, int Depth)>();
+        stack.Push((root, 1));
+
+        while (stack.Count > 0)
+        {
+            var (node, depth) = stack.Pop();
+            if (depth > deepest)
+                deepest = depth;
+
+            // Stop counting once it is past anything that matters: the only question this
+            // answers is "deeper than DeepTree?", and a pathological tree should not cost a
+            // full walk to find that out.
+            if (deepest > DeepTree)
+                return deepest;
+
+            foreach (var child in node._args)
+            {
+                if (child != null)
+                    stack.Push((child, depth + 1));
+            }
+        }
+
+        return deepest;
+    }
+
+    /// <summary>
+    /// Evaluates a deep tree with an explicit stack, bottom up, memoising each node's value so
+    /// the ordinary switch can read its children instead of calling into them.
+    /// </summary>
+    private float EvaluateDeep(EvalContext context)
+    {
+        var memo = new Dictionary<Expression, float>(ReferenceComparer.Instance);
+        var order = new List<Expression>(64);
+        var pending = new Stack<Expression>();
+        pending.Push(this);
+
+        // Post-order: push a node, then its children; reversing the visit order afterwards
+        // leaves every child before its parent.
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            order.Add(node);
+
+            foreach (var child in node._args)
+            {
+                if (child != null)
+                    pending.Push(child);
+            }
+        }
+
+        _memo = memo;
+        try
+        {
+            for (var i = order.Count - 1; i >= 0; i--)
+            {
+                var node = order[i];
+                memo[node] = node.Evaluate(context);
+            }
+
+            return memo[this];
+        }
+        finally
+        {
+            _memo = null;
+        }
+    }
+
+    /// <summary>Identity, so two equal-looking subtrees keep separate memo entries.</summary>
+    private sealed class ReferenceComparer : IEqualityComparer<Expression>
+    {
+        internal static readonly ReferenceComparer Instance = new();
+
+        public bool Equals(Expression? a, Expression? b) => ReferenceEquals(a, b);
+
+        public int GetHashCode(Expression value) =>
+            System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(value);
     }
 
     // Division by zero yields 0 rather than an infinity that would poison vertex
@@ -889,259 +1010,378 @@ internal sealed class Expression
             _text = source.StartsWith('=') ? source[1..] : source;
         }
 
+        /// <summary>
+        /// Parses the whole expression with NO recursion, so nesting is bounded by memory
+        /// rather than by the call stack.
+        /// </summary>
+        /// <remarks>
+        /// This was a recursive-descent parser, and every nesting construct -- `(`, a `$name[]`
+        /// index, a call's arguments, a run of prefix `-`, a chain of `^` -- recursed once per
+        /// level. Deep input therefore overflowed the stack, which in .NET cannot be caught: it
+        /// ends the PROCESS, so one scene could take the game down. Depth caps were added
+        /// against that and were the wrong answer: they refuse input that is merely deep, and a
+        /// scene generated from a document can legitimately nest further than a person would
+        /// type. The limit is gone rather than raised.
+        ///
+        /// Two stacks do what the call stack did. Operands and operators give ordinary
+        /// precedence climbing within one level; the GROUP stack holds the one thing the
+        /// recursion was really carrying -- which bracket we are inside and what to build when
+        /// it closes. Precedence and associativity are unchanged: `2^3^2` is 512, `-2^2` is -4,
+        /// `2^-3` works, and `---1` is -1.
+        /// </remarks>
         internal Expression ParseExpression()
         {
-            var left = ParseTerm();
+            var operands = new List<Expression>(8);
+            var operators = new List<Operator>(8);
+            var groups = new List<Group>(4);
 
             while (true)
             {
-                SkipSpace();
-                if (Match('+')) left = Binary(Kind.Add, left, ParseTerm());
-                else if (Match('-')) left = Binary(Kind.Subtract, left, ParseTerm());
-                else return left;
-            }
-        }
-
-        private Expression ParseTerm()
-        {
-            var left = ParseUnary();
-
-            while (true)
-            {
-                SkipSpace();
-                if (Match('*')) left = Binary(Kind.Multiply, left, ParseUnary());
-                else if (Match('/')) left = Binary(Kind.Divide, left, ParseUnary());
-                else if (Match('%')) left = Binary(Kind.Modulo, left, ParseUnary());
-                else return left;
-            }
-        }
-
-        private Expression ParseUnary()
-        {
-            SkipSpace();
-            if (Match('-'))
-            {
-                Enter();
-                try
-                {
-                    var operand = ParseUnary();
-                    var node = new Expression { _kind = Kind.Negate, _args = new Expression?[] { operand } };
-                    node.UsesTime = operand.UsesTime;
-                    node.UsesScroll = operand.UsesScroll;
-                    return node;
-                }
-                finally
-                {
-                    Leave();
-                }
-            }
-
-            return ParsePower();
-        }
-
-        // Right-associative, so 2^3^2 is 2^(3^2).
-        private Expression ParsePower()
-        {
-            var left = ParsePrimary();
-            SkipSpace();
-            if (!Match('^'))
-                return left;
-
-            Enter();
-            try
-            {
-                return Binary(Kind.Power, left, ParseUnary());
-            }
-            finally
-            {
-                Leave();
-            }
-        }
-
-        /// <summary>
-        /// How deep the parser may descend, counted across EVERY recursion: a `(`, a prefix
-        /// `-`, and a `^`. Each is a stack frame, and a .NET stack overflow cannot be caught --
-        /// it ends the process, so in game it would take Stationeers down rather than fail the
-        /// scene. 0.11.77 counted only `(`, which left `---...-1` and `1^1^1^...` open; both
-        /// were measured to kill the process at 100,000, and both can arrive through ANY
-        /// numeric attribute, since a bare value is parsed as an expression with no leading
-        /// `=` required.
-        /// </summary>
-        private const int MaxDepth = 64;
-        private int _depth;
-
-        /// <summary>Takes one level, or refuses. Paired with <see cref="Leave"/> in a finally.</summary>
-        private void Enter()
-        {
-            if (++_depth > MaxDepth)
-            {
-                _depth--;
-                throw new FormatException($"expressions may not nest more than {MaxDepth} deep");
-            }
-        }
-
-        private void Leave() => _depth--;
-
-        private Expression ParsePrimary()
-        {
-            SkipSpace();
-
-            if (_at >= _text.Length)
-                throw new FormatException("unexpected end");
-
-            if (Match('('))
-            {
-                // Each '(' is a stack frame through ParseExpression. A stack overflow cannot
-                // be caught in .NET -- it ends the process, not the parse -- so depth is
-                // capped well above anything writable by hand and reported as an ordinary
-                // malformed expression.
-                Enter();
-                try
-                {
-                    var inner = ParseExpression();
-                    SkipSpace();
-                    if (!Match(')'))
-                        throw new FormatException("expected ')'");
-
-                    return inner;
-                }
-                finally
-                {
-                    _depth--;
-                }
-            }
-
-            if (Match('$'))
-                return ParseDataReference();
-
-            // A colour literal. Parsed to a Color NOW: Unity's parser is a native ECall and
-            // evaluation happens on the tessellation worker, where an ECall throws.
-            if (_text[_at] == '#')
-            {
-                var start = _at++;
-                while (_at < _text.Length && Uri.IsHexDigit(_text[_at]))
-                    _at++;
-
-                var text = _text[start.._at];
-                if (!Colours.TryParse(text, out var parsed))
-                    throw new FormatException($"\"{text}\" is not a colour");
-
-                return new Expression { _kind = Kind.Colour, _colour = parsed };
-            }
-
-            var c = _text[_at];
-            if (char.IsDigit(c) || c == '.')
-                return Constant(ReadNumber());
-
-            if (char.IsLetter(c) || c == '_')
-                return ParseIdentifier();
-
-            throw new FormatException($"unexpected '{c}'");
-        }
-
-        private Expression ParseDataReference()
-        {
-            var name = ReadName();
-            SkipSpace();
-
-            if (!Match('['))
-                return new Expression { _kind = Kind.Scalar, _name = name };
-
-            // An index recurses like any other nesting: `$a[$a[$a[...]]]` overflowed the
-            // stack and ended the process before this counted.
-            Enter();
-            Expression index;
-            try
-            {
-                index = ParseExpression();
-            }
-            finally
-            {
-                Leave();
-            }
-
-            SkipSpace();
-            if (!Match(']'))
-                throw new FormatException("expected ']'");
-
-            return new Expression
-            {
-                _kind = Kind.Element,
-                _name = name,
-                _args = new Expression?[] { index },
-                UsesTime = index.UsesTime,
-                UsesScroll = index.UsesScroll,
-            };
-        }
-
-        private Expression ParseIdentifier()
-        {
-            var name = ReadName();
-            SkipSpace();
-
-            if (!Match('('))
-                return Variable(name);
-
-            // `since($name)` takes a data NAME, not its value: seconds since that name last
-            // arrived. Time-dependent, so a scene using it animates.
-            if (name == "since")
-            {
-                SkipSpace();
-                if (!Match('$'))
-                    throw new FormatException("since() takes a data name, e.g. since($jump)");
-
-                var dataName = ReadName();
-                SkipSpace();
-                if (!Match(')'))
-                    throw new FormatException("expected ')' after since($name");
-
-                return new Expression { _kind = Kind.Since, _name = dataName, UsesTime = true };
-            }
-
-            if (!Arity.TryGetValue(name, out var expected))
-                throw new FormatException($"unknown function '{name}'");
-
-            var args = new List<Expression>(expected);
-            SkipSpace();
-
-            if (!Match(')'))
-            {
+                // --- an operand, with any prefix minus signs in front of it ---
                 while (true)
                 {
-                    // So do a call's arguments: `abs(abs(abs(...)))` was the same overflow.
-                    Enter();
-                    try
-                    {
-                        args.Add(ParseExpression());
-                    }
-                    finally
-                    {
-                        Leave();
-                    }
                     SkipSpace();
-                    if (Match(',')) continue;
-                    if (Match(')')) break;
-                    throw new FormatException($"expected ',' or ')' in {name}(...)");
+                    if (!Match('-'))
+                        break;
+
+                    operators.Add(new Operator(Kind.Negate, UnaryPrecedence, rightAssociative: true, unary: true));
+                }
+
+                SkipSpace();
+                if (_at >= _text.Length)
+                    throw new FormatException("unexpected end");
+
+                if (Match('('))
+                {
+                    groups.Add(new Group(GroupKind.Paren, null, operands.Count, operators.Count));
+                    continue;
+                }
+
+                if (Match('$'))
+                {
+                    var dataName = ReadName();
+                    SkipSpace();
+                    if (Match('['))
+                    {
+                        groups.Add(new Group(GroupKind.Index, dataName, operands.Count, operators.Count));
+                        continue;
+                    }
+
+                    operands.Add(new Expression { _kind = Kind.Scalar, _name = dataName });
+                }
+                else if (_text[_at] == '#')
+                {
+                    operands.Add(ReadColour());
+                }
+                else if (char.IsDigit(_text[_at]) || _text[_at] == '.')
+                {
+                    operands.Add(Constant(ReadNumber()));
+                }
+                else if (char.IsLetter(_text[_at]) || _text[_at] == '_')
+                {
+                    var name = ReadName();
+                    SkipSpace();
+
+                    if (!Match('('))
+                    {
+                        operands.Add(Variable(name));
+                    }
+                    else if (name == "since")
+                    {
+                        // `since($name)` takes a data NAME, not its value, so it opens no
+                        // group: there is no sub-expression to parse.
+                        operands.Add(ReadSince());
+                    }
+                    else
+                    {
+                        if (!Arity.ContainsKey(name))
+                            throw new FormatException("unknown function '" + name + "'");
+
+                        var call = new Group(GroupKind.Call, name, operands.Count, operators.Count);
+                        SkipSpace();
+
+                        // A zero-argument function closes at once: `pi()`.
+                        if (Match(')'))
+                        {
+                            operands.Add(CloseCall(call, null));
+                        }
+                        else
+                        {
+                            groups.Add(call);
+                            continue;
+                        }
+                    }
+                }
+                else
+                {
+                    throw new FormatException("unexpected '" + _text[_at] + "'");
+                }
+
+                // --- an operator, a separator, or the end ---
+                while (true)
+                {
+                    SkipSpace();
+
+                    if (_at < _text.Length && TryReadBinary(out var binary))
+                    {
+                        ReduceWhile(operands, operators, binary, groups);
+                        operators.Add(binary);
+                        break;
+                    }
+
+                    if (groups.Count == 0)
+                    {
+                        // Nothing is open, so whatever is here belongs to the caller.
+                        ReduceAll(operands, operators, 0, 0);
+                        if (operands.Count != 1)
+                            throw new FormatException("malformed expression");
+
+                        return operands[0];
+                    }
+
+                    var group = groups[groups.Count - 1];
+
+                    if (group.Kind == GroupKind.Call && Match(','))
+                    {
+                        ReduceAll(operands, operators, group.OperandMark, group.OperatorMark);
+                        group.Arguments.Add(TakeOne(operands, group.OperandMark));
+                        break;
+                    }
+
+                    if (group.Kind == GroupKind.Paren && Match(')'))
+                    {
+                        ReduceAll(operands, operators, group.OperandMark, group.OperatorMark);
+                        if (operands.Count != group.OperandMark + 1)
+                            throw new FormatException("malformed expression");
+
+                        groups.RemoveAt(groups.Count - 1);
+                        continue;
+                    }
+
+                    if (group.Kind == GroupKind.Call && Match(')'))
+                    {
+                        ReduceAll(operands, operators, group.OperandMark, group.OperatorMark);
+                        group.Arguments.Add(TakeOne(operands, group.OperandMark));
+                        groups.RemoveAt(groups.Count - 1);
+                        operands.Add(CloseCall(group, group.Arguments));
+                        continue;
+                    }
+
+                    if (group.Kind == GroupKind.Index && Match(']'))
+                    {
+                        ReduceAll(operands, operators, group.OperandMark, group.OperatorMark);
+                        var index = TakeOne(operands, group.OperandMark);
+                        groups.RemoveAt(groups.Count - 1);
+
+                        operands.Add(new Expression
+                        {
+                            _kind = Kind.Element,
+                            _name = group.Name!,
+                            _args = new Expression?[] { index },
+                            UsesTime = index.UsesTime,
+                            UsesScroll = index.UsesScroll,
+                        });
+                        continue;
+                    }
+
+                    throw new FormatException(group.Kind == GroupKind.Paren
+                        ? "expected ')'"
+                        : group.Kind == GroupKind.Index
+                            ? "expected ']'"
+                            : "expected ',' or ')' in " + group.Name + "(...)");
                 }
             }
+        }
 
-            if (args.Count != expected)
-                throw new FormatException($"{name}() takes {expected} argument(s), got {args.Count}");
+        /// <summary>A prefix minus binds looser than `^` and tighter than `*`.</summary>
+        private const int UnaryPrecedence = 3;
+
+        private enum GroupKind { Paren, Index, Call }
+
+        /// <summary>One open bracket: what the recursion used to hold on the call stack.</summary>
+        private sealed class Group
+        {
+            internal readonly GroupKind Kind;
+            internal readonly string? Name;
+
+            /// <summary>Where this group's own operands and operators begin.</summary>
+            internal readonly int OperandMark;
+            internal readonly int OperatorMark;
+
+            internal readonly List<Expression> Arguments;
+
+            internal Group(GroupKind kind, string? name, int operandMark, int operatorMark)
+            {
+                Kind = kind;
+                Name = name;
+                OperandMark = operandMark;
+                OperatorMark = operatorMark;
+                Arguments = new List<Expression>(4);
+            }
+        }
+
+        private readonly struct Operator
+        {
+            internal readonly Kind Kind;
+            internal readonly int Precedence;
+            internal readonly bool RightAssociative;
+            internal readonly bool Unary;
+
+            internal Operator(Kind kind, int precedence, bool rightAssociative, bool unary = false)
+            {
+                Kind = kind;
+                Precedence = precedence;
+                RightAssociative = rightAssociative;
+                Unary = unary;
+            }
+        }
+
+        private bool TryReadBinary(out Operator op)
+        {
+            switch (_text[_at])
+            {
+                case '+': _at++; op = new Operator(Kind.Add, 1, false); return true;
+                case '-': _at++; op = new Operator(Kind.Subtract, 1, false); return true;
+                case '*': _at++; op = new Operator(Kind.Multiply, 2, false); return true;
+                case '/': _at++; op = new Operator(Kind.Divide, 2, false); return true;
+                case '%': _at++; op = new Operator(Kind.Modulo, 2, false); return true;
+
+                // Right-associative and tighter than a prefix minus, so `2^3^2` is 512 and
+                // `-2^2` is -(2^2).
+                case '^': _at++; op = new Operator(Kind.Power, 4, true); return true;
+
+                default: op = default; return false;
+            }
+        }
+
+        /// <summary>Folds the operators that bind tighter than the one about to be pushed.</summary>
+        private static void ReduceWhile(List<Expression> operands, List<Operator> operators,
+            Operator next, List<Group> groups)
+        {
+            var operatorFloor = groups.Count > 0 ? groups[groups.Count - 1].OperatorMark : 0;
+            var operandFloor = groups.Count > 0 ? groups[groups.Count - 1].OperandMark : 0;
+
+            while (operators.Count > operatorFloor)
+            {
+                var top = operators[operators.Count - 1];
+                var folds = next.RightAssociative
+                    ? top.Precedence > next.Precedence
+                    : top.Precedence >= next.Precedence;
+
+                if (!folds)
+                    break;
+
+                Fold(operands, operators, operandFloor);
+            }
+        }
+
+        private static void ReduceAll(List<Expression> operands, List<Operator> operators,
+            int operandFloor, int operatorFloor)
+        {
+            while (operators.Count > operatorFloor)
+                Fold(operands, operators, operandFloor);
+        }
+
+        private static void Fold(List<Expression> operands, List<Operator> operators, int operandFloor)
+        {
+            var op = operators[operators.Count - 1];
+            operators.RemoveAt(operators.Count - 1);
+
+            if (op.Unary)
+            {
+                if (operands.Count <= operandFloor)
+                    throw new FormatException("malformed expression");
+
+                var operand = operands[operands.Count - 1];
+                operands.RemoveAt(operands.Count - 1);
+
+                operands.Add(new Expression
+                {
+                    _kind = Kind.Negate,
+                    _args = new Expression?[] { operand },
+                    UsesTime = operand.UsesTime,
+                    UsesScroll = operand.UsesScroll,
+                });
+
+                return;
+            }
+
+            if (operands.Count < operandFloor + 2)
+                throw new FormatException("malformed expression");
+
+            var right = operands[operands.Count - 1];
+            operands.RemoveAt(operands.Count - 1);
+            var left = operands[operands.Count - 1];
+            operands.RemoveAt(operands.Count - 1);
+            operands.Add(Binary(op.Kind, left, right));
+        }
+
+        private static Expression TakeOne(List<Expression> operands, int mark)
+        {
+            if (operands.Count != mark + 1)
+                throw new FormatException("malformed expression");
+
+            var value = operands[operands.Count - 1];
+            operands.RemoveAt(operands.Count - 1);
+            return value;
+        }
+
+        private static Expression CloseCall(Group group, List<Expression>? arguments)
+        {
+            var expected = Arity[group.Name!];
+            var count = arguments == null ? 0 : arguments.Count;
+
+            if (count != expected)
+            {
+                throw new FormatException(
+                    group.Name + "() takes " + expected + " argument(s), got " + count);
+            }
 
             var node = new Expression
             {
                 _kind = Kind.Call,
-                _name = name,
-                _args = args.ToArray(),
+                _name = group.Name!,
+                _args = arguments == null ? System.Array.Empty<Expression>() : arguments.ToArray(),
             };
 
-            foreach (var argument in args)
+            if (arguments != null)
             {
-                node.UsesTime |= argument.UsesTime;
-                node.UsesScroll |= argument.UsesScroll;
+                foreach (var argument in arguments)
+                {
+                    node.UsesTime |= argument.UsesTime;
+                    node.UsesScroll |= argument.UsesScroll;
+                }
             }
 
             return node;
+        }
+
+        /// <summary>A colour literal, turned into a Color at parse time; see Kind.Colour.</summary>
+        private Expression ReadColour()
+        {
+            var start = _at++;
+            while (_at < _text.Length && Uri.IsHexDigit(_text[_at]))
+                _at++;
+
+            var text = _text[start.._at];
+            if (!Colours.TryParse(text, out var parsed))
+                throw new FormatException("\"" + text + "\" is not a colour");
+
+            return new Expression { _kind = Kind.Colour, _colour = parsed };
+        }
+
+        private Expression ReadSince()
+        {
+            SkipSpace();
+            if (!Match('$'))
+                throw new FormatException("since() takes a data name, e.g. since($jump)");
+
+            var dataName = ReadName();
+            SkipSpace();
+            if (!Match(')'))
+                throw new FormatException("expected ')' after since($name");
+
+            return new Expression { _kind = Kind.Since, _name = dataName, UsesTime = true };
         }
 
         /// <summary>
