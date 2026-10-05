@@ -171,6 +171,7 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
 | a shape missing | self-intersecting `Y` or `P` |
 | picture missing | URL failed; `vector_stats` shows the HTTP error |
 | click does nothing | node lacks `id` or `click = 1`, or the element has no `on_click` |
+| a value set once in the data element's declaration reads `--` | no `ui:commit()` between declaring that element and the first `set_props` on it: ScriptedScreens merges them into one upsert and `data` is replaced whole. Commit after the declaration |
 | click misses the middle of a shape | it is an OPEN `L`/`SP`/`P`: clickable along its stroke only. Close it (`Y`, `SP close=1`) to claim the inside |
 | animation stuck at the start | the structure is being re-sent with a CHANGE each tick; a changed structure restarts `t`. Re-sending identical text is free and keeps the clock |
 

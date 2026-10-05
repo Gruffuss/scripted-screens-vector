@@ -65,6 +65,27 @@ props = { scene = "log", keep = 1, data = { … } }
 Off by default, deliberately. With merging always on there would be no way to clear a value,
 and the missing-name diagnostic would go quiet for any name ever sent once.
 
+**Commit between declaring the element and the first `set_props`, or the declaration is lost.**
+ScriptedScreens merges successive upserts of the same element id into **one** before the mod is
+called, and `data` is replaced whole rather than merged. So this sends only the tick's payload,
+and `long` never arrives at all:
+
+```lua
+local data = ui:element({ id = "d", type = "vector",
+    props = { scene = "log", keep = 1, data = { long = "set once, never resent" } } })
+
+function tick()                            -- no commit in between
+    data:set_props({ scene = "log", keep = 1, data = { pct = 42 } })
+    ui:commit()
+end
+```
+
+Add `ui:commit()` after the declaration and both arrive. Measured, one variable apart: without
+it the declared name reads `--`, with it the value is there. This bites exactly the values a
+`keep = 1` element exists for — the ones set once and never resent — and it is silent, because a
+name that never arrived looks the same as a name never sent. `examples/10-text.lua` and
+`12-click.lua` had this bug until 0.11.82.
+
 **`snap = 1` turns easing off for one payload.** Numbers normally glide from the value on
 screen to the new one over the gap between payloads, which is right for a gauge and wrong for
 a value that must change at once: a mode switch, a jump to a new item, or the constants
@@ -196,6 +217,19 @@ A scene reports its own faults rather than drawing nothing and leaving you to gu
 | a colour that will not parse, in `f` or `s` | reported, and the shape draws **magenta** |
 | missing gradient id | reported, and the shape draws **magenta** — the same signal as an unresolved data colour, so a dangling `@id` looks like a fault rather than a design decision |
 | missing clip id | reported; the reference is ignored, so the content draws unclipped |
+| a symbol that uses itself, directly or round a cycle | reported, naming the chain (`a -> b -> a`); that branch is not expanded |
+| nodes nested more than 64 deep | reported; the tree below the cap is not built |
+| an array in scene text nested more than 32 deep | the scene is refused, naming the line |
+| an expression nested more than 64 deep — parentheses, a run of `-`, or a chain of `^` | reported; that attribute falls back to its default |
+
+**The four nesting limits exist because exceeding them ended the game's PROCESS, not the scene.**
+Each was an unbounded recursion in the parser, and a .NET stack overflow cannot be caught: it
+takes the process down with nothing in the log. The caps are far above anything written by hand —
+the deepest array in any example here is two, and the deepest group nesting is a handful — and a
+symbol that uses itself is an ordinary typo rather than an attack. There is one ceiling the mod
+cannot raise: a Lua table nested a few thousand deep dies in ScriptedScreens' own conversion
+before this renderer sees it.
+
 
 Anything reported also puts a magenta hatched border around the surface, so a broken scene
 looks broken instead of looking switched off. Detail goes to `BepInEx/LogOutput.log`.
