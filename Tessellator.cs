@@ -3256,9 +3256,27 @@ internal static class Tessellator
             // the long they cast to.
             var hex = part.Hex && !float.IsNaN(value) && !float.IsInfinity(value);
 
-            var ok = hex
-                ? ((long)Mathf.Round(value)).TryFormat(_textBuffer.AsSpan(at, 64), out var written, part.Spec, CultureInfo.InvariantCulture)
-                : value.TryFormat(_textBuffer.AsSpan(at, 64), out written, part.Spec, CultureInfo.InvariantCulture);
+            // `TryFormat` THROWS on a specifier the type cannot take -- the comment above says so
+            // for `X`, and it is true of every other one: `{0:Z}`, `{0:D3}` and `{0:B}` are all
+            // well-formed composite formats that a float refuses. Unguarded here, that
+            // FormatException escaped the whole tessellation and the SCENE failed to draw, while
+            // the same spec on a whole binding printed the missing text, because that path
+            // (`Format`) wraps its own TryFormat in a try. A spec this cannot use is a fault in
+            // one label, not in the console. Falling through to the slow path below gives it the
+            // same treatment the whole-binding path already gave it.
+            bool ok;
+            int written;
+            try
+            {
+                ok = hex
+                    ? ((long)Mathf.Round(value)).TryFormat(_textBuffer.AsSpan(at, 64), out written, part.Spec, CultureInfo.InvariantCulture)
+                    : value.TryFormat(_textBuffer.AsSpan(at, 64), out written, part.Spec, CultureInfo.InvariantCulture);
+            }
+            catch (FormatException)
+            {
+                ok = false;
+                written = 0;
+            }
 
             if (ok)
             {

@@ -2337,21 +2337,37 @@ internal static class SceneParser
             // -- `Frame.Pieces` can already draw a node once per clip region, but once-per-region
             // equals a union only for DISJOINT regions, and overlapping ones double-composite,
             // which is invisible on an opaque fill and obvious through transparency and feather.
+            // Counted in two kinds, because they fail for different reasons and an author who
+            // wrote a `GL` inside a `CP` needs to be told something else than one who wrote two
+            // rects. A def op -- GL, GR, GC, CP, SYM -- returns null from ParseNode, since
+            // ParseDefs owns those, so the shape count below would silently pass over it.
             var extra = 0;
+            var defs = 0;
             foreach (var rest in children.Value.Array)
             {
-                if (!ReferenceEquals(rest.Map, item.Map)
-                    && rest.Type == SS.UiValueType.Map && rest.Map != null
-                    && ParseNode(rest.Map, new VecScene()) != null)
+                if (ReferenceEquals(rest.Map, item.Map)
+                    || rest.Type != SS.UiValueType.Map || rest.Map == null)
                 {
-                    extra++;
+                    continue;
                 }
+
+                var restOp = PropString(rest.Map, "op")?.ToUpperInvariant();
+                if (restOp is "GL" or "GR" or "GC" or "CP" or "SYM")
+                    defs++;
+                else if (ParseNode(rest.Map, new VecScene()) != null)
+                    extra++;
             }
 
             if (extra > 0)
             {
                 scene.Problem($"CP \"{PropString(map, "id")}\": a clip uses one shape; "
                               + $"{extra} further shape{(extra == 1 ? " was" : "s were")} ignored");
+            }
+
+            if (defs > 0)
+            {
+                scene.Problem($"CP \"{PropString(map, "id")}\": a def belongs in DEFS, not inside a "
+                              + $"clip; {defs} {(defs == 1 ? "was" : "were")} ignored");
             }
 
             return (node, Tessellator.Outline(node, new EvalContext()));

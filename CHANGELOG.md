@@ -2,6 +2,33 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.99
+
+### Fixed
+
+- **A format spec a float cannot take KILLED THE WHOLE SCENE** when it reached a placeholder.
+  `text = "<{$v}>"` with `fmt = "{0:Z}"` — and the same for `{0:D3}` and `{0:B}` — threw a
+  `FormatException` out of the tessellation and the console drew nothing at all, while the very
+  same spec on a whole binding (`text = "$v" fmt = "{0:Z}"`) printed the missing text and carried
+  on. `float.TryFormat` THROWS on a specifier the type cannot use rather than returning false; the
+  code already knew that for `X` and handled only that one. Guarded now, so a spec this cannot use
+  falls through to the same slow path the whole-binding route always used. Measured: the scene
+  draws `<-->` where it used to fail, with `{0:F1}` unchanged.
+
+  **This is a different fault from 0.11.97's unreadable-`fmt` report, and that check cannot catch
+  it**: `{0:Z}` is a well-formed .NET composite format, so it splits cleanly. It is the float that
+  refuses the `Z`.
+- **A def op written inside a `CP` was dropped in silence.** 0.11.96 began reporting a second
+  SHAPE in a clip, but a `GL`, `GR`, `GC`, `CP` or `SYM` there returns null from the node parser —
+  `ParseDefs` owns those — so the shape count passed straight over it. It is reported now, and
+  with its own message, since an author who wrote a gradient inside a clip needs telling something
+  different from one who wrote two rectangles.
+
+### Measured
+
+Fingerprint byte-identical to 0.11.98, unit suite 359. Both faults were reported by the console
+builder session from reading the source, and both reproduced exactly as described.
+
 ## 0.11.98
 
 Six faults that move pixels or change behaviour, as against 0.11.96 and 0.11.97 which only turned
