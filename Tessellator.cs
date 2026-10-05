@@ -232,6 +232,14 @@ internal static class Tessellator
     /// </remarks>
     internal static int Emit(MeshBuilder vh, VecScene scene, EvalContext context, Rect target, float screenPixelsPerUnit, bool screenSizeKnown, TessellationStats stats)
     {
+        // Belt as well as braces for the state a throw could strand. The three places that
+        // save and restore now do it in a `finally`, but `_repeatPiece` is [ThreadStatic] and
+        // the repeat stack rides on the context, so a build that died before any of that --
+        // or an older path added later without the same care -- would poison every later
+        // rebuild on this worker. Starting clean costs two assignments.
+        _repeatPiece = false;
+        context.ResetRepeats();
+
         var shapes = EmitCore(vh, scene, context, target, screenPixelsPerUnit, screenSizeKnown);
 
         System.Array.Copy(OpMilliseconds, stats.OpMilliseconds, stats.OpMilliseconds.Length);
@@ -449,9 +457,18 @@ internal static class Tessellator
             piece.Clip = frame.Pieces[k];
             stack.Push(piece);
 
+            // `_repeatPiece` is [ThreadStatic], so leaving it set does not just spoil this
+            // scene: it suppresses text, hit regions and scroll containers in EVERY later
+            // Emit on this worker thread, including other consoles' graphics.
             _repeatPiece = saved || k > 0;
-            EmitNode(vh, scene, node, context, stack, ref emitted);
-            stack.Pop();
+            try
+            {
+                EmitNode(vh, scene, node, context, stack, ref emitted);
+            }
+            finally
+            {
+                stack.Pop();
+            }
         }
 
         _repeatPiece = saved;
@@ -825,11 +842,20 @@ internal static class Tessellator
                     // `n` stays the authored count inside expressions: reducing it would
                     // change where instances sit, not just how many there are, so a thinned
                     // field would redistribute itself rather than simply thin out.
+                    // The pop must happen even if a child throws. Since 0.11.76 a throw is
+                    // caught and reported rather than killing the surface, so the graphic goes
+                    // on rebuilding -- and a repeat left on the stack would make `i` and `n`
+                    // wrong on every later rebuild, silently. The catch made this reachable.
                     context.PushRepeat(i, node.RepeatCount);
-                    foreach (var child in node.Children)
-                        EmitNode(vh, scene, child, context, stack, ref emitted);
-
-                    context.PopRepeat();
+                    try
+                    {
+                        foreach (var child in node.Children)
+                            EmitNode(vh, scene, child, context, stack, ref emitted);
+                    }
+                    finally
+                    {
+                        context.PopRepeat();
+                    }
                 }
 
                 break;
@@ -3303,12 +3329,17 @@ internal static class Tessellator
         context.ScrollY = offset;
         context.ViewportH = height;
 
-        foreach (var child in node.Children)
-            EmitNode(vh, scene, child, context, stack, ref emitted);
-
-        context.ScrollY = savedScroll;
-        context.ViewportH = savedViewport;
-        stack.Pop();
+        try
+        {
+            foreach (var child in node.Children)
+                EmitNode(vh, scene, child, context, stack, ref emitted);
+        }
+        finally
+        {
+            context.ScrollY = savedScroll;
+            context.ViewportH = savedViewport;
+            stack.Pop();
+        }
     }
 
     /// <summary>

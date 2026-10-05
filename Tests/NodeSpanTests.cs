@@ -22,7 +22,66 @@ internal static class NodeSpanTests
         ("recursion caps", RecursionCaps),
         ("open shapes are clickable on the stroke", OpenShapeHitArea),
         ("colour expressions", ColourExpressions),
+        ("state a throw could strand", StrandedState),
     };
+
+    /// <summary>
+    /// Nesting and leftover state, both reachable only through the TABLE form or a throw.
+    /// </summary>
+    /// <remarks>
+    /// The leftover-state half became reachable because of 0.11.76: before it, a throw inside
+    /// Emit faulted the task and the graphic stopped, so stranded state never got used. Now the
+    /// throw is caught and reported and the graphic keeps rebuilding -- with `i`, `n` and the
+    /// scroll offsets wrong, and `_repeatPiece` wrong for every OTHER graphic on that worker
+    /// thread too. Making a failure survivable made its side effects matter.
+    /// </remarks>
+    private static void StrandedState(TestRun run)
+    {
+        ImageCache.Loaded["test:span"] = (8, 8, null);
+
+        // Table-form nesting: the text form is bounded before the parser runs, the table form
+        // is not. 1,000 levels was "Stack overflow.", exit 127, measured out of process.
+        static SS.UiValue Nest(int depth)
+        {
+            var node = Map(Prop("op", Str("IMG")), Prop("x", Num(0f)), Prop("y", Num(0f)),
+                Prop("w", Num(10f)), Prop("h", Num(10f)), Prop("src", Str("test:span")));
+
+            for (var i = 0; i < depth; i++)
+                node = Map(Prop("op", Str("G")), Prop("c", Arr(node)));
+
+            return node;
+        }
+
+        static VecScene Build(int depth) => SceneParser.Parse(new[]
+        {
+            Prop("scene", Str("deep")), Prop("w", Num(100f)), Prop("h", Num(100f)),
+            Prop("root", Arr(Nest(depth))),
+        })!;
+
+        var shallow = Build(8);
+        run.Check("nesting: an ordinary tree is untouched",
+            shallow.Problems.Count == 0, shallow.Problems.Count > 0 ? shallow.Problems[0] : "");
+
+        var deep = Build(500);
+        run.Check("nesting: a table-form tree past the cap is refused, not fatal",
+            deep.Problems.Count == 1 && deep.Problems[0].Contains("nest"),
+            deep.Problems.Count > 0 ? deep.Problems[0] : "(nothing reported)");
+
+        // A build starts from clean state even when the last one left some behind. Corrupting
+        // the context directly stands in for the throw that would have done it.
+        var context = new EvalContext();
+        context.PushRepeat(7f, 9f);
+        context.PushRepeat(3f, 4f);
+        context.ScrollY = 123f;
+        run.Check("state: the context is corrupted before the build", context.RepeatDepth == 2,
+            $"{context.RepeatDepth}");
+
+        Tessellator.Emit(new MeshBuilder(), Build(2), context, new Rect(0f, 0f, 100f, 100f), 1f,
+            true, new TessellationStats());
+
+        run.Check("state: a build empties a repeat stack left behind by the last one",
+            context.RepeatDepth == 0, $"{context.RepeatDepth} level(s) still on the stack");
+    }
 
     /// <summary>
     /// `f = "=if(hover,#A,#B)"` and `"=mix(#A,#B,t)"`. A colour is not a float, so colours are

@@ -558,6 +558,18 @@ internal static class SceneParser
     /// them is a cycle. Parsing is main-thread only, but this is `[ThreadStatic]` like every
     /// other mutable static here so a stray parse elsewhere cannot corrupt it.
     /// </summary>
+    /// <summary>
+    /// How deep nodes may nest. The TEXT form is bounded before it gets here -- `SceneText`
+    /// caps `{` nesting -- but the table form arrives as a tree and reaches ParseNodes
+    /// directly, so `c = { { op = "G", c = { ... } } }` built by a Lua loop recursed with
+    /// nothing to stop it. Measured: 10 levels fine, 1,000 levels "Stack overflow." and exit
+    /// 127, which in game is the whole process. The tessellator recurses per level too, so
+    /// capping it here covers both.
+    /// </summary>
+    private const int MaxNodeDepth = 64;
+
+    [System.ThreadStatic] private static int _nodeDepth;
+
     [System.ThreadStatic] private static List<string>? _expandingSymbols;
 
     private static List<string> _expanding => _expandingSymbols ??= new List<string>();
@@ -567,6 +579,7 @@ internal static class SceneParser
         // A scene that threw or broke out mid-expansion must not leave a symbol marked as
         // being expanded, or the next parse reports a cycle that is not there.
         _expanding.Clear();
+        _nodeDepth = 0;
 
         var root = PropValue(props, "root");
         if (root == null || root.Value.Type != SS.UiValueType.Array)
@@ -934,6 +947,16 @@ internal static class SceneParser
         if (array.Array == null)
             return nodes;
 
+        if (_nodeDepth >= MaxNodeDepth)
+        {
+            scene.Problem($"nodes may not nest more than {MaxNodeDepth} deep");
+            return nodes;
+        }
+
+        _nodeDepth++;
+        try
+        {
+
         foreach (var item in array.Array)
         {
             if (item.Type != SS.UiValueType.Map || item.Map == null)
@@ -946,6 +969,12 @@ internal static class SceneParser
             var node = ParseNode(map, scene, inherited);
             if (node != null)
                 nodes.Add(node);
+        }
+
+        }
+        finally
+        {
+            _nodeDepth--;
         }
 
         return nodes;

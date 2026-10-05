@@ -2,6 +2,16 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.81
+
+Both reported by the ScriptedScreens console builder session from reading the source, and both
+confirmed here by running them first.
+
+- Fixed: **a deeply nested scene in the TABLE form killed the game process** -- as far as this mod can fix it; see below. The text form is bounded before the parser ever runs -- `SceneText` caps `{` nesting -- but a table arrives as a tree and reaches the node parser directly, so `c = { { op = "G", c = { ... } } }` built by a Lua loop recursed with nothing to stop it. Measured: 10 levels fine, 1,000 levels "Stack overflow." and exit 127. Nodes are now capped at 64 deep and the scene reports it. The tessellator recurses per level as well, so one cap covers both.
+  - **A deep enough table still ends the process, and not in this mod.** Measured on 0.11.81: 100 levels survives and is reported, 2,000 levels kills the game with nothing in the log. The parser refuses at 64 whatever it is handed, so it behaves identically at both -- the difference is below it, in the conversion from the Lua table to props, which runs before any of this mod and recurses per level. Nothing here can guard that. `InGameTest-deepnest.lua` carries the 100 case; its header says why 2,000 is not worth running.
+- Fixed: **state stranded by a throw was carried into every later rebuild.** Three places saved and restored around a recursive call without a `finally`: the repeat stack, the `[ThreadStatic]` concave-clip piece flag, and the scroll offsets. A build is also reset before it starts.
+  - **This was made reachable by 0.11.76.** Before it, a throw inside the tessellator faulted the task and the graphic stopped, so nothing used the stranded state; now the throw is caught and reported and the graphic goes on rebuilding -- with `i` and `n` wrong in every repeat, the scroll offsets wrong inside `SC`, and the piece flag suppressing text, hit regions and scroll containers in **every other graphic on that worker thread**. Making a failure survivable is what made its side effects matter.
+
 ## 0.11.80
 
 - Fixed: **two more recursions that killed the game process.** 0.11.77 capped nested `(`, but the expression parser descends once per prefix `-` and once per `^` as well, and neither was counted: `---...-1` and `1^1^1^...` at 100,000 both ended the process. Measured out of process before and after -- "Stack overflow.", exit 127, then a clean fall back to the attribute's default. All three recursions now share one depth counter at 64, so an ordinary `---1` and `2^3^2` are untouched.

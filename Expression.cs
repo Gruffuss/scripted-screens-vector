@@ -360,6 +360,17 @@ internal sealed class EvalContext
         _counts.RemoveAt(_counts.Count - 1);
     }
 
+    /// <summary>
+    /// Empties the repeat stack, for the start of a build. A repeat left on it from a build
+    /// that threw would make `i` and `n` wrong on every later rebuild of that graphic, with
+    /// nothing reported -- the kind of fault that reads as a scene bug for weeks.
+    /// </summary>
+    internal void ResetRepeats()
+    {
+        _indices.Clear();
+        _counts.Clear();
+    }
+
     /// <summary>How many repeats enclose the node being walked. 0 outside any.</summary>
     internal int RepeatDepth => _indices.Count;
 
