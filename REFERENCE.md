@@ -330,6 +330,50 @@ typo — `fille`, `strke` — which otherwise vanishes silently because unknown 
 by design. It does not catch a real key on the wrong op. `USE` and `SYM` are exempt, since
 symbol parameters are arbitrary by definition.
 
+### Enum words
+
+Every word-valued attribute is matched **case-insensitively** — `cover`, `Cover` and `COVER` are
+one value — and every one of them falls back rather than refusing, so a misspelt word draws
+something instead of nothing. Of the words below **only `rep` and `srep` report the typo**; the
+rest fall back in silence, and the unknown-attribute check above does not catch them, because the
+key itself is real.
+
+| Key | Where | Accepted | Anything else |
+|-----|-------|----------|---------------|
+| `fit` | structure element | `stretch`, `contain`, `cover` | `stretch` |
+| `fit` | `T` | `none`, `ellipsis`, `shrink` | `none` |
+| `fit` | `IMG` | `fill`, `contain`, `cover`, `none`, `scale-down` | `fill` |
+| `cap` | stroke | `butt`, `round`, `square` | `butt` |
+| `join` | stroke | `miter`, `round`, `bevel` | `miter` |
+| `fr` | `P` | `evenodd` | `nonzero` |
+| `align` | `T` | `left`, `center`, `centre`, `right`, `justified`, `justify` | `left` |
+| `valign` | `T` | `top`, `middle`, `center`, `centre`, `bottom` | `top` |
+| `weight` | `T`, and inside `fl` | `bold`, or a number `600` or more | not bold |
+| `tile` | `IMG` | `contain`, `cover` | the natural size, as `tile = {0, 0}` |
+| `rep` | `IMG` | `repeat`, `once`, `no-repeat`, `round`, `space`, `stretch` | `repeat`, reported |
+| `srep` | `IMG` | `stretch`, `repeat`, `round`, `space`, `once`, `no-repeat` | `repeat`, reported |
+| `smp` | `IMG` | `point` | smooth |
+| `units` | `GL`, `GR`, `GC` | `bbox` | scene coordinates |
+| `spread` | `GL`, `GR` | `pad`, `repeat`, `reflect`, `none` | `pad` |
+
+**Three unrelated attributes are called `fit`** — the viewbox fit, shrink-to-fit text and CSS
+`object-fit` — so a word from one is a typo in another, silently: `fit = "cover"` on a `T` is
+`none`. `center` is horizontal in `align` and vertical in `valign`, and both spell it either way.
+
+`rep` and `srep` read **one word list between them**, so each accepts the other's word and then
+draws it as `repeat`: `rep = "stretch"` tiles, and `srep = "once"` tiles an edge rather than
+leaving a single copy on it. Note that an unrecognised `srep` falls back to `repeat` and not to
+its own `stretch` default.
+
+A value that is not a string behaves differently again, and neither case is reported: a **pair**
+such as `{1, 2}` reads as `repeat` on both axes, while a **bare number** such as `srep = 5` is not
+read at all, so the attribute keeps its own default — `stretch` for `srep`. In the text format a
+bare `fit` means `fit = 1`, a number, and takes the fallback for the same reason.
+
+`wrap`, `kern`, `mid` and `close` are numeric flags rather than words, and `missing`, `unit`,
+`fmt`, `font` and `oc` are free strings. Curve names in `ease` are words as well, listed with
+`ease` above; an unknown one glides straight and reaches the log alone.
+
 ### `vector_stats` — the MCP tool
 
 If [StationeersLua](https://steamcommunity.com/workshop/) is installed, the mod registers a
@@ -1209,12 +1253,12 @@ filled but never stroked.
 |-----|---------|
 | `f` | `#rrggbb`, `#rrggbbaa`, `@gradientId`, `$dataName`, `none`, or a gradient sample (below) |
 | `fo` | fill opacity `0..1`, expression-capable |
+| `fr` | fill rule, read on a `P` only: `nonzero` (default) or `evenodd` |
 
 **Opacity blends in linear light**, the way the game's UI does, not in the sRGB numbers a browser
 averages. Half-opaque `#EAF4F8` over `#0D161C` shows as about `#ACB5B7`, where a browser shows
 `#7B858A`, so anything faded reads lighter than the same value in a CSS mockup. Applies to every
 alpha: `fo`, `so`, `o`, colour alpha, gradients, masks and shadows.
-| `fr` | `nonzero` (default) or `evenodd` |
 
 **Gradient sample** — the way to animate a colour:
 
@@ -1418,6 +1462,19 @@ filled with the colour, blurred with a Gaussian whose sigma is **half** the blur
 drawn beneath the shape. Several stack as CSS stacks them, **the first on top**. A single
 shadow may be written unwrapped.
 
+**An entry needs four numbers and a colour.** `dx`, `dy`, `blur` and `spread`, then a colour
+string that parses, and optionally the sixth field below. An `sh` that is not a list at all, an
+entry with fewer than five values, and one whose fifth value is not a colour string are each
+**dropped without a word** — a mistyped `"#0000O01f"` leaves the card with no shadow and nothing
+to read. Which form `sh` is in is decided by its **first** element alone, so a list that mixes
+them — an unwrapped shadow with a second one wrapped after it — reads as the unwrapped one
+carrying the second as its sixth field, and the second is discarded.
+
+**The four numbers are read literally.** Unlike `rx`'s per-corner list, or a gradient's geometry
+and stops, a string in one of those four slots is not evaluated: `"=2*t"` counts as `0`, and that
+is not reported either. A shadow's offset, blur and spread therefore do not animate; its opacity
+does, through the group's `o`.
+
 **Shadows fade with their shape**: the group's `o` and the shape's `fo` multiply into the shadow,
 as CSS `opacity` takes a box-shadow with its box. Before 0.11.21 they did not, and a faded card
 kept a full-strength halo. The shadow colour's own alpha is separate and unaffected.
@@ -1475,7 +1532,9 @@ builds its own mesh above ours — so a `T` shadow is the SDF shader's underlay 
   a translucent shape does not darken over its own shadow. That needs a polygon boolean here.
   Opaque shapes are unaffected; a translucent one will read darker than the mockup. Geometry
   only — the text underlay draws strictly behind its glyphs and has no such problem.
-- **`inset`** — a sixth field `"inset"` (or `1`) — draws inside the shape, over the fill and
+- **`inset`** — a sixth field `"inset"`, a number above `0.5`, or a Lua `true`. **In a `src`
+  scene `true` is the string `"true"`, which is not `"inset"`**, so it silently draws an ordinary
+  outset shadow; write `"inset"` there. Draws inside the shape, over the fill and
   under the stroke: the shape moved by `dx`/`dy` and shrunk by `spread`, inverted, blurred and
   clipped to the shape, as CSS draws it. Needs a **convex** outline (`R`, `C`, a convex `Y`
   or `P`); a concave one is refused with a problem rather than leaking past its edges. Costs
@@ -1897,15 +1956,43 @@ because it never scrolls, and needs neither of these.
 
 ### Operators
 
-`+` `-` `*` `/` `%` `^`, unary `-`, parentheses. Standard precedence.
+`+` `-` `*` `/` `%` `^`, a prefix `-`, and parentheses. Loosest first:
 
-**`^` is the power operator and there is no `pow()`** — reaching for one is an easy mistake
-when scanning the function table. An unknown function name fails at parse time rather than
-evaluating to zero, exactly as an unknown variable does, and names are case-sensitive, so
-`Sin(x)` is unknown too. **The scene still draws**: it is reported, and that one attribute falls
-back to its own default while everything else is unaffected. On `f` or `s` it costs a second
-problem, because the fallback is a number and a number is not a colour —
-`f: "=nosuchfn(1)" is an expression but does not give a colour`.
+| Operators | Associativity |
+|-----------|---------------|
+| `+` `-` | left to right |
+| `*` `/` `%` | left to right |
+| prefix `-` | right to left |
+| `^` | right to left |
+
+**`^` binds tighter than a prefix `-` and is right-associative**, as in Lua: `-2^2` is `-4` and
+`2^3^2` is `512`. Prefix minus signs stack, so `---1` is `-1`, and a prefix `-` may stand wherever
+an operand may — `2^-3` and `max(-1,2)` both parse. There is no prefix `+`.
+
+**There are no infix comparisons or logical operators.** `<` `>` `<=` `>=` `==` `&&` `||` and `!`
+are not part of the grammar; the spellings are the functions `lt` `gt` `lte` `gte` `eq` `and` `or`
+`not`, so `"=lt($x,5)"` says what another language writes as `$x < 5`. There is no "not equal" at
+all — write `not(eq(a,b))`.
+
+Whitespace is free between terms and operators — `"= clamp( $x , 0 , 1 )"` is the same expression
+as `"=clamp($x,0,1)"` — and never allowed inside one, because a number, a name and a `#` colour
+literal each read as a single run of characters: `1 . 5` and `# FFF` are malformed. A number is
+decimal digits and a `.`, with no exponent form, so `1e3` is malformed too — write `1000`. A data
+name after `$` is letters, digits and `_`, and the `[…]` index is a whole expression, so
+`$a[$order[i]]` reads fine. Every term is a number except a colour — a `#` literal, or one chosen
+by `if` or `mix` — which is read only where a colour is asked for; there are no strings in an
+expression.
+
+**`^` is the power operator and there is no `pow()`** — reaching for one is an easy mistake when
+scanning the function table. An unknown function or variable name fails at **parse** time rather
+than evaluating to zero, and so does every other malformed expression: an unclosed bracket, a
+stray `>`, a number with an `e` in it. Names are case-sensitive, so `Sin(x)` is unknown too.
+**The scene still draws.** The expression is reported and that one attribute falls back to its own
+default, while the rest of the scene is unaffected — which is what makes the `ver` banner above
+work. **`f` and `s` are the exception**: their fallback is a number, a number is not a colour, so
+they report a second problem and the shape draws **magenta** rather than falling back to no fill
+or no stroke. A missing `$name` is a different case again: it is reported as an unresolved name
+and reads `0` where it is used.
 
 Division by zero yields `0`, not infinity — an infinity would poison vertex positions and produce an invisible mesh
 rather than a visible glitch. `%` and `mod(a, 0)` do the same. **`^` has no such guard**: `0^-1`
