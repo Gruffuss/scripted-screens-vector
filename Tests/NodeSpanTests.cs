@@ -212,6 +212,34 @@ internal static class NodeSpanTests
         run.Check("recursion: ordinary parentheses still evaluate",
             Mathf.Approximately(fine.Evaluate(new EvalContext()), 3f),
             $"{fine.Evaluate(new EvalContext())}");
+
+        // `(` was not the only recursion. A run of prefix `-` descends once per sign, and a
+        // chain of `^` once per operator; 0.11.77 counted neither, and both killed the process
+        // at 100,000 (measured out of process: "Stack overflow.", exit 127). They share one
+        // depth counter now.
+        //
+        // The bare form matters most: a value needs no leading `=` to be parsed as an
+        // expression, so these arrive through ANY numeric attribute, not only `=`-prefixed ones.
+        foreach (var (what, text) in new[]
+                 {
+                     ("a run of prefix -", "=" + new string('-', 500) + "1"),
+                     ("a chain of ^", "=" + string.Join("^", new string('1', 500).ToCharArray())),
+                     ("the same with no leading =", new string('-', 500) + "1"),
+                 })
+        {
+            var guarded = Expression.Parse(text, 42f);
+            run.Check($"recursion: {what} falls back to the attribute default",
+                Mathf.Approximately(guarded.Evaluate(new EvalContext()), 42f),
+                $"{guarded.Evaluate(new EvalContext())}");
+        }
+
+        // And short runs of both must still evaluate, or the cap is too tight.
+        run.Check("recursion: ---1 is still -1",
+            Mathf.Approximately(Expression.Parse("=---1", 0f).Evaluate(new EvalContext()), -1f),
+            $"{Expression.Parse("=---1", 0f).Evaluate(new EvalContext())}");
+        run.Check("recursion: 2^3^2 is still right-associative (512)",
+            Mathf.Approximately(Expression.Parse("=2^3^2", 0f).Evaluate(new EvalContext()), 512f),
+            $"{Expression.Parse("=2^3^2", 0f).Evaluate(new EvalContext())}");
     }
 
     /// <summary>

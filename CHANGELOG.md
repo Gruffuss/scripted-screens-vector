@@ -2,6 +2,12 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.80
+
+- Fixed: **two more recursions that killed the game process.** 0.11.77 capped nested `(`, but the expression parser descends once per prefix `-` and once per `^` as well, and neither was counted: `---...-1` and `1^1^1^...` at 100,000 both ended the process. Measured out of process before and after -- "Stack overflow.", exit 127, then a clean fall back to the attribute's default. All three recursions now share one depth counter at 64, so an ordinary `---1` and `2^3^2` are untouched.
+  - **These arrive through any numeric attribute.** A value needs no leading `=` to be parsed as an expression, so `w = "---...-1"` is as dangerous as `w = "=---...-1"` was. That is what made it worth fixing rather than noting.
+  - Reported by the ScriptedScreens console builder session from reading the source, and confirmed here by running it. Its own validator already caps prefix runs and `^` counts before generating a scene.
+
 ## 0.11.79
 
 - Added: **a colour can be an expression.** `f = "=if(down,#2E8B6E,if(hover,#6FE3B6,#5FD9A8))"` is a button with three states in one node and nothing sent to the chip; `s = "=mix(#24405A,#3A6E8B,hover)"` blends between two. Works on `f` and `s`, with `hover`, `down`, `t`, `$data` or anything else an expression reads.

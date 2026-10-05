@@ -877,11 +877,19 @@ internal sealed class Expression
             SkipSpace();
             if (Match('-'))
             {
-                var operand = ParseUnary();
-                var node = new Expression { _kind = Kind.Negate, _args = new Expression?[] { operand } };
-                node.UsesTime = operand.UsesTime;
-                node.UsesScroll = operand.UsesScroll;
-                return node;
+                Enter();
+                try
+                {
+                    var operand = ParseUnary();
+                    var node = new Expression { _kind = Kind.Negate, _args = new Expression?[] { operand } };
+                    node.UsesTime = operand.UsesTime;
+                    node.UsesScroll = operand.UsesScroll;
+                    return node;
+                }
+                finally
+                {
+                    Leave();
+                }
             }
 
             return ParsePower();
@@ -892,11 +900,43 @@ internal sealed class Expression
         {
             var left = ParsePrimary();
             SkipSpace();
-            return Match('^') ? Binary(Kind.Power, left, ParseUnary()) : left;
+            if (!Match('^'))
+                return left;
+
+            Enter();
+            try
+            {
+                return Binary(Kind.Power, left, ParseUnary());
+            }
+            finally
+            {
+                Leave();
+            }
         }
 
+        /// <summary>
+        /// How deep the parser may descend, counted across EVERY recursion: a `(`, a prefix
+        /// `-`, and a `^`. Each is a stack frame, and a .NET stack overflow cannot be caught --
+        /// it ends the process, so in game it would take Stationeers down rather than fail the
+        /// scene. 0.11.77 counted only `(`, which left `---...-1` and `1^1^1^...` open; both
+        /// were measured to kill the process at 100,000, and both can arrive through ANY
+        /// numeric attribute, since a bare value is parsed as an expression with no leading
+        /// `=` required.
+        /// </summary>
         private const int MaxDepth = 64;
         private int _depth;
+
+        /// <summary>Takes one level, or refuses. Paired with <see cref="Leave"/> in a finally.</summary>
+        private void Enter()
+        {
+            if (++_depth > MaxDepth)
+            {
+                _depth--;
+                throw new FormatException($"expressions may not nest more than {MaxDepth} deep");
+            }
+        }
+
+        private void Leave() => _depth--;
 
         private Expression ParsePrimary()
         {
@@ -911,12 +951,7 @@ internal sealed class Expression
                 // be caught in .NET -- it ends the process, not the parse -- so depth is
                 // capped well above anything writable by hand and reported as an ordinary
                 // malformed expression.
-                if (++_depth > MaxDepth)
-                {
-                    _depth--;
-                    throw new FormatException($"expressions may not nest more than {MaxDepth} deep");
-                }
-
+                Enter();
                 try
                 {
                     var inner = ParseExpression();
