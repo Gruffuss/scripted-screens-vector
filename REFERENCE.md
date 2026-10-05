@@ -39,7 +39,7 @@ from the **element**, always, so a `scene=` on a `SCENE` line does not pair anyt
 | Prop | Type | Meaning |
 |------|------|---------|
 | `scene` | string | matching scene id |
-| `data` | map | named numbers, arrays of numbers, and colour strings |
+| `data` | map | named numbers and strings (a string may be a colour), and arrays of either; see **What a data value may be** below |
 | `nodes` | map | geometry patches by node `id` — see below |
 | `keep` | number | `1` makes the payload a patch: names it omits keep their values |
 | `snap` | number | `1` applies this payload's numbers and number arrays at once instead of easing them in |
@@ -314,7 +314,18 @@ such limit.
 
 
 Anything reported also puts a magenta hatched border around the surface, so a broken scene
-looks broken instead of looking switched off. Detail goes to `BepInEx/LogOutput.log`.
+looks broken instead of looking switched off. Detail goes to `BepInEx/LogOutput.log`, and
+`vector_stats` lists the same messages.
+
+**The border means something was reported, not that nothing drew.** A scene can draw every shape
+exactly as written and still carry it. The problem list belongs to the scene and is never cleared
+within it, so one typo caught at parse time keeps the border up for as long as that scene stands:
+only a reparse of the **structure** clears it, new data never does, and a `src` text element
+resent unchanged is not reparsed.
+
+There is a **second, separate marker** for a scene that emitted no shape at all — the border
+without stripes. That is the one that means "nothing drew". A shape with zero width or height
+counts as not emitted, so a bar at 0% can raise it on its own.
 
 A scene keeps at most **16 distinct problems**. Any further new one is dropped from the border,
 from `vector_stats` and from the log alike, so fix the first ones and reload to see the rest. The
@@ -447,6 +458,27 @@ reach rather than two — checked against a 400-ring reference, the difference i
 pixels at 12/255. The cap is **96 rings**, multiplied by `Renderer.BlurDensity`; it was 24 until
 0.11.50, when a glow seen up close turned out to be hitting it. Reducing the blur radius is still
 the direct lever.
+
+### What a data value may be
+
+A `data` entry may be a **number**, a **string**, or an **array** of numbers or of strings. Those
+are the only shapes stored. A **boolean**, a nested table, and any other Lua kind are **dropped**,
+so the name is never stored at all: `$name` reads `0` and is listed as unresolved, and a colour
+bound to it draws magenta.
+
+**`true` is not `1`.** A Lua boolean arrives as its own kind, and every numeric prop and attribute
+here reads numbers only, so `keep = true`, `snap = true`, `click = true` and `v = false` all read
+as absent and leave their default. Nothing is reported, because the key itself is spelled
+correctly. Write `1` and `0`.
+
+**The trap `keep = 1` hides.** A dropped value carries nothing, and `keep` only replaces the names
+a payload actually brings — so `data = { alarm = 1 }` followed by `data = { alarm = false }` with
+`keep = 1` leaves `alarm` at **1**, silently. The payload that was meant to clear the alarm did
+nothing at all.
+
+Within an array, a slot that is not a string reads as `""`, and a hole reads `0` while the other
+slots keep their values — `{1, nil, 3}` arrives as `[1, 0, 3]`. An array **of arrays**, or of
+booleans, is all zeros.
 
 ### Which colour strings a data value may be
 
