@@ -1446,6 +1446,18 @@ internal static class Tessellator
         // needle swung, 45 degrees making it square whatever the text.
         var box = LabelBox(frame.Matrix, x, y, w, h, out var rotation);
 
+        // A label takes clicks on its own box. `box` above is already in canvas space for
+        // TextLayer, and RecordHit applies the frame matrix itself, so the LOCAL rect is built
+        // here instead -- the same region an `R` in this place would register. Until 0.11.93 a
+        // `T` registered nothing at all.
+        if (node.Clickable && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
+        {
+            RecordHit(node.Id!, new List<Vector2>(4)
+            {
+                new(x, y), new(x + w, y), new(x + w, y + h), new(x, y + h),
+            }, frame.Matrix, frame.CanvasClip, context, node);
+        }
+
         // A skew or a one-axis stretch cannot be expressed by a RectTransform, which only turns
         // and scales evenly: `m=[1,0,-0.5,1,0,0]` sheared the box around upright letters. The
         // label is laid out at the frame's even scale instead and the rest goes to the glyphs.
@@ -1612,6 +1624,11 @@ internal static class Tessellator
         var box = RectOutline(node, context, frame.Scale * ScreenScale, new List<Vector2>(64));
         if (box.Count < 3 || texW <= 0 || texH <= 0)
             return;
+
+        // A picture takes clicks on its own box, corner radii included -- this is the same
+        // outline it draws through. Until 0.11.93 an `IMG` registered nothing at all.
+        if (node.Clickable && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
+            RecordHit(node.Id!, box, frame.Matrix, frame.CanvasClip, context, node);
 
         // The natural size fit works from is the cropped part's, not the whole texture's.
         var crop = node.ImageCrop;

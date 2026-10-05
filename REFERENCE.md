@@ -1229,10 +1229,16 @@ makes an invisible hit area; so does an open shape with no stroke at all.
 **Every drawn SHAPE can be clicked: `R`, `C`, `L`, `Y`, `SP`, `LS` and `P`.** A `P` is clickable
 over its outer contour, holes included.
 
-**`T` and `IMG` cannot.** A label or a picture with `click = 1` registers no hit area, does
-nothing and reports nothing; put a transparent `R` over it when you need one to be clickable.
-This has always been so -- the doc previously claimed otherwise, and claimed they worked before
-0.11.74, but a hit area has only ever been recorded where a shape's outline is built.
+**`T` and `IMG` can be clicked from 0.11.93.** Each takes clicks on its own box: a picture
+through the same outline it draws, corner radii included; a label through its rect, the same
+region an `R` in that place would claim. Before 0.11.93 neither registered anything at all --
+`click`, `press`, `xy`, `drag` and `drop` on them did nothing and reported nothing, whatever this
+reference said at the time -- so a scene that must run on an older build still needs a
+transparent `R` over the label.
+
+A label that sits over a clickable shape and carries both an `id` and `click` now takes the
+click itself rather than letting it through, because a click lands on what is drawn last. A
+label with no `click` registers nothing.
 
 Until 0.11.74 only the closed shapes registered one, so `press`, `xy`, `drag` and plain clicks on
 a polyline, a polygon, a spline or a path did nothing at all and reported nothing.

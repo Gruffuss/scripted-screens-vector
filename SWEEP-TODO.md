@@ -1,4 +1,4 @@
-# Reference sweep — working list
+﻿# Reference sweep — working list
 
 The 59 items from the VectorBuilder sweep against v0.11.91, plus what today's work left open.
 Kept updated as each lands. Started 2026-10-05.
@@ -15,9 +15,9 @@ push. Being tested separately, at the owner's instruction.
 
 | | done | left |
 |---|---|---|
-| Part A (code vs doc) | 3 | 17 |
+| Part A (code vs doc) | 4 | 16 |
 | Part B (doc silent or vague) | 0 | 39 |
-| Carried over from today | 1 | 4 |
+| Carried over from today | 2 | 3 |
 
 ---
 
@@ -30,8 +30,10 @@ push. Being tested separately, at the owner's instruction.
       clickable is tracked below as a feature.
 - [x] **A3** `so` on an `SC` becomes the stroke opacity of everything inside — **CODE**. Fixed in
       0.11.92, measured before and after and seen on a console. Second half still open below.
-- [ ] **A4** in `src`, only `=` values are read to whitespace, so `text=$rows[i]`-style values can
-      reject the whole scene
+- [x] **A4** in `src`, only `=` values are read to whitespace — **CODE**. One unquoted
+      `text=$rows[i]` rejected the WHOLE scene; a `$` binding now reads to whitespace like an `=`
+      expression, which is what the reference already promised. Inside an array the ordinary rule
+      stays so `p=[$a,$b]` still splits on the comma. Measured before and after.
 - [ ] **A5** `weight` given as a number is ignored
 - [ ] **A6** `fmt` is not the printf spec, and an unreadable spec does not render `missing`
 - [ ] **A7** an open `L`, `LS` or `SP` with `f` is filled
@@ -100,13 +102,13 @@ reference where it belongs.
       arriving counts up (35.0 s), one that keeps arriving sits near zero (0.3 s). A capture
       cannot measure it, because the capture replays the stored elements and re-stamps every data
       name, so `since()` reads 0 in every capture regardless.
-- [ ] **`FEATURE` make `T` and `IMG` clickable.** They never have been; the reference now says so.
+- [ ] **`FEATURE` make `T` and `IMG` clickable.** IN PROGRESS. They never have been; the reference now says so.
       A hit area is recorded where a shape's outline is built, and neither a label nor a picture
       goes through that path. Owner asked for this on 2026-10-05.
 - [ ] **A3 second half** — a stroke `so` inherited INTO an `SC` that declares `sov` becomes its
       scroll offset. Needs the parse to tell a node's own keys from its inherited ones.
-- [ ] document the `since()` trap: a `nodes`-only patch re-delivers the element's accumulated
-      `data` and re-stamps its names, holding `since()` at zero.
+- [x] document the `since()` trap — done, `f45b169`, with the measurement and the remedy (send
+      geometry patches from a different element than the one carrying the animated data).
 - [ ] audit the conclusions drawn from the offline probe BEFORE `sync_src.py` existed — the
       snapshot could have been stale, and several of today's decisions rest on them.
 - [ ] commit the scratch test pages that are worth keeping, delete the rest.

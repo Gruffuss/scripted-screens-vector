@@ -387,7 +387,7 @@ internal static class SceneText
             // letting a line break through would make a missing `]` swallow the rest of the
             // scene instead of being reported here.
             var before = r.At;
-            items.Add(ReadScalar(r));
+            items.Add(ReadScalar(r, insideArray: true));
 
             if (r.At == before)
                 throw Fail(r, "an array must be closed with ] on the same line");
@@ -395,14 +395,22 @@ internal static class SceneText
     }
 
     /// <summary>One value that is not an array.</summary>
-    private static SS.UiValue ReadScalar(Reader r)
+    private static SS.UiValue ReadScalar(Reader r, bool insideArray = false)
     {
         // An expression is read to whitespace and nothing else. The ordinary token rule
         // breaks on ',' '[' ']', and expressions are full of all three -- `clamp($x,0,1)`,
         // `$name[i]`. Consequence, and the one rule the format imposes: an unquoted
         // expression cannot contain a space. Quote it if it needs one.
-        if (r.At < r.Text.Length && r.Text[r.At] == '=')
+        //
+        // A `$` binding is read the same way, because it has the same problem: `text=$rows[i]`
+        // ended at the `[`, the `[` was then read as the next op, and the WHOLE SCENE was
+        // rejected for one unquoted binding. Inside an array the ordinary rule stays, since
+        // there a `,` has to keep separating the items.
+        if (r.At < r.Text.Length
+            && (r.Text[r.At] == '=' || (!insideArray && r.Text[r.At] == '$')))
+        {
             return Str(ReadUntilSpace(r));
+        }
 
         var token = ReadToken(r);
 

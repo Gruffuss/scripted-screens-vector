@@ -2,6 +2,25 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.93
+
+- **A `T` or an `IMG` with `click = 1` now registers a hit area.** Neither ever has: a hit area is
+  recorded where a shape's outline is built, and a label and a picture go through neither path, so
+  `click`, `press`, `xy`, `drag` and `drop` on them did nothing and reported nothing. Each now
+  takes clicks on its own box -- a picture through the same outline it draws, corner radii
+  included; a label through its rect, the same region an `R` in that place would claim.
+
+  **Changed, so worth knowing:** a label that sits over a clickable shape and carries both an `id`
+  and `click` now takes the click itself rather than letting it through, because a click lands on
+  what is drawn last. A label with no `click` registers nothing, exactly as before.
+
+- **Fixed: one unquoted `$name[i]` rejected the whole scene.** Values are read to whitespace
+  because expressions and bindings are full of `,` `[` `]`, but only a value starting with `=` was
+  read that way. `text=$rows[i]` therefore ended at the `[`, the `[` was read as the next op, and
+  the scene was refused with "expected an op" -- the whole page, for one unquoted binding, exactly
+  the form the reference gives as an example. A `$` value now reads to whitespace too. Inside an
+  array the ordinary rule stays, so `p=[$a,$b]` still splits on the comma.
+
 ## 0.11.92
 
 - **Fixed: a scroll container's `so` made every outline inside it invisible.** `so` is stroke
