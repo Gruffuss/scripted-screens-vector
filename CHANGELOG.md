@@ -2,6 +2,16 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.92
+
+- **Fixed: a scroll container's `so` made every outline inside it invisible.** `so` is stroke
+  opacity on a shape and a **scroll offset** on an `SC`, and because a scroll container has
+  children it was passing its own `so` down as a paint default. So `SC so=0 ...` asked the list
+  to jump to the top and drew every stroke inside it at alpha 0; a larger offset escaped notice
+  only because opacity clamps to 1. An `SC` now keeps its `so` to itself, the way a group already
+  keeps `s` (which is scale there and stroke colour on a shape). `so` as a default on an ordinary
+  group is unchanged.
+
 ## 0.11.91
 
 - **Fixed: `fea` was ignored on a shape with no fill.** A stroke is an edge and takes a feather

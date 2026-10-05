@@ -1653,7 +1653,13 @@ internal static class SceneParser
         {
             // A group's `style` becomes the default for everything under it, combined with
             // whatever it inherited itself, so defaults nest.
-            var style = ParseStyle(map, inherited);
+            //
+            // An `SC` keeps its own `so`: there it is a SCROLL OFFSET, not stroke opacity, and
+            // passing it down made `SC so=0` draw every outline inside the list at alpha 0.
+            // The same collision as `s` (scale on a group, stroke colour on a shape), handled
+            // the same way -- the node that uses a key itself does not pass it on.
+            var style = ParseStyle(map, inherited,
+                string.Equals(op, "SC", StringComparison.OrdinalIgnoreCase) ? "so" : null);
 
             Pending.Enqueue(new PendingChildren(node, children.Value, style, _expanding));
         }

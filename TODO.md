@@ -1,4 +1,12 @@
-﻿## CLOSED: a scene with no `T` captured blank (2026-10-05, fixed in 0.11.83)
+﻿## `so` inherited INTO an SC still becomes its scroll offset
+
+0.11.92 stopped an `SC` passing its own `so` down as stroke opacity. The reverse is still open: a
+stroke `so` inherited from an enclosing group lands on an `SC` that declares `sov`, and is taken
+as the scroll offset. Reaching it needs the parse to tell a node's OWN keys from its inherited
+ones, which it does not currently carry -- the inherited defaults are merged into the map before
+the op-specific parse reads it. Reported from a source reading; not yet reproduced in game.
+
+## CLOSED: a scene with no `T` captured blank (2026-10-05, fixed in 0.11.83)
 
 **Cause: the capture canvas does not upload `TEXCOORD1`, and the dither shader multiplies alpha
 by it.** `UIDither` carries a blur's coverage in TEXCOORD1 and the fragment does
