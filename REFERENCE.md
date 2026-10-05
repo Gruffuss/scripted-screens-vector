@@ -71,11 +71,16 @@ the script calls `ui:commit()`, and successive `set_props` on one element inside
 arrive as **one** payload. What that payload carries is the rule worth knowing, because the two
 halves differ:
 
-- **Ordinary properties MERGE.** A property set by an earlier call and not mentioned again
-  survives, so `set_props { f = "#f00" }` then `set_props { x = 10 }` delivers both.
-- **`data` does NOT.** It is a single property whose value is a table, so a later `data` replaces
-  the earlier one **whole**. Names sent in the first and absent from the second are gone, and
-  `keep = 1` cannot help -- the earlier table never arrives to be merged:
+- **`set_props` MERGES ordinary properties.** One set by an earlier call and not mentioned again
+  survives, so `set_props { f = "#f00" }` then `set_props { x = 10 }` delivers both, and a
+  property set in the declaration still arrives when the patch never mentions it.
+- **A property holding a TABLE does not merge with itself.** `data`, `nodes` and `ease` are each
+  one property, so a later write of the same one replaces it **whole**. Names in the first and
+  absent from the second are gone, and `keep = 1` cannot help -- the earlier table never arrives
+  to be merged. Measured for `data` and `nodes`; `ease` is the same property-level mechanism.
+- **A second `ui:element` declaration of one id REPLACES the first whole**, unlike `set_props`.
+  A property named in the first declaration and omitted from the second is gone -- including
+  `scene`, which sends the payload somewhere else entirely:
 
 ```lua
 function tick()
