@@ -1,17 +1,26 @@
--- A table-form scene nested deep, which killed the game process before 0.11.81. The text form
--- was already bounded by the scene-text reader; this road was not.
+-- A table-form scene nested deep, which killed the game process before 0.11.81.
 --
--- SET `DEPTH` TO 100 FOR THE NORMAL TEST. The page then draws, the game keeps running, and
--- vector_stats says "nodes may not nest more than 64 deep". That is the mod's guard working.
+-- THE 64-DEEP GUARD THIS PAGE WAS WRITTEN FOR IS GONE. 0.11.81 added it; 0.11.86 removed it and
+-- every other depth cap, because a cap that refuses merely DEEP input is a mitigation, not a fix.
+-- All the recursions underneath are explicit stacks now. So `vector_stats` no longer says
+-- "nodes may not nest more than 64 deep" at any depth, and a page expecting that message is
+-- reading a build older than 0.11.86.
 --
--- AT 2000 THE GAME STILL DIES, AND NOT IN THIS MOD. The vector parser refuses at 64 whatever
--- it is handed, so it behaves identically at 100 and at 2000; the difference is below it, in
--- the conversion from the Lua table to props, which happens before any of this mod runs and
--- recurses per level. Measured 2026-10-05 on 0.11.81: 100 survives, 2000 kills the process
--- with nothing in the log. Nothing in this mod can guard that -- it is the host's recursion.
+-- WHAT THE PAGE TESTS NOW: that deep nesting simply works. Measured offline on 0.11.94, the
+-- table form through the real parser and tessellator -- 10, 64, 65, 100, 2000 and 20,000 levels
+-- each parse, draw, and report NO problems, with the rect's x offset tracking the nesting
+-- exactly at every depth (20,000 levels of `t = {1, 0}` put it at x = 40,000). Nothing refuses
+-- and nothing is dropped.
 --
--- So: 100 tests the guard. 2000 tests the host, costs a restart, and is not worth running
--- unless someone is working on the host.
+-- THE HOST'S OWN RECURSION IS A SEPARATE QUESTION AND IS UNTESTED SINCE 0.11.86. On 0.11.81,
+-- DEPTH = 2000 killed the process with nothing in the log, and that was attributed to the
+-- conversion from the Lua table to props, which happens in the host BEFORE this mod runs. That
+-- attribution has not been re-checked since the mod's own caps came out, and it cannot be
+-- checked offline -- the probe never runs the host's converter. Treat 2000 as unproven in
+-- either direction: if it dies, the log and the stack say whether it died above this mod.
+--
+-- So: any DEPTH tests that the mod handles it. 2000 tests the HOST, costs a restart, and is
+-- worth running only when someone is asking about the host.
 local ui = ss.ui.surface("main")
 ss.ui.activate("main")
 local size = ui:size()
