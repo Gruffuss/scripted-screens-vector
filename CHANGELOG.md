@@ -120,7 +120,7 @@ scenes written for masks, concave clips, scroll, repeats, symbols and `ztext` or
 
 ## 0.11.84
 
-Both reported by the ScriptedScreens console builder session from reading v0.11.80, both
+Both reported from reading v0.11.80, both
 confirmed here by running them first.
 
 - Fixed: **two more recursions that ended the game process.** The depth cap counted parentheses,
@@ -151,7 +151,7 @@ confirmed here by running them first.
 
 ## 0.11.82
 
-Three faults found by the console builder session from reading the source, all confirmed here and
+Three faults found from reading the source, all confirmed here and
 all invisible in normal use, which is why they lasted.
 
 - Fixed: **a table-form scene inherited the previous run's data and clock.** The carry-over guard
@@ -174,7 +174,7 @@ all invisible in normal use, which is why they lasted.
 
 ## 0.11.81
 
-Both reported by the ScriptedScreens console builder session from reading the source, and both
+Both reported from reading the source, and both
 confirmed here by running them first.
 
 - Fixed: **a deeply nested scene in the TABLE form killed the game process** -- as far as this mod can fix it; see below. The text form is bounded before the parser ever runs -- `SceneText` caps `{` nesting -- but a table arrives as a tree and reaches the node parser directly, so `c = { { op = "G", c = { ... } } }` built by a Lua loop recursed with nothing to stop it. Measured: 10 levels fine, 1,000 levels "Stack overflow." and exit 127. Nodes are now capped at 64 deep and the scene reports it. The tessellator recurses per level as well, so one cap covers both.
@@ -186,7 +186,7 @@ confirmed here by running them first.
 
 - Fixed: **two more recursions that killed the game process.** 0.11.77 capped nested `(`, but the expression parser descends once per prefix `-` and once per `^` as well, and neither was counted: `---...-1` and `1^1^1^...` at 100,000 both ended the process. Measured out of process before and after -- "Stack overflow.", exit 127, then a clean fall back to the attribute's default. All three recursions now share one depth counter at 64, so an ordinary `---1` and `2^3^2` are untouched.
   - **These arrive through any numeric attribute.** A value needs no leading `=` to be parsed as an expression, so `w = "---...-1"` is as dangerous as `w = "=---...-1"` was. That is what made it worth fixing rather than noting.
-  - Reported by the ScriptedScreens console builder session from reading the source, and confirmed here by running it. Its own validator already caps prefix runs and `^` counts before generating a scene.
+  - Reported from reading the source, and confirmed here by running it. The tool that reported it already caps prefix runs and `^` counts before generating a scene, so it was never going to send one.
 
 ## 0.11.79
 
