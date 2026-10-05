@@ -46,6 +46,12 @@ internal static class VectorElementPatch
     /// <summary>Data that arrived before its structure. Spec §1: either order must work.</summary>
     private static readonly Dictionary<string, EvalContext> PendingData = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// A `nodes` patch whose structure has not arrived yet, kept beside its data in
+    /// <see cref="PendingData"/> and applied when the graphic appears.
+    /// </summary>
+    private static readonly Dictionary<string, SS.UiProp[]> PendingPatches = new(StringComparer.Ordinal);
+
     private static void Postfix(Motherboard? board, CartridgeIntegratedCircuitLua? cartridge,
         ProgrammableVisorGlasses? visor, SS.BoardState state, string surface, SS.UiElement element)
     {
@@ -196,7 +202,21 @@ internal static class VectorElementPatch
             // different structure with the same slot names meaning other things -- a page
             // rebuilt from scratch -- and the old values then landed in the wrong slots: a
             // capture showed stale text in other fonts, and dark blocks.
-            if (string.Equals(previous.StructureText, source, StringComparison.Ordinal))
+            //
+            // The text comparison alone could not say that for a TABLE-form scene, where both
+            // sides are null and `string.Equals(null, null)` is true: any table-form page
+            // pushed with a scene id the board had used before inherited the previous run's
+            // data and clock. `Scenes` is never pruned, so "before" could be an hour ago.
+            //
+            // `Capturing` is what makes the table form answerable. The carry-over exists for
+            // the rebuild a capture does, where the structure is identical by construction;
+            // outside a capture a table-form scene has nothing to compare, so it starts clean,
+            // which is what an author re-pushing a page means by it.
+            var sameStructure = Capturing
+                                || (!string.IsNullOrEmpty(source)
+                                    && string.Equals(previous.StructureText, source, StringComparison.Ordinal));
+
+            if (sameStructure)
             {
                 graphic.SetData(previous.Snapshot());
 
@@ -213,6 +233,14 @@ internal static class VectorElementPatch
         }
 
         Scenes[key] = graphic;
+
+        // The patch first, then the data: that is the order they would have arrived in, and a
+        // patch rewrites the node a later datum fills.
+        if (PendingPatches.TryGetValue(key, out var patch))
+        {
+            graphic.PatchScene(patch);
+            PendingPatches.Remove(key);
+        }
 
         if (PendingData.TryGetValue(key, out var waiting))
         {
@@ -253,7 +281,17 @@ internal static class VectorElementPatch
 
         // A geometry patch is applied to the live scene; it is not evaluator data.
         if (graphic != null)
+        {
             graphic.PatchScene(element.Props);
+        }
+        else if (HasProp(element.Props, "nodes"))
+        {
+            // No graphic yet: the structure has not arrived, or the surface is mid-rebuild.
+            // The payload's DATA waits below, and the `nodes` patch used to be dropped here --
+            // so a script that sent its geometry patch ahead of the structure lost it with
+            // nothing reported. It waits with the data and is applied in the same order.
+            PendingPatches[key] = element.Props;
+        }
 
         if (graphic != null)
         {

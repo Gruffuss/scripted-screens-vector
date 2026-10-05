@@ -2,6 +2,29 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.82
+
+Three faults found by the console builder session from reading the source, all confirmed here and
+all invisible in normal use, which is why they lasted.
+
+- Fixed: **a table-form scene inherited the previous run's data and clock.** The carry-over guard
+  compared the structure text of the old graphic against the new one, and for a `root` scene both
+  are null -- so `string.Equals(null, null)` was true and any table-form page pushed with a scene
+  id the board had used before took the earlier run's values and `t`. `Scenes` is never pruned, so
+  "before" could be an hour ago. The carry-over now applies when a capture is running, where the
+  structure is identical by construction, or when a non-empty `src` matches.
+- Fixed: **a `nodes` patch was dropped when its data arrived before the structure.** `PendingData`
+  held the payload's values and nothing else, so a script that sent a geometry patch ahead of the
+  structure lost it silently. Patches now wait beside the data and are applied first.
+- Fixed: **`Snapshot()` left out data still in flight.** Values that arrived while a rebuild was
+  running had not reached the context yet, so a capture's replacement graphic was handed a console
+  missing whatever was sent in that window.
+- Fixed in `examples/10-text.lua` and `12-click.lua`: **both declared a `keep = 1` data element and
+  never committed before the first `tick`.** ScriptedScreens merges successive upserts of one
+  element into a single one, with `data` replaced whole, so the declaration's values never arrived
+  and every name only it set read `--`. Measured, one variable apart: without a commit the declared
+  value reads `-- LOST --`, with one it reads `SURVIVED`. Examples 08, 16 and 17 always committed.
+
 ## 0.11.81
 
 Both reported by the ScriptedScreens console builder session from reading the source, and both

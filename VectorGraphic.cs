@@ -1481,6 +1481,13 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     {
         var copy = new EvalContext { KeepUnmentioned = true };
 
+        // Data that arrived while a rebuild was in flight has not reached `_context` yet. It is
+        // still the console's state, and a snapshot that left it out handed the replacement a
+        // console missing whatever was sent in that window -- rare, and invisible when it
+        // happened, because the values simply read as never sent.
+        if (_pendingData != null)
+            copy.MergeFrom(_pendingData);
+
         foreach (var pair in _context.Scalars)
             copy.Scalars[pair.Key] = pair.Value;
         foreach (var pair in _context.Arrays)

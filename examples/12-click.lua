@@ -137,6 +137,13 @@ data = ui:element({
     props = { scene = "click", keep = 1, data = { names = ROWS, picked = picked } },
 })
 
+-- COMMIT THE DECLARATION BEFORE THE FIRST TICK. Without this, the element declared above and
+-- the first `set_props` in `tick` are merged into one upsert before the mod ever sees them, so
+-- the declaration's values never arrive and every `keep = 1` name it set reads "--". Examples
+-- 08, 16 and 17 have always committed here; these two did not, which is why their long text
+-- and their row names came out blank in a capture.
+ui:commit()
+
 local phase = 0
 
 function tick(dt)

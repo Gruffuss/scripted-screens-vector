@@ -1,3 +1,53 @@
+﻿## Open: a scene with no `T` captures blank (2026-10-05, 0.11.81)
+
+**Reproduction, deterministic.** Push any of examples 01-07 to a console and capture: 7,327 bytes,
+one flat image of the ScriptedScreens panel behind the scene, byte-identical across all seven.
+Push 08-18 and the capture has content. Add ONE `T` node to `01-hello` and its capture goes from
+7,327 to 72,329 bytes. The split is exactly "has a text node" -- 01-07 have none.
+
+Nothing is wrong with the scenes. They draw correctly on a console, `vector_stats` reports the
+shapes and verts, and the mod's own log says `vector capture: "hello" built inline, 568 verts
+across 1 mesh(es)` for the blank ones. The geometry is built; it does not reach the picture.
+
+**What the capture-dump tree shows.** A page with text has `VectorSlice` children under
+`VectorSurface`; a page without has none, because `ApplySlices` only creates children for slices
+1..n and slice 0 rides on the graphic's own `CanvasRenderer`. Text is what splits a scene across
+slices, which is why it correlates.
+
+**THE DECISIVE FACT (2026-10-05, logged):** the capture clone's `UpdateGeometry` DOES run, and it
+DOES present the right mesh -- `vector capture: clone presented "?" with 568 verts`, matching the
+`built inline, 568 verts` from the same capture. So the clone exists, shares the mesh (`_mesh` is
+already `[SerializeField]`), and hands over correct geometry. The picture is still blank. Whatever
+is wrong is NOT that the geometry is missing from the clone.
+
+**Five fixes tried, none worked** -- so the structural explanation above is not sufficient on
+its own, and the cause is more likely to be WHEN the clone is taken than WHERE the mesh sits:
+
+1. Marking every live surface dirty in the capture prefix, so `UpdateGeometry` is called.
+2. Leaving the clone's renderer untouched when it has no scene (`_mesh` is already
+   `[SerializeField]`, so the clone does share the mesh -- that was not the gap).
+3. Putting every slice on a `VectorSlice` child during a capture, including slice 0.
+
+4. Setting the clone's MATERIAL as well as its mesh (Instantiate copies neither). The clone had
+   no material; giving it one changed nothing.
+5. `maskable = false` on the clone, in case the surface's `RectMask2D` was clipping a correct
+   mesh away because the mask's clip rect is pushed during a canvas update the clone misses.
+6. Presenting mesh and material from `OnEnable` instead of `UpdateGeometry`, in case the
+   presentation was simply landing after the capture had read its picture.
+
+**What that leaves.** The clone we can see and touch is given the right geometry, a material and
+no mask, at enable time, and the render still shows nothing -- while a scene with one text node in
+it renders. The remaining explanations are about ScriptedScreens' own capture, not about this
+graphic: either the object that is rendered is not the one we are presenting to, or the render
+happens before any of our hooks. Both are answerable only by reading what the host actually does.
+
+**Next thing to try, and it is the first thing now rather than more guessing:** read
+`TryCaptureSurfaceShared` in `decompiled/ScriptedScreens/` and establish, from its code, what it
+clones, what it renders and in what order. Every hypothesis above was formed from the outside and
+five of five were wrong; the host's source will say in minutes what a day of probing has not.
+
+**Workaround for anyone needing a capture now:** put a text node in the scene, even an empty one.
+
 # Open items
 
 Things found and measured but deliberately not done. Each says what was measured, what the
