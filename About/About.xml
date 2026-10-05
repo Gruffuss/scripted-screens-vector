@@ -22,7 +22,7 @@ Adds a [b]vector[/b] element: describe a screen once -- shapes, gradients, text,
 [h2]Getting started[/h2]
 The mod folder holds eighteen examples that run on paste, a guide (README.md), a full reference (REFERENCE.md) and the release history (CHANGELOG.md), also [url=https://github.com/Gruffuss/scripted-screens-vector/tree/main/ScriptedScreensVector]on GitHub[/url]. With StationeersLua installed, AI editors can read and search the same docs through its MCP server.
 
-[h2]What's new (0.11.31 to 0.11.84)[/h2]
+[h2]What's new (0.11.31 to 0.11.85)[/h2]
 [list]
 [*] [b]Smooth glows.[/b] Soft fades and shadows no longer band: coverage rides in a float channel and the output is dithered per pixel
 [*] [b]Colours can be expressions[/b] -- [b]f = "=if(down,#A,if(hover,#B,#C))"[/b] is a three-state button in one node, and [b]mix(a,b,t)[/b] blends between two
@@ -30,6 +30,7 @@ The mod folder holds eighteen examples that run on paste, a guide (README.md), a
 [*] Letter spacing ([b]kern[/b]), closed splines ([b]SP close = 1[/b]), per-corner radii, defaults on the scene root, and [b]v = 0[/b] on any node
 [*] [b]blur[/b] on a group reaches every closed shape, and gradients fade the way a browser does
 [*] Three new examples: the pointer, pictures, and line ends
+[*] [b]Nothing nests too deep[/b] -- groups, expressions and arrays go as far as you like, and a scene built by a tool is no longer a special case
 [*] Many fixes, including several that could stop a console drawing or end the game outright
 [/list]
 Full history: [url=https://github.com/Gruffuss/scripted-screens-vector/blob/main/ScriptedScreensVector/CHANGELOG.md]CHANGELOG.md[/url].

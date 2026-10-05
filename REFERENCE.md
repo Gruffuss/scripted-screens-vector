@@ -218,17 +218,22 @@ A scene reports its own faults rather than drawing nothing and leaving you to gu
 | missing gradient id | reported, and the shape draws **magenta** — the same signal as an unresolved data colour, so a dangling `@id` looks like a fault rather than a design decision |
 | missing clip id | reported; the reference is ignored, so the content draws unclipped |
 | a symbol that uses itself, directly or round a cycle | reported, naming the chain (`a -> b -> a`); that branch is not expanded |
-| nodes nested more than 64 deep | reported; the tree below the cap is not built |
-| an array in scene text nested more than 32 deep | the scene is refused, naming the line |
-| an expression nested more than 64 deep — parentheses, a run of `-`, or a chain of `^` | reported; that attribute falls back to its default |
 
-**The four nesting limits exist because exceeding them ended the game's PROCESS, not the scene.**
-Each was an unbounded recursion in the parser, and a .NET stack overflow cannot be caught: it
-takes the process down with nothing in the log. The caps are far above anything written by hand —
-the deepest array in any example here is two, and the deepest group nesting is a handful — and a
-symbol that uses itself is an ordinary typo rather than an attack. There is one ceiling the mod
-cannot raise: a Lua table nested a few thousand deep dies in ScriptedScreens' own conversion
-before this renderer sees it.
+**There is no nesting limit.** Groups, arrays, expressions, function calls and `$name[]` indices
+nest as deep as you like: a scene 100,000 levels deep parses and draws. Nothing here recurses —
+the parsers, the evaluator and the tessellator's traversal all use explicit stacks — so depth
+costs memory and nothing else.
+
+Until 0.11.85 there were caps, at 32 and 64, added after unbounded recursion overflowed the stack
+and ended the game's *process*. They were the wrong answer: a scene generated from a document
+nests further than a person types, so refusing it was a limitation rather than a fix.
+
+**A symbol that uses itself is different and is still refused**, because it has no finite
+expansion at all — that input is wrong rather than deep.
+
+One ceiling this mod cannot raise: a Lua **table** nested a few thousand deep dies inside
+ScriptedScreens' own conversion, before the scene reaches this renderer. The text form has no
+such limit.
 
 
 Anything reported also puts a magenta hatched border around the surface, so a broken scene
