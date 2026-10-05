@@ -381,8 +381,8 @@ internal sealed class PathData
                     var rx = reader.Number();
                     var ry = reader.Number();
                     var rotation = reader.Number();
-                    var largeArc = reader.Number();
-                    var sweep = reader.Number();
+                    var largeArc = reader.Flag();
+                    var sweep = reader.Flag();
                     cursor = origin + reader.Point();
                     path._commands.Add(new Command(Op.Arc, new[] { rx, ry, rotation, largeArc, sweep, cursor.x, cursor.y }));
                     break;
@@ -461,6 +461,23 @@ internal sealed class PathData
             return new Vector2(Number(), Number());
         }
 
+        /// <summary>
+        /// One arc flag: a SINGLE character, which is how a minifier packs them -- the two flags
+        /// and the endpoint of `a20 20 0 011 40` are 0, 1 and (1, 40). Read with
+        /// <see cref="Number"/> the first flag swallowed `011`, the second took the endpoint's x,
+        /// and the arc ended at (0, 0). Anything that is not a plain 0 or 1 falls through to the
+        /// old reader rather than consuming a character blind.
+        /// </summary>
+        internal float Flag()
+        {
+            SkipSeparators();
+
+            if (_at < _text.Length && (_text[_at] == '0' || _text[_at] == '1'))
+                return _text[_at++] == '1' ? 1f : 0f;
+
+            return Number();
+        }
+
         internal float Number()
         {
             SkipSeparators();
@@ -469,8 +486,15 @@ internal sealed class PathData
             if (_at < _text.Length && (_text[_at] == '-' || _text[_at] == '+'))
                 _at++;
 
-            while (_at < _text.Length && (char.IsDigit(_text[_at]) || _text[_at] == '.'))
+            // A second '.' ENDS the number, as SVG's grammar says: `60.5.5` is two numbers.
+            // Swallowed whole it parsed as nothing and the coordinate silently read 0, which
+            // is what most minifiers emit.
+            var dot = false;
+            while (_at < _text.Length && (char.IsDigit(_text[_at]) || (_text[_at] == '.' && !dot)))
+            {
+                dot |= _text[_at] == '.';
                 _at++;
+            }
 
             // Exponent form, e.g. 1e-3.
             if (_at < _text.Length && (_text[_at] == 'e' || _text[_at] == 'E'))

@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace ScriptedScreensVector;
@@ -479,7 +480,15 @@ internal static class Printf
             _ => null,
         };
 
-        return net == null ? spec : spec[..percent] + "{0:" + net + "}" + spec[(end + 1)..];
+        if (net == null)
+            return spec;
+
+        // `%%` is a literal percent sign. The guard above only catches it when it opens the
+        // spec, so `"%.0f%%"` kept both signs and drew `50%%`. Collapse it in the literal text
+        // either side of the conversion, which is the only place it can now survive.
+        return spec[..percent].Replace("%%", "%", StringComparison.Ordinal)
+               + "{0:" + net + "}"
+               + spec[(end + 1)..].Replace("%%", "%", StringComparison.Ordinal);
     }
 }
 

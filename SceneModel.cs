@@ -1338,7 +1338,12 @@ internal static class SceneParser
                         continue;
 
                     node.Filters ??= new List<(int, Expression)>();
-                    node.Filters.Add((filterOp, Attr(map, prop.Key, 1f)));
+
+                    // The fallback has to be THIS filter's identity, not a flat 1. One is
+                    // identity for `bri`, `con` and `sat` and FULL EFFECT for `gray`, `sep` and
+                    // `inv`, so a malformed value -- already reported -- used to turn a red
+                    // rect fully grey instead of leaving it alone.
+                    node.Filters.Add((filterOp, Attr(map, prop.Key, ColourFilter.Identity(filterOp))));
                 }
 
                 var mask = PropString(map, "mask");
@@ -1512,12 +1517,16 @@ internal static class SceneParser
                 // height, so the conversion happens where it is applied rather than here.
                 node.LineHeight = PropNumber(map, "lh", 0f);
 
+                // `weight = 700` written in scene text arrives as a NUMBER, and the string
+                // accessor below returns null for one, so the numeric form documented as "a
+                // number >= 600" was dropped without a word. Both spellings are read now.
                 var weight = PropString(map, "weight");
-                node.Bold = weight != null
-                            && (weight.Equals("bold", StringComparison.OrdinalIgnoreCase)
-                                || (float.TryParse(weight, System.Globalization.NumberStyles.Float,
-                                        System.Globalization.CultureInfo.InvariantCulture, out var numeric)
-                                    && numeric >= 600f));
+                node.Bold = (weight != null
+                             && (weight.Equals("bold", StringComparison.OrdinalIgnoreCase)
+                                 || (float.TryParse(weight, System.Globalization.NumberStyles.Float,
+                                         System.Globalization.CultureInfo.InvariantCulture, out var numeric)
+                                     && numeric >= 600f)))
+                            || PropNumber(map, "weight", 0f) >= 600f;
 
                 var firstLine = PropString(map, "fl");
                 if (!string.IsNullOrEmpty(firstLine))
@@ -1881,6 +1890,12 @@ internal static class SceneParser
             var op = PropString(map, "op")?.ToUpperInvariant();
             var id = PropString(map, "id");
 
+            // A def's keys are checked like a node's. They were not, so a stray key on a
+            // gradient or a clip was ignored in silence -- the exact fault this check exists to
+            // catch. CHANGES WHAT AN EXISTING SCENE LOOKS LIKE: one that carries a typo on a
+            // def now reports it and shows the magenta border, where before it drew clean.
+            Validate(map, scene, op, id);
+
             if (op == "SYM" && !string.IsNullOrEmpty(id))
             {
                 var body = PropValue(map, "c");
@@ -1955,7 +1970,7 @@ internal static class SceneParser
 
                         slots.Cx = Live(map, "cx");
                         slots.Cy = Live(map, "cy");
-                        slots.Radius = Live(map, "r");
+                        slots.Radius = Live(map, "r", 1f);
 
                         // An unstated focus is the centre, and stays the centre when the
                         // centre moves: it takes the same expression rather than a stale copy.
@@ -1970,7 +1985,7 @@ internal static class SceneParser
                         slots.X1 = Live(map, "x1");
                         slots.Y1 = Live(map, "y1");
                         slots.X2 = Live(map, "x2");
-                        slots.Y2 = Live(map, "y2");
+                        slots.Y2 = Live(map, "y2", 1f);
                     }
 
                     ReadStops(map, gradient, slots);
@@ -2116,13 +2131,18 @@ internal static class SceneParser
     /// gradient carries no expressions at all, so a static declaration costs exactly what it
     /// did before.
     /// </remarks>
-    private static Expression? Live(SS.UiProp[] map, string key)
+    /// <summary>
+    /// A gradient coordinate that may be an expression. `fallback` is the key's OWN default,
+    /// not zero: a malformed `y2` used to collapse the axis to zero length instead of the 1 it
+    /// documents. Only reached when the expression failed to parse, which is already reported.
+    /// </summary>
+    private static Expression? Live(SS.UiProp[] map, string key, float fallback = 0f)
     {
         var value = PropValue(map, key);
         if (value?.Type != SS.UiValueType.String || string.IsNullOrEmpty(value.Value.String))
             return null;
 
-        return Expression.Parse(value.Value.String!, 0f);
+        return Expression.Parse(value.Value.String!, fallback);
     }
 
     private static void Publish(VecScene scene, string id, Gradient gradient, GradientSlots slots)

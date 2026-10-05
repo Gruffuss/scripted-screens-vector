@@ -2,6 +2,66 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.94
+
+Ten bugs from the reference sweep, each watched failing on the previous build before the fix and
+measured again after. The 17-scene fingerprint is byte-identical across all three `t` values, so
+nothing that already drew has moved.
+
+### Fixed
+
+- **`weight` given as a number was ignored.** The documented "a number of 600 or more" went
+  through a string-only accessor, which returns null for a number, so `weight = 700` from Lua
+  left the label at its ordinary weight without a word. `weight = "bold"` always worked.
+  Measured: `weight=700` bold `False` -> `True`.
+- **`%%` did not collapse to one percent sign.** The guard that spots it only fired when the
+  `%%` opened the spec, so `"{=50:%.0f%%}"` drew `50%%`. Measured: `50%%` -> `50%`.
+- **`{$n:%x}` truncated where `fmt = "%x"` rounds**, so the same number printed differently
+  through the two, against the code's own comment. A NaN also printed the long it cast to.
+  Measured: `{=254.6:%x}` `fe` -> `ff`; a NaN now prints its missing text.
+- **A `P` carrying `sh` but no `f` cast no shadow.** Both shadow calls sat inside the fill test,
+  where every other shape emits them outside it. Measured against an identical `Y`: 0 vertices ->
+  1361, the same as the control.
+- **A malformed colour-filter value fell back to 1 for all seven filters.** One is identity for
+  `bri`, `con` and `sat` and FULL EFFECT for `gray`, `sep` and `inv`, so a value that was
+  already reported as broken turned a red rectangle fully grey. Each filter now falls back to
+  its own identity. Measured: a broken `gray=` amount 1.00 -> 0.00, still reported.
+- **An enclosing group's `blur` was lost inside an `SC`.** The scroll container's frame carried
+  opacity and scale but not blur, so the field fell back to 0 and the content drew sharp.
+  Measured: 4 vertices -> 3333.
+- **A missing numeric data array was not reported.** `$arr[i]` in an expression read 0 in
+  silence, while the same reference in a label's text was listed. It was the one accessor that
+  did not record the name. Measured: `Missing` empty -> `[nosuch]`, matching the label control.
+  An out-of-range index stays silent, as it does for a string or colour array: the array is
+  there, the slot is not.
+- **A malformed number in a gradient def fell back to 0 instead of that key's own default**, so
+  a broken `y2` collapsed the ramp axis to no length rather than the documented 1, and a broken
+  `r` gave a radius of 0. Measured: both 0.00 -> 1.00.
+- **A def's keys were never checked.** `Validate` ran on nodes only, so a typo on a gradient or
+  a clip was ignored in silence -- the exact fault that check exists to catch. Measured: a `GL`
+  carrying `nosuchkey` reported nothing -> `GL "g": unknown attribute "nosuchkey"`, matching the
+  node control, with a valid `GL`/`GR`/`GC`/`CP` set still reporting nothing.
+- **`d` rejected compact SVG numbers.** The reader was greedy over `.`, so `L60.5.5` -- two
+  numbers, and what a minifier emits -- parsed as neither and the coordinate silently read 0;
+  and the two arc flags were read as whole numbers, so `a20 20 0 011 40` took `011` as the
+  large-arc flag, the endpoint's x as the sweep flag, and drew nothing at all. A second `.` now
+  ends a number and a flag is one character. Measured against the same paths written out in
+  full: `L60.5.5` box `(-1.87,78.13)-(121.87,201.87)` -> exactly the control's
+  `(15.29,74.61)-(123.44,201.91)`; the packed arc 0 vertices -> the control's 138, same box.
+
+### Changed
+
+- **A typo on a `defs` entry now shows the magenta problem border.** A scene that carries one has
+  been drawing clean and will now report it, which is the point, but it is a visible change to an
+  existing scene rather than only to a broken one.
+
+### Tests
+
+- **The unit suite had been red since 0.11.86** and nobody noticed, because its one failing check
+  asserted the array-depth cap's refusal message -- and that cap was deliberately removed in
+  0.11.86. It now asserts what the removal was for: an array nested 2000 deep parses, while an
+  unterminated one is still refused. 358 checks, exit 0.
+
 ## 0.11.93
 
 - **A `T` or an `IMG` with `click = 1` now registers a hit area.** Neither ever has: a hit area is

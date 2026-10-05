@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 namespace ScriptedScreensVector;
@@ -26,6 +26,17 @@ internal static class ColourFilter
 
     /// <summary>Scene keys, in op-code order.</summary>
     internal static readonly string[] Keys = { "bri", "con", "sat", "hue", "gray", "sep", "inv" };
+
+    /// <summary>The amount at which a filter does nothing. NOT 1 for all of them.</summary>
+    /// <remarks>
+    /// `bri`, `con` and `sat` are identity at 1, but `gray`, `sep` and `inv` scale from 0 to
+    /// FULL effect and `hue` is degrees, so a flat fallback of 1 turned a malformed value into
+    /// a fully grey, fully sepia or fully inverted shape instead of leaving it alone.
+    /// </remarks>
+    internal static float Identity(int op)
+    {
+        return op == Brightness || op == Contrast || op == Saturate ? 1f : 0f;
+    }
 
     internal static int OpFor(string key)
     {

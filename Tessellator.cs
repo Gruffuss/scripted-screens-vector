@@ -2667,11 +2667,14 @@ internal static class Tessellator
         if (outer != null && node.Clickable && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
             RecordHit(node.Id!, outer, frame.Matrix, frame.CanvasClip, context, node);
 
+        // Outside the fill test, as on every other shape: a closed shape carrying `sh` but no
+        // `f` still casts its shadow. A `P` was the one op where both shadow calls sat INSIDE
+        // it, so a path with a shadow and no fill drew nothing at all.
+        if (outer != null)
+            EmitShadows(vh, node, context, outer, frame);
+
         if (node.HasFill)
         {
-            if (outer != null)
-                EmitShadows(vh, node, context, outer, frame);
-
             // As on every other shape, a flat fill under a `blur` is drawn as its own blurred
             // silhouette. A path's is its outer contour, so a blurred path with holes blurs as
             // though it had none -- the same approximation its shadow already makes.
@@ -2691,10 +2694,10 @@ internal static class Tessellator
 
             if (!blurred)
                 FillSubpaths(vh, scene, node, context, frame, subpaths);
-
-            if (outer != null)
-                EmitInsetShadows(vh, scene, node, context, outer, frame);
         }
+
+        if (outer != null)
+            EmitInsetShadows(vh, scene, node, context, outer, frame);
 
         foreach (var sub in subpaths)
             StrokeOutline(vh, scene, node, context, frame, sub.Points, sub.Closed);
@@ -3238,8 +3241,14 @@ internal static class Tessellator
 
             // `X` is an integer format: `float.TryFormat` THROWS on it rather than returning
             // false, so hex rounds to a long first. See TextPart.Hex.
-            var ok = part.Hex
-                ? ((long)value).TryFormat(_textBuffer.AsSpan(at, 64), out var written, part.Spec, CultureInfo.InvariantCulture)
+            // Hex ROUNDS, as TextPart.Hex says and as the `fmt` path does -- this one
+            // truncated, so the same value printed differently through `{$n:%x}` than through
+            // `fmt = "%x"`. NaN and the infinities keep their own names rather than becoming
+            // the long they cast to.
+            var hex = part.Hex && !float.IsNaN(value) && !float.IsInfinity(value);
+
+            var ok = hex
+                ? ((long)Mathf.Round(value)).TryFormat(_textBuffer.AsSpan(at, 64), out var written, part.Spec, CultureInfo.InvariantCulture)
                 : value.TryFormat(_textBuffer.AsSpan(at, 64), out written, part.Spec, CultureInfo.InvariantCulture);
 
             if (ok)
@@ -3540,6 +3549,12 @@ internal static class Tessellator
         {
             Matrix = parent.Matrix * local,
             Opacity = parent.Opacity * Mathf.Clamp01(node.Opacity.Evaluate(context)),
+
+            // Carried like opacity above it. Without this an enclosing `G blur=N` was lost at
+            // the container and everything inside the list drew sharp. The container's own
+            // matrix is a pure translate and it keeps the parent's scale, so the blur is
+            // already in the right units.
+            Blur = parent.Blur,
             Clip = viewport?.Transform(inverse),
             Pieces = viewportPieces,
             CanvasClip = CombineCanvasClip(parent.CanvasClip, ToCanvas(parent.Matrix, box)),

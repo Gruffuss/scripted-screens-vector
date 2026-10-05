@@ -453,7 +453,14 @@ internal sealed class EvalContext
     internal float Element(string name, float index)
     {
         if (!Arrays.TryGetValue(name, out var array) || array == null)
+        {
+            // Recorded like every other absent name. This was the one accessor that stayed
+            // quiet, so `$arr[i]` in an EXPRESSION read 0 with nothing listed while the same
+            // reference in a label reported. An out-of-range index is still silent, as it is
+            // for a string or colour array: the array is there, the slot is not.
+            Missing.Add(name);
             return 0f;
+        }
 
         var at = Mathf.RoundToInt(index);
 

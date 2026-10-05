@@ -269,10 +269,21 @@ internal static class NodeSpanTests
             textCycle.Problems.Count == 1 && textCycle.Problems[0].Contains("a -> b -> a"),
             textCycle.Problems.Count > 0 ? textCycle.Problems[0] : "(no problem reported)");
 
-        // Arrays nested past the cap, which recursed through ReadValue.
-        var deep = SceneText.ToProps("SCENE w=10 h=10\nR p=" + new string('[', 2000) + "\n", "deep");
-        run.Check("recursion: arrays nested too deep are refused",
-            deep == null && SceneText.Rejected != null && SceneText.Rejected.Contains("nest"),
+        // Arrays nested deeply, which used to recurse through ReadValue and was CAPPED at 32.
+        // The cap is gone (0.11.86: a merely deep input is valid, and refusing it was a
+        // mitigation, not a fix), so depth must now PARSE. This test asserted the cap's own
+        // refusal message and so went red the moment the cap went, where it had to pass.
+        var deep = SceneText.ToProps(
+            "SCENE w=10 h=10\nR p=" + new string('[', 2000) + "1" + new string(']', 2000) + "\n", "deep");
+        run.Check("recursion: a deeply nested array parses, cap removed",
+            deep != null,
+            deep != null ? "accepted at 2000 deep" : SceneText.Rejected ?? "(refused)");
+
+        // An UNTERMINATED array is still malformed and still refused -- that is the input being
+        // wrong, not deep.
+        var unclosed = SceneText.ToProps("SCENE w=10 h=10\nR p=" + new string('[', 2000) + "\n", "deep");
+        run.Check("recursion: an unterminated array is still refused",
+            unclosed == null && SceneText.Rejected != null,
             SceneText.Rejected ?? "(accepted)");
 
         // A normally nested array must still parse, or the cap is too tight.
