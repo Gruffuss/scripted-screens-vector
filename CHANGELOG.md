@@ -2,6 +2,16 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.90
+
+- **Fixed, properly this time: a geometry patch waiting for its structure still dropped the one
+  before it.** 0.11.89 combined the waiting patches, but only at the top level -- and `nodes` is
+  a single property holding a map of node id to that node's patch, so the later `nodes` replaced
+  the earlier one whole and the first patch vanished exactly as before. Patches now combine per
+  node id, and within a node per property, so two queued patches land exactly as two delivered
+  ones would: a live patch merges into the node's current properties rather than replacing them,
+  and a waiting pair now does the same.
+
 ## 0.11.89
 
 - **Fixed: a geometry patch sent before the structure could drop an earlier one.** When a

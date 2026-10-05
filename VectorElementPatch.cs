@@ -418,7 +418,14 @@ internal static class VectorElementPatch
         return deepest;
     }
 
-    /// <summary>Two prop sets as one, later winning per key -- the host's own `set_props` rule.</summary>
+    /// <summary>
+    /// Two prop sets as one, later winning per key -- except `nodes`, which merges deeper.
+    /// </summary>
+    /// <remarks>
+    /// `nodes` is a single property holding a map of node id to that node's patch, so taking the
+    /// later one whole would drop every node the earlier patch touched. That was the fault this
+    /// merge was added to fix, still present one level down.
+    /// </remarks>
     private static SS.UiProp[] MergeProps(SS.UiProp[] earlier, SS.UiProp[] later)
     {
         if (earlier == null || earlier.Length == 0)
@@ -427,7 +434,8 @@ internal static class VectorElementPatch
         if (later == null || later.Length == 0)
             return earlier;
 
-        var byKey = new Dictionary<string, SS.UiProp>(earlier.Length + later.Length, StringComparer.Ordinal);
+        var byKey = new Dictionary<string, SS.UiProp>(earlier.Length + later.Length,
+            StringComparer.OrdinalIgnoreCase);
 
         foreach (var prop in earlier)
         {
@@ -437,13 +445,78 @@ internal static class VectorElementPatch
 
         foreach (var prop in later)
         {
-            if (!string.IsNullOrEmpty(prop.Key))
-                byKey[prop.Key] = prop;
+            if (string.IsNullOrEmpty(prop.Key))
+                continue;
+
+            if (string.Equals(prop.Key, "nodes", StringComparison.OrdinalIgnoreCase)
+                && byKey.TryGetValue(prop.Key, out var queued))
+            {
+                byKey[prop.Key] = new SS.UiProp
+                {
+                    Key = prop.Key,
+                    Value = MergeNodePatches(queued.Value, prop.Value),
+                };
+                continue;
+            }
+
+            byKey[prop.Key] = prop;
         }
 
         var merged = new SS.UiProp[byKey.Count];
         byKey.Values.CopyTo(merged, 0);
         return merged;
+    }
+
+    /// <summary>Two `nodes` patches as one: per node id, then per property within a node.</summary>
+    /// <remarks>
+    /// A node patched by both keeps the earlier patch's other properties, because that is what it
+    /// would have kept had the two patches arrived in turn -- a live patch merges into the node's
+    /// current properties rather than replacing them.
+    /// </remarks>
+    private static SS.UiValue MergeNodePatches(SS.UiValue earlier, SS.UiValue later)
+    {
+        if (earlier.Type != SS.UiValueType.Map || earlier.Map == null)
+            return later;
+
+        if (later.Type != SS.UiValueType.Map || later.Map == null)
+            return earlier;
+
+        var byId = new Dictionary<string, SS.UiProp>(earlier.Map.Length + later.Map.Length,
+            StringComparer.Ordinal);
+
+        foreach (var node in earlier.Map)
+        {
+            if (!string.IsNullOrEmpty(node.Key))
+                byId[node.Key] = node;
+        }
+
+        foreach (var node in later.Map)
+        {
+            if (string.IsNullOrEmpty(node.Key))
+                continue;
+
+            if (byId.TryGetValue(node.Key, out var before)
+                && before.Value.Type == SS.UiValueType.Map && before.Value.Map != null
+                && node.Value.Type == SS.UiValueType.Map && node.Value.Map != null)
+            {
+                byId[node.Key] = new SS.UiProp
+                {
+                    Key = node.Key,
+                    Value = new SS.UiValue
+                    {
+                        Type = SS.UiValueType.Map,
+                        Map = MergeProps(before.Value.Map, node.Value.Map),
+                    },
+                };
+                continue;
+            }
+
+            byId[node.Key] = node;
+        }
+
+        var merged = new SS.UiProp[byId.Count];
+        byId.Values.CopyTo(merged, 0);
+        return new SS.UiValue { Type = SS.UiValueType.Map, Map = merged };
     }
 
     private static SS.UiValue? Find(SS.UiProp[] props, string key)
