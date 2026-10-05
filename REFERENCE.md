@@ -270,9 +270,24 @@ reports an unknown id. To draw a bare integer, write it as a computed placeholde
 `text="{=700}"` — that prints through `0.##`, so it suits whole numbers, not `"007"` or
 `"1.50"`.
 
+**An unquoted value ends at a space, at `=` `,` `[` `]` `{` `}`, or at a `#` that is not its
+first character** — which is why a `#colour` needs no quotes. Double quotes wrap a value that has
+to hold one of those, and **leaving them off rejects the whole scene rather than truncating the
+value**: an unquoted `data:` URL stops at the `,` after `base64`, the parser then reads that `,`
+as the next op, and the scene is refused with `expected an op`. The same befalls `text=a=b` and
+`text=a,b`. Inside the quotes, a backslash escapes a quote or another backslash, and \n and
+\t are a newline and a tab. Any other escape keeps its backslash, so a mistyped \q arrives
+as \q rather than vanishing.
+
 **One rule the format imposes: an unquoted expression cannot contain a space.** Values are
 read to whitespace, because expressions are full of `,` `[` `]` — `clamp($x,0,1)`,
 `$name[i]` — and those cannot also be separators. Quote an expression that needs a space.
+
+**A `{` opens on the same line as the op it belongs to**, after that op's attributes. A `{` alone
+on a line is read as the next op and rejected for not being one. Its `}` may stand alone or trail
+the last child, so `CP id=tank { R x=10 y=10 w=44 h=60 rx=8 }` is one line. An array follows the
+same shape: the `[` comes straight after the `=`, and the `]` closes on that line — a value split
+across two lines is reported as `an array must be closed with ] on the same line`.
 
 The text is converted to the same props the table form arrives as and parsed by the same
 code, so the two cannot drift apart, and parsed scenes are cached by source text so a
@@ -288,10 +303,13 @@ A scene reports its own faults rather than drawing nothing and leaving you to gu
 | unknown op | reported; the node is skipped |
 | unknown attribute name | reported, with the op and the node id |
 | malformed expression | reported; that attribute falls back to its default |
+| a character in `d` where a number belongs, or a number after `Z` | reported, quoting the text around it; parsing stops there and the rest of `d` is discarded |
+| an unknown command letter in `d` | **not** reported, on the surface or in `vector_stats`; the log warns, and the rest of `d` is discarded |
 | `$name` with no data value | reported; a bound **colour** draws **magenta** |
 | a colour that will not parse, in `f` or `s` | reported, and the shape draws **magenta** |
 | missing gradient id | reported, and the shape draws **magenta** — the same signal as an unresolved data colour, so a dangling `@id` looks like a fault rather than a design decision |
 | missing clip id | reported; the reference is ignored, so the content draws unclipped |
+| `src` text that will not parse | reported, and nothing in the scene draws. A syntax fault names the line number and prints that line; a scene that parses but holds no nodes says only `the scene text has no nodes`, with no line |
 | a symbol that uses itself, directly or round a cycle | reported, naming the chain (`a -> b -> a`); that branch is not expanded |
 
 **There is no nesting limit.** Groups, arrays, expressions, function calls and `$name[]` indices
@@ -767,6 +785,12 @@ enclosing index is `i1`, the next out `i2`.
 
 `n` is structural — changing it means resending the structure element.
 
+**`n` is rounded to a whole number and capped at 20,000, and neither is reported.** A larger
+figure draws 20,000 instances; `n` in the expressions then reads 20,000 as well, so `i` runs
+`0..19999` and the arithmetic stays consistent with what was drawn rather than with what was
+written. The same cap holds for a `YS`'s and an `LS`'s sample count. It sits far past anything
+worth drawing, so it only ever catches a count that came from data rather than from a decision.
+
 A `YS` or `LS` counts as a repeat of its `n` samples for `x`, `y` and `y2`, so `i1` there is the
 repeat around it. A `YS` reads `f`, `fo`, `fo2` and `fea_edge` **once**, as sample 0, so an `i` in
 them is `0`. When Count LOD thins a repeat, `n` stays the count you wrote and `i` stops short of
@@ -820,13 +844,35 @@ wherever a round speck is what you actually mean.
 adaptively against on-screen size, cached in ~12% scale buckets so camera drift does not
 retessellate.
 
+**Those ten letters are all of them, and any other letter stops the parse there**: what came
+before it still draws, and the rest of the string is dropped. A stray character where a number
+belongs — the `)` or `;` a half-typed path leaves behind — stops it as well, and so does a
+number after `Z`. Those two are reported, naming the command and the few characters around it;
+an unknown letter is not, so half a path draws with only a log line to say why.
+
+**Numbers follow SVG's own grammar**, so a minified `d` reads as its author meant it: a second
+`.` ends a number, which makes `60.5.5` two of them, and each arc flag is one character, which
+makes the flags and endpoint of `a20 20 0 011 40` read as `0`, `1` and (1, 40).
+
 Multiple subpaths make holes. The largest closed subpath is the outer contour; `fr` decides
 what the rest are.
+
+**A subpath with no `Z` is filled as though it had one, but only when it is the path's only
+subpath** — the gap between its last point and its first closes for the fill, as it does in SVG,
+while the stroke stays open. **Where a path has two or more subpaths, an open one is stroked and
+never filled**: it counts as neither the outer contour nor a hole, so it receives no fill. Write
+`Z` on every subpath that should be filled. Neither case is reported.
+
+Shadow, `blur` and the hit area all read the largest *closed* subpath, so a `P` with no closed
+subpath anywhere casts no shadow, is left sharp by a `blur` and answers no clicks even with
+`click = 1`; a `CP` built from one reports no usable shape.
 
 ### `L`, `Y` — polyline, polygon
 
 `p` is a flat array of alternating coordinates: `{x, y, x, y, ...}`. `Y` closes
-automatically and can be filled; `L` is stroked only.
+automatically. An `L` is open — it strokes as an open run and is clickable along that stroke —
+but **an `f` on an `L` still fills it**, closing the gap from its last point to its first the
+way SVG's fill rule does.
 
 ### `YS` — sampled band
 
@@ -1172,7 +1218,7 @@ reach for `T` is what a label cannot do at all, not the budget.
 | Key | Meaning |
 |-----|---------|
 | `p` | flat point array `{x, y, x, y, ...}` |
-| `seg` | segments per span |
+| `seg` | segments per span, rounded to a whole number and held to `1..32`; default `8`. `seg = 64` draws 32, unreported |
 | `close` | `1` wraps the curve into a closed ring, which can then be filled |
 
 Catmull-Rom, so the curve passes **through** its points rather than being pulled toward them.
@@ -1344,6 +1390,10 @@ to meet:
 Joins are a **clamped miter** rather than inserted bevel or round geometry — invisible at UI
 stroke widths, visible on very wide strokes at sharp corners. `join` is closer to a hint than
 a guarantee.
+
+**`ml` is read only when `join` is `miter`.** `round` and `bevel` clamp every join at `1.4`
+whatever `ml` says — that flattening is what stands in for the geometry they do not get — and an
+`ml` below `1` is raised to `1`.
 
 `dash` and `dofs` are in the shape's **own units**, like `sw`, so they scale with the group. A
 list of odd length is repeated to make an even one, as in SVG: `dash = {10}` is `{10, 10}`, and
@@ -1626,10 +1676,18 @@ props = { scene = "panel", w = 200, h = 240, style = { f = "#5FD9A8", fea = 0 },
 SCENE w=200 h=240 f=#5FD9A8 fea=0
 ```
 
-`fit` is the one key the root does not pass down: there it says how the viewBox meets the
+`fit` is the one key the root does not pass down **when it is written bare**: there it says how the viewBox meets the
 surface, while on a `T` it means shrink-to-fit and on an `IMG` how the picture fills its box.
 Put a text or image `fit` default on a `G`. Before 0.11.74 a root `style` was read by nothing at
 all, silently.
+
+**A `style` map passes down every key it holds**, not only the paint keys. Each one is merged
+into the attributes of every node below, whatever its `op`, exactly as though it had been written
+there — including a key that node does not read, which does nothing, and a key the renderer does
+not know at all, which is **reported on every node below it**, so one typo in a root `style`
+fills the problem list. `style = { w = 40, h = 12 }` sizes a row of bare `R`s. The transform keys
+are the trap: `style = { s = {2, 2} }` reaches every descendant `G` as well, and each level
+scales again.
 
 Anything a node states itself wins, which is what makes it a default rather than an override.
 Defaults nest: a child group's `style` is merged onto what it inherited.
@@ -1651,13 +1709,32 @@ one.
 
 The default resolves to roughly **1.3 screen pixels**, not a fixed number of scene units,
 because the same scene draws at very different sizes. `0` gives deliberately hard edges; a
-large value gives a glow.
+large value gives a glow on a shape big enough to hold it.
+
+**A filled shape's feather is reduced by the shape's own size.** The width actually used is the
+width asked for, scaled by how the shorter side of the shape's bounding box compares with it:
+the full width at three times the feather and above, **half** at twice, and **nothing** at one
+times or below. So `fea = 2` softens a rule 6 units tall by the full 2, one 4 units tall by 1,
+and one 2 units tall not at all. **Nothing reports it.**
+
+With an explicit `fea` both quantities are in scene units, so that ratio is fixed. **With the
+default it is not**: the automatic width is about 1.3 *screen* pixels converted back to local
+units, so it moves with the camera and with every enclosing group's scale — a shape gets the full
+feather at roughly 3.9 screen pixels across its shorter side, half at 2.6, none at 1.3 or below.
+The lever is a smaller `fea`; the hard cutoff this replaced popped on and off as the camera moved,
+which was worse.
+
+**The ring around a filled contour is the only thing this touches.** A stroke's feather and a
+`YS`'s `fea_edge` take the width asked for whatever the shape's size, so a thin soft-edged band is
+written as a `YS` rather than as a feathered `R`.
 
 `fea_edge` lets a liquid or gas surface carry a wide soft ramp while the walls beside it stay
 crisp.
 
 A clipped shape's feather is clipped too: where the clip cut the outline the ramp collapses
-to nothing, so no halo escapes, while untouched edges keep their full feather.
+to nothing, so no halo escapes, while untouched edges keep their full feather. The size rule
+above is measured on **what the clip left**, though, so a clip down to a sliver takes the
+feather off those untouched edges as well.
 
 **Set `fea_edge = 0` on a band edge that ABUTS another shape.** Feathering exists to soften a
 silhouette. An edge with a neighbour flush against it has no silhouette, and the ramp
@@ -1862,7 +1939,8 @@ dofs` and the text keys `size font weight cspace kern align valign fit min_size`
 `t r s a o clip` are not, because it uses those itself and inheriting them would apply every
 transform twice.
 
-**Stroke colour is `s_`, not `s`, when written as a group default.** On a shape `s` is the
+**Stroke colour is `s_`, not `s`, in a group's BARE attributes.** `s_` is read only there: in a
+`style` map write `s` as usual, and `style = { s_ = "#f00" }` does nothing at all. On a shape `s` is the
 stroke colour; on a group it is the scale. `s_` says the former without breaking the latter.
 
 Both forms work in the table form too, and an explicit `style` wins over a bare attribute on
