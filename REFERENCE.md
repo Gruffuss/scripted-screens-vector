@@ -1766,11 +1766,12 @@ A radial or conic gradient without `cx`, `cy` is centred on `0,0` — the scene 
 `bbox` or anything else, which means scene coordinates; `spread` is `repeat`, `reflect` or `none`,
 or anything else, which means `pad`. Both are case-insensitive and **an unknown word is not
 reported**. Stop positions are held to `0..1` and stops out of order are sorted. A stop that is
-not a pair, whose colour is not a string, or whose colour will not parse is dropped **without a
-report**, so `stops = { { 0, "#fff" }, { 1, "bleu" } }` is a flat `#fff`. A gradient with no stops
-paints white, and only the log says so. A stop colour `$name` the payload does not supply draws
-that stop magenta but is not listed among the unresolved names, and `$name[i]` is not read as a
-stop colour at all.
+not a pair, whose colour is not a string, or whose colour will not parse is dropped **and
+reported**, naming the stop, so `stops = { { 0, "#fff" }, { 1, "bleu" } }` is a flat `#fff` with a
+problem on the border. A gradient with no stops, or none that are usable, paints white and is
+reported the same way. A stop colour `$name` the payload does not supply draws that stop magenta
+and **is** listed among the unresolved names, as `f = "$name"` on a node is; `$name[i]` is not
+read as a stop colour at all, so it is listed under that whole literal name.
 
 ### `GR` — radial gradient
 

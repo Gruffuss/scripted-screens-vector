@@ -1607,6 +1607,20 @@ internal static class Tessellator
         if (string.IsNullOrEmpty(src))
             return;
 
+        var box = RectOutline(node, context, frame.Scale * ScreenScale, new List<Vector2>(64));
+
+        // A picture takes clicks on its own box, corner radii included -- this is the same
+        // outline it draws through. Until 0.11.93 an `IMG` registered nothing at all.
+        //
+        // Above the cache lookup rather than below it: the box is built from x/y/w/h/rx alone, so
+        // it is known before the texture is. Registered after, a clickable picture answered
+        // nothing until its download finished -- the same scene dead on a cold start and live on a
+        // warm one -- and nothing ever behind a source that fails. A box answering whether or not
+        // anything is painted inside it is the rule every other shape follows, and the rule this
+        // already followed for a starved mesh or a tile count that collapsed to zero.
+        if (node.Clickable && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
+            RecordHit(node.Id!, box, frame.Matrix, frame.CanvasClip, context, node);
+
         if (!ImageCache.TryGet(src!, out var texW, out var texH, out var error))
         {
             if (error != null)
@@ -1621,14 +1635,8 @@ internal static class Tessellator
         var y = node.Y.Evaluate(context);
         var w = node.W.Evaluate(context);
         var h = node.H.Evaluate(context);
-        var box = RectOutline(node, context, frame.Scale * ScreenScale, new List<Vector2>(64));
         if (box.Count < 3 || texW <= 0 || texH <= 0)
             return;
-
-        // A picture takes clicks on its own box, corner radii included -- this is the same
-        // outline it draws through. Until 0.11.93 an `IMG` registered nothing at all.
-        if (node.Clickable && !_repeatPiece && !string.IsNullOrEmpty(node.Id))
-            RecordHit(node.Id!, box, frame.Matrix, frame.CanvasClip, context, node);
 
         // The natural size fit works from is the cropped part's, not the whole texture's.
         var crop = node.ImageCrop;

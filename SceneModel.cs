@@ -619,6 +619,12 @@ internal static class SceneParser
         // Malformed expressions are the parser's business, not the log's alone.
         Expression.Report = message => scene.Problem(message);
 
+        // The header's keys are checked like a node's and a def's. They were not, so `ztxt` for
+        // `ztext` was ignored in silence -- the scene simply drew with the default, and the stats
+        // tool said no problems -- while the same typo on a node was reported. CHANGES WHAT AN
+        // EXISTING SCENE LOOKS LIKE: a header carrying a stray key now shows the magenta border.
+        Validate(props, scene, "SCENE", scene.Id);
+
         ParseDefs(PropValue(props, "defs"), scene);
 
         // Defaults on the scene root, inherited by everything in it exactly as a `G`'s are.
@@ -1222,11 +1228,34 @@ internal static class SceneParser
         "x", "y", "w", "h", "cx", "cy", "rx", "ry", "x1", "y1", "x2", "y2", "y2",
         "n", "p", "d", "seg", "close", "t", "r", "s", "s_", "a", "o", "clip", "ref", "params", "ch",
         "f", "fo", "fo2", "fr", "fea", "fea_edge", "sh",
-        "sw", "so", "cap", "join", "ml", "dash", "dofs", "sd", "sdo",
+        "sw", "so", "cap", "join", "ml", "dash", "dofs",
         "grad", "at", "units", "spread", "stops", "fx", "fy",
         "text", "size", "align", "valign", "font", "weight", "cspace", "kern", "fit", "min_size",
         "fmt", "unit", "missing", "wrap", "lh",
         "fat", "sat", "m", "bri", "con", "hue", "gray", "sep", "inv", "mask", "sov", "src", "fl", "uv", "v", "at", "off", "tile", "rep", "srep", "smp", "slice", "bw", "mid", "ow", "oc",
+    };
+
+    /// <summary>
+    /// Every attribute name the scene HEADER reads that no node does.
+    /// </summary>
+    /// <remarks>
+    /// Kept out of <see cref="KnownKeys"/> rather than folded into it: `root` or `nofill` on a
+    /// shape is still a typo worth reporting, and one union would make all of these legal on
+    /// every node. `w`, `h`, `fit`, `style`, `src` and `n` are not repeated here -- a node reads
+    /// them too, so they are in that union already. `probe` is the payload instrumentation
+    /// `VectorElementPatch.ReportProbe` reads off any vector element.
+    ///
+    /// The last six are not the author's writing at all. ScriptedScreens reads `visible`, `parent_id` and
+    /// `z_index` off these same props whatever the element's type is -- and this mod's own
+    /// README tells authors to layer two vector elements with `z_index`, `ui:layout` writes
+    /// `parent_id` in by itself, and an element on a visor carries `visor_anchor_*`: reporting
+    /// those would put a problem border on a scene nobody typed a mistake into.
+    /// </remarks>
+    private static readonly HashSet<string> SceneKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "scene", "root", "defs", "nofill", "nofeather", "noeval", "ztext", "probe",
+        "visible", "parent_id", "z_index", "zIndex",
+        "visor_anchor_look", "visor_anchor_ref", "visor_anchor_dx", "visor_anchor_dy",
     };
 
     private static void Validate(SS.UiProp[] map, VecScene scene, string? op, string? id)
@@ -1239,6 +1268,15 @@ internal static class SceneParser
             // Symbol parameters are arbitrary by definition, so a USE is exempt.
             if (string.Equals(op, "USE", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(op, "SYM", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // The header is checked with op "SCENE", and its own vocabulary -- the node list,
+            // the defs, the debug switches, the keys the host reads for itself -- is not in the
+            // per-node union.
+            if (string.Equals(op, "SCENE", StringComparison.OrdinalIgnoreCase)
+                && SceneKeys.Contains(prop.Key))
             {
                 continue;
             }
@@ -1347,8 +1385,22 @@ internal static class SceneParser
                 }
 
                 var mask = PropString(map, "mask");
-                if (!string.IsNullOrEmpty(mask) && mask![0] == '@')
-                    node.MaskGradient = mask[1..];
+                if (!string.IsNullOrEmpty(mask))
+                {
+                    // `clip` next door takes a bare id, so `mask=fade` is the natural slip; it
+                    // set nothing, the group drew unmasked, and there was nothing in
+                    // vector_stats to say why. An `@` name that is not declared is reported in
+                    // GroupTint instead, once the defs are known.
+                    //
+                    // EMPTY stays silent and means "no mask", as `clip=""` does: that is how a
+                    // `nodes` patch turns a mask off, since Merge overrides a key and never
+                    // deletes one, and how an optional `%param` on a symbol reads when the USE
+                    // leaves it out. Reporting it would flag a console that is behaving.
+                    if (mask![0] == '@')
+                        node.MaskGradient = mask[1..];
+                    else
+                        scene.Problem($"G: mask \"{mask}\" is not a gradient reference (must be \"@{mask}\")");
+                }
 
                 if (HasKey(map, "blur"))
                     node.Blur = Attr(map, "blur", 0f);
@@ -1654,7 +1706,7 @@ internal static class SceneParser
 
         Validate(map, scene, op, PropString(map, "id"));
 
-        ParseFill(map, node, scene);
+        ParseFill(map, node, scene, op);
         ParseStroke(map, node, scene);
 
         var children = PropValue(map, "c");
@@ -1770,11 +1822,18 @@ internal static class SceneParser
     /// <summary>The same magenta an unresolved data colour and an undeclared gradient draw.</summary>
     private static readonly Color UnparsedColour = new(1f, 0f, 1f, 1f);
 
-    private static void ParseFill(SS.UiProp[] map, VecNode node, VecScene scene)
+    private static void ParseFill(SS.UiProp[] map, VecNode node, VecScene scene, string? op = null)
     {
+        // A USE's attributes are symbol PARAMETERS and may be named anything, `sh` among them,
+        // so `USE ref=card sh=4` is a legal scene and not a malformed shadow. Validate makes the
+        // same exemption for the same reason; a null scene here means "parse it, report nothing".
+        var report = string.Equals(op, "USE", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(op, "SYM", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : scene;
         // Map form: f = { grad = "name", at = "=expr" } samples the ramp at an expression
         // rather than by position, which is how a colour is animated or driven by data.
-        node.Shadows = ParseShadows(map);
+        node.Shadows = ParseShadows(map, report);
 
         // BEFORE any fill branch can return. `fea` is the edge softness of whatever this node
         // draws, and a STROKE is an edge -- but every assignment used to sit inside a fill
@@ -1938,7 +1997,7 @@ internal static class SceneParser
                         Angle = PropNumber(map, "a", 0f),
                     };
 
-                    ReadStops(map, conic, conicSlots);
+                    ReadStops(map, conic, conicSlots, scene, op, id!);
                     Publish(scene, id!, conic, conicSlots);
                     break;
                 }
@@ -1988,14 +2047,14 @@ internal static class SceneParser
                         slots.Y2 = Live(map, "y2", 1f);
                     }
 
-                    ReadStops(map, gradient, slots);
+                    ReadStops(map, gradient, slots, scene, op, id!);
                     Publish(scene, id!, gradient, slots);
                     break;
                 }
 
                 case "CP":
                 {
-                    var (shape, outline) = ClipOutline(map);
+                    var (shape, outline) = ClipOutline(map, scene);
 
                     // A clip written with expressions is re-cut every rebuild, so a masked
                     // bar or a scrolling list can change size from the data payload alone,
@@ -2029,26 +2088,48 @@ internal static class SceneParser
     /// expression and a colour may be a <c>$name</c> from the data payload; both are then
     /// re-read every rebuild.
     /// </summary>
-    private static void ReadStops(SS.UiProp[] map, Gradient gradient, GradientSlots slots)
+    private static void ReadStops(SS.UiProp[] map, Gradient gradient, GradientSlots slots,
+        VecScene scene, string? op, string id)
     {
         gradient.Slots = slots;
 
+        // `OP "id": ...`, the form every other def report takes.
+        var label = $"{op} \"{id}\"";
+
         var stops = PropValue(map, "stops");
         if (stops == null || stops.Value.Type != SS.UiValueType.Array || stops.Value.Array == null)
+        {
+            // A ramp with nothing to ramp between paints white everywhere (SampleWithin), and
+            // white is a colour somebody meant to use: the def read as working while every
+            // shape filled from it was wrong, and this case never even reached the log.
+            scene.Problem($"{label}: no stops; the gradient paints white");
             return;
+        }
 
         var positions = new List<float>();
         var colours = new List<string>();
         List<Expression?>? positionSlots = null;
         List<string?>? colourSlots = null;
 
+        // Which stop in the declaration a report is about. Naming the gradient alone would send
+        // the author back through the whole list looking for the one that was thrown away.
+        var at = 0;
+
         foreach (var stop in stops.Value.Array)
         {
+            at++;
+
             if (stop.Type != SS.UiValueType.Array || stop.Array == null || stop.Array.Length < 2)
+            {
+                scene.Problem($"{label}: stop {at} is not a {{position, colour}} pair; dropped");
                 continue;
+            }
 
             if (stop.Array[1].Type != SS.UiValueType.String)
+            {
+                scene.Problem($"{label}: stop {at} colour is not a string; dropped");
                 continue;
+            }
 
             Expression? livePosition = null;
 
@@ -2064,6 +2145,7 @@ internal static class SceneParser
                     break;
 
                 default:
+                    scene.Problem($"{label}: stop {at} position is neither a number nor an expression; dropped");
                     continue;
             }
 
@@ -2095,7 +2177,7 @@ internal static class SceneParser
         Pad(positionSlots, positions.Count);
         Pad(colourSlots, positions.Count);
 
-        GradientParser.ReadStops(positions.ToArray(), colours.ToArray(), gradient,
+        GradientParser.ReadStops(positions.ToArray(), colours.ToArray(), gradient, scene, label,
             positionSlots?.ToArray(), colourSlots?.ToArray());
 
         static List<Expression?> Fill(int count)
@@ -2194,7 +2276,7 @@ internal static class SceneParser
     /// node and is re-cut per rebuild (<see cref="VecScene.ResolveLiveDefs"/>), so a clip can
     /// follow the data the way a shape does.
     /// </remarks>
-    private static (VecNode? Shape, List<Vector2>? Outline) ClipOutline(SS.UiProp[] map)
+    private static (VecNode? Shape, List<Vector2>? Outline) ClipOutline(SS.UiProp[] map, VecScene scene)
     {
         var children = PropValue(map, "c");
         if (children == null || children.Value.Type != SS.UiValueType.Array || children.Value.Array == null)
@@ -2205,9 +2287,40 @@ internal static class SceneParser
             if (item.Type != SS.UiValueType.Map || item.Map == null)
                 continue;
 
-            var node = ParseNode(item.Map, new VecScene());
-            if (node != null)
-                return (node, Tessellator.Outline(node, new EvalContext()));
+            // Parsed against a throwaway `new VecScene()` until now, so a fault in the clip's
+            // shape -- a typo'd attribute, an unparseable colour, the name of an unsupported op
+            // -- was recorded on a scene dropped on the next line: nothing in vector_stats, no
+            // error marker, and the clip quietly the wrong shape. Reporting on the real scene
+            // cannot double up: `ParseDefs` runs once per parse, and a live clip is re-cut from
+            // the kept node by `ResolveLiveDefs` rather than re-parsed.
+            var node = ParseNode(item.Map, scene);
+            if (node == null)
+                continue;
+
+            // A `CP` uses its FIRST usable shape and ignores the rest, and said nothing about
+            // it: a second `R` written in the hope of a two-part window simply never cut, and
+            // the clip looked like the author's first shape alone. Reported rather than unioned
+            // -- `Frame.Pieces` can already draw a node once per clip region, but once-per-region
+            // equals a union only for DISJOINT regions, and overlapping ones double-composite,
+            // which is invisible on an opaque fill and obvious through transparency and feather.
+            var extra = 0;
+            foreach (var rest in children.Value.Array)
+            {
+                if (!ReferenceEquals(rest.Map, item.Map)
+                    && rest.Type == SS.UiValueType.Map && rest.Map != null
+                    && ParseNode(rest.Map, new VecScene()) != null)
+                {
+                    extra++;
+                }
+            }
+
+            if (extra > 0)
+            {
+                scene.Problem($"CP \"{PropString(map, "id")}\": a clip uses one shape; "
+                              + $"{extra} further shape{(extra == 1 ? " was" : "s were")} ignored");
+            }
+
+            return (node, Tessellator.Outline(node, new EvalContext()));
         }
 
         return (null, null);
@@ -2466,11 +2579,20 @@ internal static class SceneParser
     /// `sh = { { dx, dy, blur, spread, "#rrggbbaa" }, ... }` -- CSS box-shadow order, and a
     /// list so several compose. A single shadow may be given unwrapped.
     /// </summary>
-    private static VecShadow[]? ParseShadows(SS.UiProp[] map)
+    private static VecShadow[]? ParseShadows(SS.UiProp[] map, VecScene? scene)
     {
         var value = PropValue(map, "sh");
-        if (value?.Type != SS.UiValueType.Array || value.Value.Array == null)
+        if (value == null)
             return null;
+
+        // `sh` written as anything but a list -- `sh = "#0000001f"`, or a bare `sh` flag, which
+        // the text form reads as the number 1 -- used to leave here with the key ignored and
+        // nothing said, which reads as "this shape cannot cast a shadow".
+        if (value.Value.Type != SS.UiValueType.Array || value.Value.Array == null)
+        {
+            scene?.Problem("sh: shadows are a list, { dx, dy, blur, spread, colour } or a list of those");
+            return null;
+        }
 
         var entries = value.Value.Array;
         if (entries.Length == 0)
@@ -2479,7 +2601,7 @@ internal static class SceneParser
         // One shadow written without the outer braces: { 0, 3, 8, 0, "#0000001f" }.
         if (entries[0].Type != SS.UiValueType.Array)
         {
-            var single = ParseShadow(entries);
+            var single = ParseShadow(entries, scene);
             return single.HasValue ? new[] { single.Value } : null;
         }
 
@@ -2487,9 +2609,15 @@ internal static class SceneParser
         foreach (var entry in entries)
         {
             if (entry.Type != SS.UiValueType.Array || entry.Array == null)
+            {
+                // No index in the message, so a list of junk entries costs one problem instead
+                // of one each: the scene keeps 16 distinct messages and they are worth more
+                // spent on the other faults in the page.
+                scene?.Problem("sh: every entry of a shadow list is itself { dx, dy, blur, spread, colour }");
                 continue;
+            }
 
-            var parsed = ParseShadow(entry.Array);
+            var parsed = ParseShadow(entry.Array, scene);
             if (parsed.HasValue)
                 list.Add(parsed.Value);
         }
@@ -2497,16 +2625,31 @@ internal static class SceneParser
         return list.Count > 0 ? list.ToArray() : null;
     }
 
-    private static VecShadow? ParseShadow(SS.UiValue[] parts)
+    private static VecShadow? ParseShadow(SS.UiValue[] parts, VecScene? scene)
     {
+        // The drop stays -- a shadow with no colour cannot be built -- but this was the one
+        // malformed value in the parser that said nothing, so a field short or a typo in the
+        // colour read as a shape that simply refuses to cast a shadow.
         if (parts.Length < 5)
+        {
+            scene?.Problem($"sh: a shadow takes dx, dy, blur, spread and a colour, {parts.Length} given");
             return null;
+        }
 
         static float Num(SS.UiValue v) => v.Type == SS.UiValueType.Number ? v.Number : 0f;
 
         var text = parts[4].Type == SS.UiValueType.String ? parts[4].String : null;
-        if (string.IsNullOrEmpty(text) || !Colours.TryParse(text, out var colour))
+        if (string.IsNullOrEmpty(text))
+        {
+            scene?.Problem("sh: the fifth field of a shadow is its colour");
             return null;
+        }
+
+        if (!Colours.TryParse(text, out var colour))
+        {
+            scene?.Problem($"sh: \"{text}\" is not a colour");
+            return null;
+        }
 
         // Sixth field: `inset` (or 1), as CSS writes it.
         var inset = parts.Length > 5

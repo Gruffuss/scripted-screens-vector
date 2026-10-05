@@ -2,6 +2,61 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.96
+
+Nine silent failures become reported ones. None of them moves a pixel that was already correct;
+each turns a scene that drew wrong, or drew clean over a typo, into one that says so.
+
+**This changes what an existing scene looks like.** A scene carrying any of these faults has been
+drawing without complaint and will now show the magenta problem border. That is the point, but it
+is a visible change rather than a quiet fix.
+
+### Fixed
+
+- **A malformed `sh` was dropped in silence.** An `sh` that is not a list at all, an entry with
+  fewer than five values, a fifth value that is not a string, and a colour that will not parse
+  were each discarded without a word, so a mistyped `"#0000O01f"` left a card with no shadow and
+  nothing to read. All four report now. A `USE`'s attributes are symbol PARAMETERS and may be
+  called anything, `sh` included, so a `USE` is exempt — the same exemption the unknown-attribute
+  check already makes.
+- **A fault inside a clip was never reported at all.** `ClipOutline` parsed the `CP`'s shape
+  against a throwaway scene that was dropped on the next line, so a typo'd attribute or an
+  unsupported op inside a clip reached nothing: no problem, no border, and the clip quietly the
+  wrong shape.
+- **A `CP` holding several shapes used the first and ignored the rest, silently.** It reports the
+  count now. Not unioned: `Frame.Pieces` can already draw a node once per clip region, but
+  once-per-region equals a union only for DISJOINT regions, and overlapping ones double-composite
+  — invisible on an opaque fill, obvious through transparency and feathering.
+- **`mask` without its leading `@` was ignored without a word**, where the sibling `clip` takes a
+  bare id, so `mask = "fade"` is the natural slip and drew an unmasked group. An EMPTY `mask`
+  stays silent and still means "no mask": that is how a `nodes` patch turns one off, since a patch
+  merge overrides a key and never deletes one.
+- **A `src` that failed to parse, on an element that also carried `root`, silently drew the
+  `root` scene** and sent the text error to the log alone.
+- **Gradient stops were dropped in silence** — a stop that is not a pair, one whose colour is not
+  a string, and one whose colour will not parse — so `{ { 0, "#fff" }, { 1, "bleu" } }` was a flat
+  `#fff` with nothing said. A gradient left with no stops says so too.
+- **The scene HEADER's own keys were never checked**, so `ztxt` for `ztext` was ignored while the
+  same typo on a node was reported. The header has its own vocabulary, and the keys the HOST reads
+  off the same props are exempt — `z_index`, `zIndex`, `visible`, `parent_id` and the visor
+  anchors — because this mod's own README tells authors to layer two vector elements with
+  `z_index`, and reporting that would mark a scene nobody mistyped.
+- **An `IMG` whose picture had not downloaded recorded no hit area**, so a clickable picture was
+  dead until it loaded, silently.
+- **`sd` and `sdo` were accepted and read by nothing.** The only two such keys in the whole
+  attribute list, added beside `dash` and `dofs` and never read by any commit. They are gone, so
+  `sd = {4, 2}` reports an unknown attribute instead of silently drawing a solid line.
+
+### Measured
+
+Seven faults each report; seven valid forms that an adversarial review predicted would break stay
+silent — a `USE` with an `sh` parameter, `mask = ""`, `z_index` and `visible` on a header, a sound
+shadow, a one-shape `CP`, and a plain scene. The 17-scene fingerprint's problem counts are
+unchanged, so no shipped example newly reports. Unit suite 359 passes.
+
+Three of these nine would have broken a valid scene as first written. The review that caught them
+is the reason this release does not ship a problem border on working consoles.
+
 ## 0.11.95
 
 ### Fixed

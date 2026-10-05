@@ -170,11 +170,24 @@ internal static class VectorElementPatch
             && string.Equals(graphic.StructureText, source, StringComparison.Ordinal))
             return;
 
-        var props = string.IsNullOrEmpty(source)
+        // An empty or blank `src` is not a refusal -- a script that leaves it off, or blanks
+        // it, means the table form on the same element -- so it goes straight to the props.
+        // Anything else goes to the parser, and `null` back from the parser IS a refusal. The
+        // test is on WHITESPACE because `ToProps` answers null for a blank string before it
+        // clears `Rejected`, so reading the field after one of those gave some earlier scene's
+        // reason.
+        var props = string.IsNullOrWhiteSpace(source)
             ? element.Props
-            : SceneText.ToProps(source!, ReadString(element.Props, "scene")) ?? element.Props;
+            : SceneText.ToProps(source!, ReadString(element.Props, "scene"));
 
-        var scene = SceneParser.Parse(props);
+        // A refused `src` used to be papered over by the `root` beside it: the fallback drew
+        // the table scene, which parses fine and reports nothing, so an author editing `src`
+        // got the other picture, no border, no entry in vector_stats -- only the log line.
+        var refused = props == null
+            ? SceneText.Rejected ?? "the scene text could not be read"
+            : null;
+
+        var scene = SceneParser.Parse(props ?? element.Props);
 
         // A scene that will not parse must SAY so. Returning here left the console blank with
         // nothing on screen and no entry in vector_stats -- only a log line, which is the last
@@ -183,7 +196,11 @@ internal static class VectorElementPatch
         if (scene == null)
         {
             scene = new VecScene { Id = ReadString(element.Props, "scene") ?? "?" };
-            scene.Problem(SceneText.Rejected ?? "the scene could not be read");
+            scene.Problem(refused ?? "the scene could not be read");
+        }
+        else if (refused != null)
+        {
+            scene.Problem($"src: {refused}");
         }
 
         graphic.SetScene(scene);

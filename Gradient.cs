@@ -134,10 +134,18 @@ internal sealed class Gradient
                 continue;
 
             // A colour the payload never supplied reads as a fault rather than as a design
-            // decision, the same choice `f = "$name"` makes on a node.
-            Colours[i] = context.Colour(colours[i]!, out var supplied)
-                ? supplied
-                : new Color(1f, 0f, 1f, 1f);
+            // decision, the same choice `f = "$name"` makes on a node -- and it is listed with
+            // the other names the payload owes, as a node's is. The magenta said a stop was
+            // wrong without ever naming the missing value, so a typo in a stop's `$name` left
+            // vector_stats with nothing to look up.
+            if (context.Colour(colours[i]!, out var supplied))
+            {
+                Colours[i] = supplied;
+                continue;
+            }
+
+            context.Missing.Add(colours[i]!);
+            Colours[i] = new Color(1f, 0f, 1f, 1f);
         }
 
         // Live positions can cross each other between ticks, and sampling walks the stops in
@@ -494,6 +502,7 @@ internal sealed class GradientSlots
 internal static class GradientParser
 {
     internal static void ReadStops(float[] flatPositions, string[] colours, Gradient into,
+        VecScene scene, string label,
         Expression?[]? positionSlots = null, string?[]? colourSlots = null)
     {
         var count = Mathf.Min(flatPositions.Length, colours.Length);
@@ -503,7 +512,14 @@ internal static class GradientParser
         for (var i = 0; i < count; i++)
         {
             if (!Colours.TryParse(colours[i], out var colour))
+            {
+                // One mistyped stop used to vanish, and a two-stop ramp that loses its second
+                // stop is a flat fill -- which reads as a colour somebody chose. The text is
+                // named rather than the index: the array arrives already filtered, so `i` is
+                // not the stop number the author wrote.
+                scene.Problem($"{label}: stop colour \"{colours[i]}\" is not a colour; dropped");
                 continue;
+            }
 
             into.Positions.Add(Mathf.Clamp01(flatPositions[i]));
             into.Colours.Add(colour);
@@ -539,8 +555,10 @@ internal static class GradientParser
         if (into.Positions.Count != 0)
             return;
 
-        // A gradient with no usable stops would silently paint white; say so instead.
-        ScriptedScreensVectorPlugin.Log?.LogWarning("gradient has no valid stops");
+        // A gradient with no usable stops paints white (SampleWithin). The log alone was not
+        // enough: nothing on the console said the ramp was dead, which is what the problem
+        // border is for. `Problem` logs as well, so the warning is not lost.
+        scene.Problem($"{label}: no usable stops; the gradient paints white");
     }
 
     /// <summary>Internal so tests can exercise it without Unity's native colour parser.</summary>
