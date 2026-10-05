@@ -2,6 +2,28 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.87
+
+Two things 0.11.85 broke and shipped. Its own offline suite had been reporting both; this is the
+first version since where every test passes.
+
+- **Fixed: a clickable shape inside a fully transparent group stopped being clickable.** When
+  0.11.85 replaced the recursion that parses children with a queue, the step that gives a group
+  its children's properties stayed where it was -- at the point where the group's child list is
+  now still empty. It therefore did nothing at all. A group only skips drawing its subtree when
+  nothing inside needs reaching, and "owns a click region" is one of those things, so a
+  transparent group carrying a button was skipped whole and the button went dead. `o=0` keeps
+  its click regions, the way a browser still sends a click to an `opacity: 0` element; `v=0`
+  takes them with it, as before.
+- The same fault stopped animation and scrolling in a child from marking its parent, and made a
+  group holding text rebuild by the wrong path.
+- **Fixed: `%x` printed the missing-value text instead of a number.** .NET's `x` is an integer
+  format and refuses a float; the buffered formatter treated that refusal as a missing value, so
+  `{=255:%x}` rendered as whatever `missing` was set to. Hex now formats from a rounded integer
+  on the fast path, and anything else the fast path cannot format falls back to the original
+  formatter rather than claiming the value is absent. `NaN` and the infinities still print their
+  own names. No allocation added: a hex readout still costs 0 bytes per rebuild.
+
 ## 0.11.86
 
 The 0.11.85 sweep removed the nesting limits from the scene parser, the expression parser and

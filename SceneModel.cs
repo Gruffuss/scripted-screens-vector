@@ -990,7 +990,62 @@ internal static class SceneParser
             item.Parent.Children.AddRange(ParseLevel(item.Array, scene, item.Inherited));
         }
 
+        FoldUpwards(nodes);
+
         return nodes;
+    }
+
+    /// <summary>
+    /// Gives every node the flags it derives from its children, bottom-up.
+    /// </summary>
+    /// <remarks>
+    /// Separate from parsing because children are parsed from a QUEUE: at the moment a node
+    /// finishes parsing, its children do not exist yet. Folding there worked only while
+    /// children were parsed by recursion, and when that changed the fold kept running over an
+    /// empty list and quietly stopped doing anything -- which is how a clickable shape stopped
+    /// marking its group interactive.
+    /// </remarks>
+    private static void FoldUpwards(List<VecNode> roots)
+    {
+        var order = new List<VecNode>();
+        var stack = new Stack<VecNode>();
+
+        foreach (var root in roots)
+            stack.Push(root);
+
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            order.Add(node);
+
+            foreach (var child in node.Children)
+                stack.Push(child);
+        }
+
+        // A parent always appears before its children in that order, so walking it backwards
+        // finishes every child before the parent that reads it.
+        for (var i = order.Count - 1; i >= 0; i--)
+        {
+            var node = order[i];
+
+            node.UsesTime = node.SelfUsesTime;
+            node.UsesScroll = NodeUsesScroll(node);
+            node.Interactive = node.Clickable || node.Op is VecOp.Scroll or VecOp.Image;
+
+            foreach (var child in node.Children)
+            {
+                node.UsesTime |= child.UsesTime;
+                node.UsesScroll |= child.UsesScroll;
+                node.Interactive |= child.Interactive;
+            }
+
+            // Read AFTER the children are final, and before this node's own UsesTime is used
+            // anywhere, exactly as it was when this sat at the end of the recursion.
+            node.AlphaOnly = node.Op == VecOp.Group
+                             && node.Opacity.UsesTime && node.Opacity.ReadsOnlyTime()
+                             && !NodeUsesTime(node, withOpacity: false) && node.Visible is not { UsesTime: true }
+                             && !node.Children.Exists(c => c.UsesTime || HoldsText(c));
+        }
     }
 
     /// <summary>One level of nodes. Anything with children queues them rather than descending.</summary>
@@ -1620,20 +1675,13 @@ internal static class SceneParser
         if (!string.IsNullOrEmpty(node.Id))
             node.SourceProps = map;
 
+        // Only what this node knows about ITSELF. Everything that depends on its children is
+        // folded in by FoldUpwards once the whole tree exists -- children are queued now, so
+        // `node.Children` is still empty here.
         node.SelfUsesTime = NodeUsesTime(node) || node.Visible is { UsesTime: true };
         node.UsesTime = node.SelfUsesTime;
-        node.AlphaOnly = node.Op == VecOp.Group
-                         && node.Opacity.UsesTime && node.Opacity.ReadsOnlyTime()
-                         && !NodeUsesTime(node, withOpacity: false) && node.Visible is not { UsesTime: true }
-                         && !node.Children.Exists(c => c.UsesTime || HoldsText(c));
         node.UsesScroll = NodeUsesScroll(node);
         node.Interactive = node.Clickable || node.Op is VecOp.Scroll or VecOp.Image;
-        foreach (var child in node.Children)
-        {
-            node.UsesTime |= child.UsesTime;
-            node.UsesScroll |= child.UsesScroll;
-            node.Interactive |= child.Interactive;
-        }
 
         return node;
     }

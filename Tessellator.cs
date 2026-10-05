@@ -3296,8 +3296,26 @@ internal static class Tessellator
             prefix.AsSpan().CopyTo(buffer);
             var at = prefix.Length;
 
-            if (!value.TryFormat(buffer.AsSpan(at, 64), out var written, spec, CultureInfo.InvariantCulture))
+            int written;
+
+            // .NET's `x`/`X` is an INTEGER format: handed a float it throws rather than
+            // declining. A value destined for hex is an integer by intent, so round it and
+            // format the long -- doing it here rather than through the exception keeps `%x`
+            // on the buffered path instead of allocating a fresh string every rebuild.
+            // NaN and the infinities are NOT rounded to a long: .NET prints their symbol
+            // from any float format, and `(long)NaN` is long.MinValue, which would print
+            // 8000000000000000 where the old path printed NaN.
+            if (spec is { Length: > 0 } && (spec[0] == 'x' || spec[0] == 'X')
+                && !float.IsNaN(value) && !float.IsInfinity(value))
+            {
+                if (!((long)Mathf.Round(value)).TryFormat(buffer.AsSpan(at, 64), out written, spec,
+                        CultureInfo.InvariantCulture))
+                    return FormatSlow(node, value);
+            }
+            else if (!value.TryFormat(buffer.AsSpan(at, 64), out written, spec, CultureInfo.InvariantCulture))
+            {
                 return FormatSlow(node, value);
+            }
 
             at += written;
             suffix.AsSpan().CopyTo(buffer.AsSpan(at));
@@ -3309,7 +3327,9 @@ internal static class Tessellator
         }
         catch (FormatException)
         {
-            return node.TextMissing;
+            // A spec this path cannot handle is not a missing value. FormatSlow knows the
+            // remaining tricks and has the only honest `missing` answer at the end of them.
+            return FormatSlow(node, value);
         }
     }
 
