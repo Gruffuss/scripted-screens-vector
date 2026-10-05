@@ -2,6 +2,35 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.95
+
+### Fixed
+
+- **A deep number inside a colour expression ended the GAME PROCESS.** `f = "=mix(#a,#b,<deep>)"`
+  and `f = "=if(<deep>,#a,#b)"` overflowed the stack, and a stack overflow cannot be caught in
+  .NET -- it takes the process down, with nothing in the log.
+
+  This was the **eighth** recursive walk, and the one 0.11.85-0.11.86 missed while converting the
+  other seven to explicit stacks. `EvaluateColour` does walk the colour tree iteratively, but it
+  reached `if`'s condition and `mix`'s blend factor through `Arg`, which calls `Evaluate` on the
+  argument -- and only a ROOT is given a measured tree depth at parse, so an argument's depth
+  reads 0, the deep-tree test is false, and it recursed at its subtree's full depth. `IsColour`
+  never walks those arguments either, so the expression was accepted as a colour and then
+  evaluated on the tessellation worker every rebuild.
+
+  Measured out of process, before and after. `mix` and `if` both survived 7,968 levels of prefix
+  `-` and died at 8,125 with `Stack overflow.`, exit 127; the same number written as an ordinary
+  numeric attribute survived 60,000, which is what pinned the fault to the colour path rather
+  than to depth in general. After the fix both survive 200,000. The 17-scene fingerprint is
+  byte-identical at all three `t` values, the colour-expression probe's 20 checks are unchanged,
+  and the unit suite passes.
+
+  The memo is allocated only for a tree that is genuinely deep, so an ordinary `mix` keeps the
+  single predictable branch it had.
+
+  **This is why the reference's promise that any depth parses and draws was not true**: it held
+  for every numeric attribute and failed for a colour one.
+
 ## 0.11.94
 
 Ten bugs from the reference sweep, each watched failing on the previous build before the fix and

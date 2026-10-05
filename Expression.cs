@@ -677,7 +677,7 @@ internal sealed class Expression
                 var blend = blends.Pop();
                 var to = done.Pop();
                 var from = done.Pop();
-                done.Push(Gradient.MixPremultiplied(from, to, Mathf.Clamp01(blend.Arg(2, context))));
+                done.Push(Gradient.MixPremultiplied(from, to, Mathf.Clamp01(ColourArg(blend, 2, context))));
                 continue;
             }
 
@@ -693,7 +693,7 @@ internal sealed class Expression
                 {
                     // The condition is a number and ONLY the branch taken is evaluated, as
                     // before: the other one is never asked whether it is a colour.
-                    var chosen = NonZero(node.Arg(0, context)) ? node._args[1] : node._args[2];
+                    var chosen = NonZero(ColourArg(node, 0, context)) ? node._args[1] : node._args[2];
                     if (chosen == null)
                     {
                         failed = true;
@@ -736,6 +736,41 @@ internal sealed class Expression
 
         colour = Color.white;
         return false;
+    }
+
+    /// <summary>
+    /// A NUMERIC argument of a colour node -- `if`'s condition and `mix`'s blend factor --
+    /// evaluated safely however deep it is.
+    /// </summary>
+    /// <remarks>
+    /// This was the eighth recursive walk, and the one 0.11.85-0.11.86 missed while removing the
+    /// other seven. <see cref="EvaluateColour"/> walks the colour tree on an explicit stack, but
+    /// reached these two numbers through <see cref="Arg"/>, which calls <c>Evaluate</c> on the
+    /// argument -- and only a ROOT is given a measured <see cref="_treeDepth"/> by
+    /// <see cref="Parse"/>, so an argument's depth reads 0, the `> DeepTree` test is false, and it
+    /// recursed at its subtree's full depth. A stack overflow cannot be caught in .NET: it ends
+    /// the PROCESS, which is the game.
+    ///
+    /// Measured before the fix, out of process: `f = "=mix(#5FD9A8,#2E8B6E,----...1)"` survived
+    /// 7,968 levels of prefix `-` and died at 8,125 with "Stack overflow.", exit 127 -- while the
+    /// same number written as an ordinary numeric attribute survived 60,000. `if` behaved
+    /// identically. `IsColour` never walks these arguments, so such an expression is accepted as
+    /// a colour and then evaluated on the tessellation worker every rebuild.
+    ///
+    /// The root's depth covers every branch including this one, so testing it here is safe, and
+    /// the memo is only allocated for a tree that is genuinely deep -- an ordinary `mix` keeps
+    /// the single predictable branch through <see cref="Arg"/>.
+    /// </remarks>
+    private float ColourArg(Expression node, int index, EvalContext context)
+    {
+        if (_treeDepth > DeepTree && _memo == null)
+        {
+            var argument = index < node._args.Length ? node._args[index] : null;
+            if (argument != null)
+                return argument.EvaluateDeep(context);
+        }
+
+        return node.Arg(index, context);
     }
 
     /// <summary>
