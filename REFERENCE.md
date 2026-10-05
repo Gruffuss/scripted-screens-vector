@@ -19,8 +19,10 @@ or `src` and neither of those is the **structure** element. One holding only `ke
 `ease` is neither, and does nothing. `scene` defaults to the element's own `id`. Elements pair
 only within the same console, surface and scene name, so two consoles running one script do not
 share a scene. An empty `src` counts as absent and `root` is used; when `src` is present and
-parses, the viewbox and the defs come from its own `SCENE` and `DEFS` lines, and the element's
-`w`, `h`, `fit` and `defs` are ignored.
+parses, **the text is the whole scene**: `w`, `h`, `fit`, `ztext` and the debug switches come
+from its `SCENE` line, the defs from its `DEFS` block, and the nodes from its other top-level
+lines. Every one of those on the element itself is ignored. `scene` is the exception — it is read
+from the **element**, always, so a `scene=` on a `SCENE` line does not pair anything.
 
 ### Structure element
 
@@ -247,12 +249,26 @@ long-string bracket closes at the first one it sees — so a scene containing
 vanishes. A longer level of bracket has no such collision.
 
 Grammar: one node per line, `OP` then `key=value`, `{` … `}` for children, `#` comments to
-end of line. `SCENE` carries the viewbox; `DEFS { … }` holds gradients and clips. Same op
-names, keys and expression syntax as the table form.
+end of line. `SCENE` carries the viewbox, `fit`, `ztext`, the debug switches, and the root's
+inherited paint defaults written as bare keys (`SCENE w=200 h=240 f=#5FD9A8 fea=0`); `DEFS { … }`
+holds gradients and clips. There is no `style` key in the text form — a map cannot be written, so
+`SCENE style=…` is read as a string and ignored. Same op names, keys and expression syntax as the
+table form.
 
 Values: a plain number is a number, `[a,b,c]` is an array and nests, anything else is a
 string — which covers `#colours`, `@refs`, enum words and `=expressions`. A bare word is a
 flag, so `lod` means `lod=1`. Double quotes wrap a string containing spaces.
+
+**Quotes hold a value together; they do not make it a string.** They exist so a value may contain
+a space, comma or bracket; the type is decided afterwards, from the characters inside them. A
+value is a **number** when everything inside the quotes parses as one, and a string otherwise —
+so `text="700"` is the number `700`, exactly as `text=700` is, and so are `"1e3"`, `"+0"` and
+`" 0 "`, while `"700 kPa"`, `"1,000"` and `"0x1F"` are strings. **A key that wants a string reads
+a number as absent, and nothing is reported**: `text="700"` draws no label at all, `missing="0"`
+leaves the default `--`, and `id=1` leaves the node unidentified, so a later `nodes` patch for it
+reports an unknown id. To draw a bare integer, write it as a computed placeholder,
+`text="{=700}"` — that prints through `0.##`, so it suits whole numbers, not `"007"` or
+`"1.50"`.
 
 **One rule the format imposes: an unquoted expression cannot contain a space.** Values are
 read to whitespace, because expressions are full of `,` `[` `]` — `clamp($x,0,1)`,
@@ -606,6 +622,17 @@ show one:
 Which to reach for: `o` to fade something out that should stay live, `v` to switch between
 states that must not overlap.
 
+**`v` is a number, and a Lua boolean is not one.** `v = false` leaves the node **visible**: a
+boolean is neither a number nor an expression string, so the attribute falls back to its default
+of `1`, and nothing is reported. `v = true` shows for the same reason, not because it is true.
+Write `v = 0` and `v = 1`. `click`, `press`, `close`, `wrap`, `keep` and `snap` read the same way,
+and a boolean leaves each of them at its default. A shadow's `inset` is the exception that proves
+it: that one does accept a Lua `true`.
+
+**The test is a threshold**: `v` hides at or below `0.5` and shows above it, so a fraction is not
+an error. Data numbers glide, so a `v` driven by a payload swaps halfway through the glide rather
+than when the payload lands; send that name with `snap = 1` to switch in one frame.
+
 **`m` is a CSS matrix**, `x' = a·x + c·y + e`, `y' = b·x + d·y + f`, and it is the innermost
 factor, as in `transform: translate() rotate() scale() matrix()`: points go through the
 matrix first, then the scale, rotation and translation. Stroke widths scale by
@@ -885,7 +912,7 @@ container, where it will be clipped away and look like nothing happened.
 | `fo` | opacity `0..1`, as on any shape; multiplied by the enclosing group's `o` |
 | `align` | `left` (default), `center`, `right`, `justified` (extra width goes between words, as CSS) |
 | `valign` | `top` (default), `middle`, `bottom` |
-| `font` | a registered TMP family, e.g. from the companion fonts mod; omitted draws in the game's own font |
+| `font` | a registered TMP face, named exactly: `Family` for the regular weight and `Family Style` otherwise — `Barlow`, `Barlow Bold` — e.g. from the companion fonts mod. Case and spaces count. Omitted draws in the game's own font. **A name that is not registered is not reported**, and labels are pooled, so the label keeps whatever face it last drew: changing `Barlow Bold` to a typo and re-pushing leaves it in Barlow Bold, and the mistake only shows after a reload |
 | `weight` | `bold`, or a number ≥ 600; omitted draws the face's regular weight |
 | `cspace` | character spacing, default `0` |
 | `kern` | `0` turns pair kerning off for this label; on otherwise. Only a font that carries kerning pairs is affected, so a label on the game's own font is unchanged either way |
@@ -897,6 +924,12 @@ container, where it will be clipped away and look like nothing happened.
 | `fl` | first-line overrides, `"f=#fff size=12 weight=bold font='Name'"` — see below |
 | `fit` | `none` (default), `ellipsis`, `shrink` |
 | `min_size` | floor for `shrink`, in scene units, default `6` |
+
+**In a `src` scene, `text`, `unit` and `missing` must not hold a bare numeral**, quoted or not: a
+value that parses as a number arrives as a number, these keys read only a string, and a number
+reads as absent. `text="700"` draws no label at all and `missing="0"` leaves the default `--`;
+neither is reported. See *Scene as text* for the rule. `fmt` is never affected, since every spec
+carries a `%`.
 
 ```lua
 { op = "T", x = 8, y = 8, w = 120, h = 20, text = "$pressure",
@@ -1785,6 +1818,17 @@ vertices: a few more than usual, only for that shape.
 
 Any numeric attribute may be a string beginning with `=`.
 
+**Write the `=`, even where it looks optional.** In the table form the parser drops a leading `=`
+if it finds one, so both spellings reach it; in the `src` text form the `=` is what makes the
+value read to whitespace, so an unmarked `x=clamp($a,0,1)` ends at the first `,` and the scene is
+then rejected. On **`f` and `s`** the `=` is not optional at all: it is the only thing separating
+an expression from a colour literal, a `@gradient` reference or a `$name` binding. They are the
+only colour keys that take one — `oc`, a gradient stop, a shadow's colour and the colour inside
+`fl` are literals, and an `=` there is simply not read.
+
+A bare word inside an expression is a variable, never a literal: `o = "half"` is a malformed
+expression, is reported as one, and leaves `o` at its default.
+
 ### Variables
 
 | Name | Meaning |
@@ -1856,8 +1900,12 @@ because it never scrolls, and needs neither of these.
 `+` `-` `*` `/` `%` `^`, unary `-`, parentheses. Standard precedence.
 
 **`^` is the power operator and there is no `pow()`** — reaching for one is an easy mistake
-when scanning the function table. An unknown function name throws at parse time rather than
-evaluating to zero, so it fails loudly, but the scene it is in will not draw.
+when scanning the function table. An unknown function name fails at parse time rather than
+evaluating to zero, exactly as an unknown variable does, and names are case-sensitive, so
+`Sin(x)` is unknown too. **The scene still draws**: it is reported, and that one attribute falls
+back to its own default while everything else is unaffected. On `f` or `s` it costs a second
+problem, because the fallback is a number and a number is not a colour —
+`f: "=nosuchfn(1)" is an expression but does not give a colour`.
 
 Division by zero yields `0`, not infinity — an infinity would poison vertex positions and produce an invisible mesh
 rather than a visible glitch. `%` and `mod(a, 0)` do the same. **`^` has no such guard**: `0^-1`
