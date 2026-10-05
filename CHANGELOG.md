@@ -2,6 +2,21 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.91
+
+- **Fixed: `fea` was ignored on a shape with no fill.** A stroke is an edge and takes a feather
+  like any other, but every read of `fea` sat inside a fill branch, and that branch returns as
+  soon as `f` is missing or `none`. A stroke-only shape therefore kept the automatic feather
+  whatever it asked for, so `fea = 0` and `fea = 8` drew exactly the same stroke. Measured on a
+  60x160 box stroked at 2: before, both forms produced 28 vertices; after, `fea = 0` produces 12
+  and keeps its hard edge. `examples/11` and `13` draw stroke-only groups with `fea = 0` and were
+  quietly getting a soft edge.
+
+  **The same early return also dropped `fea` from a shape whose fill failed to parse** -- a
+  colour expression with a branch that is not a colour, say. Those shapes now keep the edge they
+  asked for too, which is the only change to any existing drawing: a hard edge where there had
+  been an automatic one.
+
 ## 0.11.90
 
 - **Fixed, properly this time: a geometry patch waiting for its structure still dropped the one

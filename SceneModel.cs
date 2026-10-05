@@ -1761,6 +1761,16 @@ internal static class SceneParser
         // rather than by position, which is how a colour is animated or driven by data.
         node.Shadows = ParseShadows(map);
 
+        // BEFORE any fill branch can return. `fea` is the edge softness of whatever this node
+        // draws, and a STROKE is an edge -- but every assignment used to sit inside a fill
+        // branch, and this function returns early when `f` is missing or `none`. A stroke-only
+        // shape therefore kept the -1 default, which FeatherWidth reads as "automatic", so
+        // `fea = 0` and `fea = 8` drew exactly the same stroke.
+        node.Feather = Attr(map, "fea", -1f);
+
+        if (HasKey(map, "fea_edge"))
+            node.EdgeFeather = Attr(map, "fea_edge", -1f);
+
         var paint = PropValue(map, "f");
         if (paint?.Type == SS.UiValueType.Map && paint.Value.Map != null)
         {
@@ -1771,10 +1781,7 @@ internal static class SceneParser
                 node.FillGradient = name;
                 node.FillGradientAt = Attr(paint.Value.Map, "at", 0f);
                 node.FillOpacity = Attr(map, "fo", 1f);
-                node.Feather = Attr(map, "fea", -1f);
 
-        if (HasKey(map, "fea_edge"))
-            node.EdgeFeather = Attr(map, "fea_edge", -1f);
             }
 
             return;
@@ -1794,10 +1801,7 @@ internal static class SceneParser
                 node.HasFill = true;
                 node.FillColourExpr = expression;
                 node.FillOpacity = Attr(map, "fo", 1f);
-                node.Feather = Attr(map, "fea", -1f);
 
-                if (HasKey(map, "fea_edge"))
-                    node.EdgeFeather = Attr(map, "fea_edge", -1f);
 
                 return;
             }
@@ -1821,10 +1825,7 @@ internal static class SceneParser
             if (HasKey(map, "fat"))
                 node.FillGradientAt = Attr(map, "fat", 0f);
             node.FillOpacity = Attr(map, "fo", 1f);
-            node.Feather = Attr(map, "fea", -1f);
 
-        if (HasKey(map, "fea_edge"))
-            node.EdgeFeather = Attr(map, "fea_edge", -1f);
             return;
         }
 
@@ -1836,10 +1837,7 @@ internal static class SceneParser
             node.FillData = bound.Name;
             node.FillIndex = bound.Index;
             node.FillOpacity = Attr(map, "fo", 1f);
-            node.Feather = Attr(map, "fea", -1f);
 
-        if (HasKey(map, "fea_edge"))
-            node.EdgeFeather = Attr(map, "fea_edge", -1f);
             return;
         }
 
@@ -1853,17 +1851,13 @@ internal static class SceneParser
             node.HasFill = true;
             node.Fill = UnparsedColour;
             node.FillOpacity = Attr(map, "fo", 1f);
-            node.Feather = Attr(map, "fea", -1f);
             return;
         }
 
         node.HasFill = true;
         node.Fill = colour;
         node.FillOpacity = Attr(map, "fo", 1f);
-        node.Feather = Attr(map, "fea", -1f);
 
-        if (HasKey(map, "fea_edge"))
-            node.EdgeFeather = Attr(map, "fea_edge", -1f);
     }
 
     /// <summary>Reads gradient (GL/GR) and clip-path (CP) declarations.</summary>
