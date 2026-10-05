@@ -43,9 +43,10 @@ local src = table.concat({
     "R x=0 y=0 w=200 h=200 f=#0B1622 fea=0",
     'T x=6 y=4 w=188 h=6 text="0.11.87 verification -- all five rows must pass"',
 
-    -- 1  DEEP NESTING
+    -- 1  DEEP NESTING. 60 x (0.5, 0.2) = (30, 12), plus this group's own (6, 12), so the
+    --    box lands at (36, 24) and occupies y 24..40 -- clear of row 2's label at y 44.
     'T x=6 y=13 w=188 h=6 f=#8FA6B8 text="1  60 nested groups (0.11.85 refuses the scene)"',
-    "G t=[6,20] {",
+    "G t=[6,12] {",
     table.concat(deep, "\n"),
     "}",
 
