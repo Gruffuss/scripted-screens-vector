@@ -2,6 +2,19 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.83
+
+- Fixed: **a scene with no text captured blank.** The dither shader carries a blur's coverage in
+  TEXCOORD1 and multiplies alpha by it, but a canvas uploads only the vertex channels named in
+  `additionalShaderChannels` -- everything else reaches the shader as zero. ScriptedScreens'
+  screen capture builds its own Canvas (`[ScriptedScreens-McpCaptureCanvas]`), which starts at
+  `None`, so every vector pixel on it drew at alpha 0. Text scenes escaped it because
+  TextMeshPro turns TexCoord1 on for whatever canvas its labels sit on; the mod had been
+  free-riding on that since the dither material shipped. `VectorGraphic` now asks for the
+  channel itself, once per canvas, from `UpdateGeometry`. Examples 01-07 went from 7,327 bytes
+  (the bare panel) to 28-135 KB; 08-18 are unchanged. Live consoles are unaffected -- their
+  canvas already had the channel, which is why they always drew correctly.
+
 ## 0.11.82
 
 Three faults found by the console builder session from reading the source, all confirmed here and

@@ -2102,6 +2102,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// </remarks>
     protected override void UpdateGeometry()
     {
+        EnsureCoverageChannel();
+
         // A capture clone has a mesh it did not make and no scene of its own. Present what it
         // was given and touch nothing: clearing here would wipe the geometry of the live
         // console it was cloned from, which is a far worse bug than a blank capture.
@@ -2130,6 +2132,43 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         canvasRenderer.SetMesh(_mesh);
         _needsRebuild = true;
+    }
+
+    /// <summary>
+    /// Asks this graphic's canvas for the second UV, which the dither shader needs to draw anything.
+    /// </summary>
+    /// <remarks>
+    /// **A canvas uploads only the vertex channels named in <c>additionalShaderChannels</c>**, and
+    /// everything else arrives at the shader as zero. `UIDither` carries a blur's coverage in
+    /// TEXCOORD1 and multiplies alpha by it, so on a canvas that does not ask for TexCoord1 every
+    /// vector pixel comes out at alpha 0 -- invisible, not merely mis-shaded, and with nothing in
+    /// the log.
+    ///
+    /// Until this existed the mod was free-riding on TextMeshPro, which turns the same channel on
+    /// for whatever canvas its labels sit on. That is why a scene with any label captured
+    /// correctly and a scene with none came back blank: ScriptedScreens' capture builds a fresh
+    /// Canvas of its own (`[ScriptedScreens-McpCaptureCanvas]`), and only a TMP label in the
+    /// cloned tree was ever enabling the channel on it. Seven of the shipped examples have no
+    /// text, and all seven captured blank.
+    ///
+    /// Cheap enough to do on every rebuild: one flag test, and the assignment only ever runs once
+    /// per canvas. Live consoles are unaffected -- their canvas already has the channel, which is
+    /// why they always drew correctly.
+    /// </remarks>
+    private void EnsureCoverageChannel()
+    {
+        var target = canvas;
+        if (target == null || (target.additionalShaderChannels & AdditionalCanvasShaderChannels.TexCoord1) != 0)
+            return;
+
+        var before = target.additionalShaderChannels;
+        target.additionalShaderChannels = before | AdditionalCanvasShaderChannels.TexCoord1;
+
+        if (VectorConfig.Diagnostics)
+        {
+            ScriptedScreensVectorPlugin.Log?.LogInfo(
+                $"vector: canvas \"{target.name}\" was missing TexCoord1 (had {before}); every vector pixel on it would have drawn at alpha 0.");
+        }
     }
 
     private void EnsureMesh()
