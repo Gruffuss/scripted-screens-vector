@@ -348,10 +348,36 @@ internal static class Tessellator
             SceneToLocal = Matrix4x4.identity,
         });
 
-        var emitted = 0;
-        foreach (var node in scene.Root)
-            EmitNode(vh, scene, node, context, stack, ref emitted);
+        // The walk is an explicit work stack, not recursion: a scene nested 5,000 deep parses
+        // now that the parser's recursions are gone, and a .NET stack overflow cannot be caught
+        // -- it ends the game process. Reused per thread for the same reason the frame stack is.
+        var work = _work ??= new Stack<WorkItem>(64);
+        work.Clear();
+        _emitted = 0;
 
+        for (var i = scene.Root.Count - 1; i >= 0; i--)
+            work.Push(new WorkItem { Kind = Work.Visit, Node = scene.Root[i] });
+
+        try
+        {
+            while (work.Count > 0)
+                Step(vh, scene, context, stack, work, work.Pop(), unwinding: false);
+        }
+        finally
+        {
+            // Recursion restored its state in `finally` blocks on the way out; a work stack has
+            // to unwind itself. Since 0.11.76 a throw is caught and the graphic keeps rebuilding,
+            // so a repeat left pushed or a scroll offset left set would poison every later
+            // rebuild on this worker. Cleanup items only -- nothing here touches the mesh.
+            while (work.Count > 0)
+            {
+                var pending = work.Pop();
+                if (pending.Kind != Work.Visit)
+                    Step(vh, scene, context, stack, work, pending, unwinding: true);
+            }
+        }
+
+        var emitted = PeekEmitted();
 
         // A scene that drew nothing, or one that parsed with problems, gets a visible
         // marker. Silence is the worst possible failure mode here: a bad clip id, a rejected
@@ -444,35 +470,38 @@ internal static class Tessellator
             or VecOp.Spline or VecOp.Path or VecOp.Image;
     }
 
-    /// <summary>Emits a leaf once per piece of a concave clip.</summary>
-    private static void EmitPieces(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
+    /// <summary>
+    /// One step of emitting a leaf once per piece of a concave clip: pushes this piece's frame,
+    /// the node, the matching pop and the step for the next piece.
+    /// </summary>
+    /// <remarks>
+    /// The parent frame is left in place underneath rather than popped and pushed back, so there
+    /// is no Frame to carry in the work item; the piece frame on top is what the subtree peeks,
+    /// and it carries <c>Pieces = null</c> so re-visiting the same node draws it instead of
+    /// splitting it again.
+    /// </remarks>
+    private static void PieceStep(MeshBuilder vh, VecNode node, Stack<Frame> stack, Stack<WorkItem> work, int k, bool saved)
     {
-        var frame = stack.Pop();
-        var saved = _repeatPiece;
-
-        for (var k = 0; k < frame.Pieces!.Count; k++)
+        var parent = stack.Peek();
+        if (k >= parent.Pieces!.Count)
         {
-            var piece = frame;
-            piece.Pieces = null;
-            piece.Clip = frame.Pieces[k];
-            stack.Push(piece);
-
-            // `_repeatPiece` is [ThreadStatic], so leaving it set does not just spoil this
-            // scene: it suppresses text, hit regions and scroll containers in EVERY later
-            // Emit on this worker thread, including other consoles' graphics.
-            _repeatPiece = saved || k > 0;
-            try
-            {
-                EmitNode(vh, scene, node, context, stack, ref emitted);
-            }
-            finally
-            {
-                stack.Pop();
-            }
+            _repeatPiece = saved;
+            return;
         }
 
-        _repeatPiece = saved;
-        stack.Push(frame);
+        var piece = parent;
+        piece.Pieces = null;
+        piece.Clip = parent.Pieces[k];
+        stack.Push(piece);
+
+        // `_repeatPiece` is [ThreadStatic], so leaving it set does not just spoil this
+        // scene: it suppresses text, hit regions and scroll containers in EVERY later
+        // Emit on this worker thread, including other consoles' graphics.
+        _repeatPiece = saved || k > 0;
+
+        work.Push(new WorkItem { Kind = Work.Piece, Node = node, A = k + 1, Flag = saved });
+        work.Push(new WorkItem { Kind = Work.PopFrame });
+        work.Push(new WorkItem { Kind = Work.Visit, Node = node });
     }
 
     /// <summary>
@@ -639,39 +668,185 @@ internal static class Tessellator
     internal static IReadOnlyList<NodeSpan> NodeSpans =>
         (IReadOnlyList<NodeSpan>?)_spans ?? System.Array.Empty<NodeSpan>();
 
-    private static void EmitNode(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
+    /// <summary>What one entry on the walk's work stack is: a node to visit, or a cleanup.</summary>
+    /// <remarks>
+    /// Recursion's before/after pairs become a cleanup item pushed BEFORE the children, so it is
+    /// popped after them. <see cref="Work.Repeat"/> and <see cref="Work.Piece"/> are
+    /// continuations rather than cleanups: each runs one instance and re-pushes itself, so the
+    /// budget check between instances still sees what the previous one drew.
+    /// </remarks>
+    private enum Work : byte
+    {
+        Visit,
+        EndSpan,
+        EndScope,
+        EndGroup,
+        Repeat,
+        EndRepeat,
+        EndScroll,
+        Piece,
+        PopFrame,
+    }
+
+    /// <summary>
+    /// One work-stack entry. A single flat struct rather than a class per kind, so the walk
+    /// allocates nothing per node: this is dispatched per surface per rebuild at up to 60 Hz.
+    /// The fields are shared between kinds; which ones mean what is in <see cref="Step"/>.
+    /// </summary>
+    private struct WorkItem
+    {
+        internal Work Kind;
+        internal VecNode? Node;
+
+        /// <summary>EndScope: the <c>context.ScopeId</c> to put back.</summary>
+        internal string? Scope;
+
+        /// <summary>EndGroup: the group's mask, or null when it has none.</summary>
+        internal MaskInfo? Mask;
+
+        /// <summary>EndGroup: the <c>vh.Tint</c> to put back.</summary>
+        internal VertexTint? Tint;
+
+        /// <summary>EndSpan: first vertex. EndGroup: first vertex. Repeat/Piece: the index.</summary>
+        internal int A;
+
+        /// <summary>EndGroup: labels already found. Repeat: how many instances.</summary>
+        internal int B;
+
+        /// <summary>EndGroup: the group's first shape.</summary>
+        internal int C;
+
+        /// <summary>EndScroll: the <c>ScrollY</c> and <c>ViewportH</c> to put back.</summary>
+        internal float F0;
+
+        internal float F1;
+
+        /// <summary>EndScroll: the timestamp the scroll's own cost is charged from.</summary>
+        internal long Mark;
+
+        /// <summary>EndGroup: whether the group fades. Repeat/Piece: the saved `_repeatPiece`.</summary>
+        internal bool Flag;
+    }
+
+    [ThreadStatic] private static Stack<WorkItem>? _work;
+
+    /// <summary>
+    /// Shapes emitted by the walk in progress. A [ThreadStatic] counter rather than a `ref int`
+    /// threaded through, because the walk is a loop now and has nowhere to thread it from.
+    /// </summary>
+    [ThreadStatic] private static int _emitted;
+
+    /// <summary>Reads the walk's shape count. A method, not a field read, because the analyser
+    /// cannot see that <see cref="EmitNodeCore"/> writes it and calls the result dead code.</summary>
+    private static int PeekEmitted() => _emitted;
+
+    /// <summary>
+    /// Runs one work-stack entry. <paramref name="unwinding"/> is set while the driver loop is
+    /// draining after a throw: state is restored, but nothing that writes to the mesh runs and
+    /// no further work is pushed.
+    /// </summary>
+    private static void Step(MeshBuilder vh, VecScene scene, EvalContext context, Stack<Frame> stack, Stack<WorkItem> work, in WorkItem item, bool unwinding)
+    {
+        switch (item.Kind)
+        {
+            case Work.Visit:
+                Visit(vh, scene, item.Node!, context, stack, work);
+                return;
+
+            case Work.EndSpan:
+                if (!unwinding)
+                    (_spans ??= new List<NodeSpan>(64)).Add(new NodeSpan(item.Node!, item.A, vh.currentVertCount - item.A));
+
+                return;
+
+            case Work.EndScope:
+                if (_idPath is { Count: > 0 })
+                    _idPath.RemoveAt(_idPath.Count - 1);
+
+                context.ScopeId = item.Scope;
+                return;
+
+            case Work.EndGroup:
+                EndGroup(vh, item, unwinding);
+                stack.Pop();
+                return;
+
+            case Work.Repeat:
+            {
+                if (unwinding || item.A >= item.B)
+                    return;
+
+                if (Starved(vh, 1, "a repeat"))
+                    return;
+
+                // `n` stays the authored count inside expressions: reducing it would
+                // change where instances sit, not just how many there are, so a thinned
+                // field would redistribute itself rather than simply thin out.
+                context.PushRepeat(item.A, item.Node!.RepeatCount);
+                work.Push(new WorkItem { Kind = Work.Repeat, Node = item.Node, A = item.A + 1, B = item.B });
+                work.Push(new WorkItem { Kind = Work.EndRepeat });
+                PushChildren(work, item.Node);
+                return;
+            }
+
+            // The pop must happen even if a child throws. Since 0.11.76 a throw is caught and
+            // reported rather than killing the surface, so the graphic goes on rebuilding -- and
+            // a repeat left on the stack would make `i` and `n` wrong on every later rebuild,
+            // silently. The catch made this reachable.
+            case Work.EndRepeat:
+                context.PopRepeat();
+                return;
+
+            case Work.EndScroll:
+                context.ScrollY = item.F0;
+                context.ViewportH = item.F1;
+                stack.Pop();
+                if (!unwinding)
+                    Charge(VecOp.Scroll, item.Mark);
+
+                return;
+
+            case Work.Piece:
+                if (unwinding)
+                    _repeatPiece = item.Flag;
+                else
+                    PieceStep(vh, item.Node!, stack, work, item.A, item.Flag);
+
+                return;
+
+            case Work.PopFrame:
+                stack.Pop();
+                return;
+        }
+    }
+
+    private static void PushChildren(Stack<WorkItem> work, VecNode node)
+    {
+        // Reversed, so they come back off in source order: draw order is sibling order.
+        var children = node.Children;
+        for (var i = children.Count - 1; i >= 0; i--)
+            work.Push(new WorkItem { Kind = Work.Visit, Node = children[i] });
+    }
+
+    private static void Visit(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, Stack<WorkItem> work)
     {
         if (TagNodes)
-        {
-            var first = vh.currentVertCount;
-            EmitNodeTracked(vh, scene, node, context, stack, ref emitted);
-            (_spans ??= new List<NodeSpan>(64)).Add(new NodeSpan(node, first, vh.currentVertCount - first));
-            return;
-        }
+            work.Push(new WorkItem { Kind = Work.EndSpan, Node = node, A = vh.currentVertCount });
 
-        EmitNodeTracked(vh, scene, node, context, stack, ref emitted);
-    }
-
-    private static void EmitNodeTracked(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
-    {
         // A node with an id is the scope `hover` and `down` answer to, for itself and whatever
         // it holds, until a nearer id takes over.
-        if (string.IsNullOrEmpty(node.Id))
+        if (!string.IsNullOrEmpty(node.Id))
         {
-            EmitNodeCore(vh, scene, node, context, stack, ref emitted);
-            return;
+            var path = _idPath ??= new List<string>(8);
+            work.Push(new WorkItem { Kind = Work.EndScope, Scope = context.ScopeId });
+            context.ScopeId = node.Id;
+            path.Add(node.Id!);
         }
 
-        var path = _idPath ??= new List<string>(8);
-        var saved = context.ScopeId;
-        context.ScopeId = node.Id;
-        path.Add(node.Id!);
-        EmitNodeCore(vh, scene, node, context, stack, ref emitted);
-        path.RemoveAt(path.Count - 1);
-        context.ScopeId = saved;
+        EmitNodeCore(vh, scene, node, context, stack, work);
     }
 
-    private static void EmitNodeCore(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
+    private static void EmitNodeCore(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, Stack<WorkItem> work)
     {
         // Before any early-out: a group hidden by a `t`-driven `v` or `o` must still count,
         // since time is what will show it again. What it hides is never reached, and that is
@@ -695,7 +870,7 @@ internal static class Tessellator
 
         if (stack.Peek().Pieces != null && IsLeaf(node.Op))
         {
-            EmitPieces(vh, scene, node, context, stack, ref emitted);
+            PieceStep(vh, node, stack, work, 0, _repeatPiece);
             return;
         }
 
@@ -817,46 +992,31 @@ internal static class Tessellator
                 if (fades)
                     vh.ForceCutBefore(firstShape);
 
-                EmitGroupChildren(vh, scene, node, context, stack, ref emitted, vh.Tint == savedTint ? null : vh.Tint!.Mask);
-
-                if (fades && vh.ShapeCount > firstShape)
+                work.Push(new WorkItem
                 {
-                    vh.ForceCutBefore(vh.ShapeCount);
-                    AlphaFound!.Add(new AlphaGroup(firstShape, vh.ShapeCount, node.Opacity));
-                }
+                    Kind = Work.EndGroup,
+                    Node = node,
+                    Mask = vh.Tint == savedTint ? null : vh.Tint!.Mask,
+                    Tint = savedTint,
+                    A = vh.currentVertCount,
+                    B = TextFound?.Count ?? 0,
+                    C = firstShape,
+                    Flag = fades,
+                });
 
-                vh.Tint = savedTint;
-                stack.Pop();
+                PushChildren(work, node);
                 break;
             }
 
             case VecOp.Repeat:
             {
-                var instances = LodCount(node, scene, stack.Peek().Scale);
-
-                for (var i = 0; i < instances; i++)
+                work.Push(new WorkItem
                 {
-                    if (Starved(vh, 1, "a repeat"))
-                        break;
-
-                    // `n` stays the authored count inside expressions: reducing it would
-                    // change where instances sit, not just how many there are, so a thinned
-                    // field would redistribute itself rather than simply thin out.
-                    // The pop must happen even if a child throws. Since 0.11.76 a throw is
-                    // caught and reported rather than killing the surface, so the graphic goes
-                    // on rebuilding -- and a repeat left on the stack would make `i` and `n`
-                    // wrong on every later rebuild, silently. The catch made this reachable.
-                    context.PushRepeat(i, node.RepeatCount);
-                    try
-                    {
-                        foreach (var child in node.Children)
-                            EmitNode(vh, scene, child, context, stack, ref emitted);
-                    }
-                    finally
-                    {
-                        context.PopRepeat();
-                    }
-                }
+                    Kind = Work.Repeat,
+                    Node = node,
+                    A = 0,
+                    B = LodCount(node, scene, stack.Peek().Scale),
+                });
 
                 break;
             }
@@ -869,7 +1029,7 @@ internal static class Tessellator
                 if (outline.Count >= 3)
                 {
                     FillAndStroke(vh, scene, node, context, frame, outline, closed: true);
-                    emitted++;
+                    _emitted++;
                 }
 
                 // A shape is finished, so the geometry may be cut here if it has to be split
@@ -888,7 +1048,7 @@ internal static class Tessellator
                 if (outline.Count >= 3)
                 {
                     FillAndStroke(vh, scene, node, context, frame, outline, closed: true);
-                    emitted++;
+                    _emitted++;
                 }
 
                 vh.MarkShape();
@@ -900,7 +1060,7 @@ internal static class Tessellator
             {
                 var mark = Stopwatch.GetTimestamp();
                 EmitBand(vh, scene, node, context, stack.Peek());
-                emitted++;
+                _emitted++;
                 vh.MarkShape();
                 Charge(VecOp.Band, mark);
                 break;
@@ -912,7 +1072,7 @@ internal static class Tessellator
             {
                 var mark = Stopwatch.GetTimestamp();
                 EmitPath(vh, scene, node, context, stack.Peek());
-                emitted++;
+                _emitted++;
                 vh.MarkShape();
                 Charge(node.Op, mark);
                 break;
@@ -920,9 +1080,9 @@ internal static class Tessellator
 
             case VecOp.Scroll:
             {
-                var mark = Stopwatch.GetTimestamp();
-                EmitScroll(vh, scene, node, context, stack, ref emitted);
-                Charge(VecOp.Scroll, mark);
+                // Charged by the EndScroll item, so the container's cost still covers its
+                // children as it did when this was a recursive call.
+                EmitScroll(vh, scene, node, context, stack, work, Stopwatch.GetTimestamp());
                 break;
             }
 
@@ -930,7 +1090,7 @@ internal static class Tessellator
             {
                 var mark = Stopwatch.GetTimestamp();
                 EmitImage(vh, scene, node, context, stack.Peek());
-                emitted++;
+                _emitted++;
                 Charge(VecOp.Image, mark);
                 break;
             }
@@ -938,7 +1098,7 @@ internal static class Tessellator
             case VecOp.Text:
             {
                 CollectText(vh, scene, node, context, stack.Peek(), vh.ShapeCount);
-                emitted++;
+                _emitted++;
                 break;
             }
 
@@ -946,7 +1106,7 @@ internal static class Tessellator
             {
                 var mark = Stopwatch.GetTimestamp();
                 EmitPathData(vh, scene, node, context, stack.Peek());
-                emitted++;
+                _emitted++;
                 vh.MarkShape();
                 Charge(VecOp.Path, mark);
                 break;
@@ -1056,22 +1216,30 @@ internal static class Tessellator
         return new VertexTint(vh.Tint, ops, amounts, mask);
     }
 
-    /// <summary>Emits a group's children, then multiplies its mask into what they drew.</summary>
+    /// <summary>
+    /// Closes a group once its children are drawn: multiplies its mask into what they drew,
+    /// records its fade range, and puts the tint and the frame back.
+    /// </summary>
     /// <remarks>
     /// The mask is applied after the children rather than per vertex as they are added, because
     /// a `units = "bbox"` mask spans the group's content and that is only known once it exists.
     /// Labels read the same <see cref="MaskInfo"/> later, by which time its bounds are set.
+    ///
+    /// While unwinding a throw only the tint goes back -- the mesh is half-built, and the
+    /// recursion this replaced did not run any of the rest on that path either.
     /// </remarks>
-    private static void EmitGroupChildren(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted, MaskInfo? mask)
+    private static void EndGroup(MeshBuilder vh, in WorkItem item, bool unwinding)
     {
-        var from = vh.currentVertCount;
-        var labelsFrom = TextFound?.Count ?? 0;
-
-        foreach (var child in node.Children)
-            EmitNode(vh, scene, child, context, stack, ref emitted);
-
-        if (mask != null)
+        if (unwinding)
         {
+            vh.Tint = item.Tint;
+            return;
+        }
+
+        if (item.Mask != null)
+        {
+            var from = item.A;
+            var labelsFrom = item.B;
             List<Rect>? labels = null;
             if (TextFound != null && TextFound.Count > labelsFrom)
             {
@@ -1080,7 +1248,7 @@ internal static class Tessellator
                     labels.Add(TextFound[i].Rect);
             }
 
-            vh.MaskRange(from, mask, NeedsRefinement(new Paint(Color.white, mask.Gradient, 1f)), ScreenScale, labels);
+            vh.MaskRange(from, item.Mask, NeedsRefinement(new Paint(Color.white, item.Mask.Gradient, 1f)), ScreenScale, labels);
 
             // A mask that refines removes everything from `from` onward and rebuilds it with a
             // different vertex count, so any span already recorded inside that range points at
@@ -1090,6 +1258,14 @@ internal static class Tessellator
             if (TagNodes && _spans != null)
                 _spans.RemoveAll(span => span.First >= from);
         }
+
+        if (item.Flag && vh.ShapeCount > item.C)
+        {
+            vh.ForceCutBefore(vh.ShapeCount);
+            AlphaFound!.Add(new AlphaGroup(item.C, vh.ShapeCount, item.Node!.Opacity));
+        }
+
+        vh.Tint = item.Tint;
     }
 
     /// <summary>
@@ -3251,7 +3427,7 @@ internal static class Tessellator
     /// inner one would need its own wheel target inside the outer one's, and the pointer
     /// cannot be in both.
     /// </remarks>
-    private static void EmitScroll(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, ref int emitted)
+    private static void EmitScroll(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Stack<Frame> stack, Stack<WorkItem> work, long mark)
     {
         var parent = stack.Peek();
 
@@ -3271,11 +3447,15 @@ internal static class Tessellator
         // The box is written in the parent's coordinates, like any other shape's rect.
         var box = RectOutline(node, context, parent.Scale * ScreenScale, new List<Vector2>(64));
         if (box.Count < 3)
+        {
+            Charge(VecOp.Scroll, mark);
             return;
+        }
 
         if (Mathf.Abs(Triangulator.SignedArea(box)) < 0.000001f)
         {
             scene.Problem($"SC \"{node.Id}\" is degenerate; its children are not drawn");
+            Charge(VecOp.Scroll, mark);
             return;
         }
 
@@ -3329,17 +3509,8 @@ internal static class Tessellator
         context.ScrollY = offset;
         context.ViewportH = height;
 
-        try
-        {
-            foreach (var child in node.Children)
-                EmitNode(vh, scene, child, context, stack, ref emitted);
-        }
-        finally
-        {
-            context.ScrollY = savedScroll;
-            context.ViewportH = savedViewport;
-            stack.Pop();
-        }
+        work.Push(new WorkItem { Kind = Work.EndScroll, F0 = savedScroll, F1 = savedViewport, Mark = mark });
+        PushChildren(work, node);
     }
 
     /// <summary>

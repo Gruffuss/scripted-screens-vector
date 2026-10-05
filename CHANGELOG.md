@@ -2,6 +2,39 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.85
+
+**The depth limits are gone, because the recursion is gone.** 0.11.77-0.11.84 capped expression
+nesting, array nesting and node nesting after four separate stack overflows ended the game's
+process. Those caps refused input that was only DEEP, not wrong -- and a scene generated from a
+document nests further than a person would type -- so they were a mitigation presented as a fix.
+Every one of the seven recursions behind them now uses an explicit stack instead.
+
+- The expression parser: an operand/operator stack for precedence and a group stack for `(`,
+  `$name[]` and call arguments. Precedence and associativity are untouched -- `2^3^2` is 512,
+  `-2^2` is -4, `2^-3` works, `---1` is -1 -- and 200,000 levels now parse.
+- Expression evaluation, which is where the overflow merely moved to once parsing was fixed. A
+  deep tree is walked post-order with an explicit stack and memoised; `Arg()` reads the memo
+  rather than descending. Shallow trees, which is every real scene, keep the original path and
+  pay one predictable branch.
+- Node parsing: children are queued rather than descended into.
+- The tessellator's whole traversal -- groups, repeats, scroll containers, concave-clip pieces,
+  id scopes and node spans -- is one work stack with explicit cleanup items, so a `finally` that
+  used to ride on the call stack is now an item on the work stack and still runs when something
+  throws.
+- `Reindex`, `HoldsText` and `CollectForcedScrolls` likewise.
+
+A scene nested 100,000 deep now parses and draws. Verified by a deterministic fingerprint of 17
+scenes at three `t` values -- vertex, triangle, shape, hit-region and label counts, mesh bounds
+and problems -- which is byte-identical between the recursive and iterative versions, with
+scenes written for masks, concave clips, scroll, repeats, symbols and `ztext` ordering.
+
+- Kept, and correctly: the **symbol cycle** guard. A symbol that reaches itself has no finite
+  expansion at all, so that input is wrong rather than deep.
+- Fixed on the way: `MeshBuilder.Clear()` does not reset `Tint`, so a throw inside a group with
+  `filters` or a `mask` left the tint set, and every later rebuild of that console drew through
+  it. The traversal now restores it while unwinding.
+
 ## 0.11.84
 
 Both reported by the ScriptedScreens console builder session from reading v0.11.80, both
