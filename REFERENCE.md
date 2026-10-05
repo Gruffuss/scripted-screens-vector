@@ -302,6 +302,7 @@ A scene reports its own faults rather than drawing nothing and leaving you to gu
 | a single shape too large for one mesh | reported, naming what was dropped |
 | unknown op | reported; the node is skipped |
 | unknown attribute name | reported, with the op and the node id |
+| unknown attribute on the SCENE header | reported from 0.11.96, as `SCENE "id": unknown attribute "x"`. The header has its own vocabulary — `scene`, `root`, `defs`, `ztext`, the debug switches — and the keys the HOST reads off the same props are exempt: `z_index`, `zIndex`, `visible`, `parent_id` and the visor anchors. A `USE` and a `SYM` are exempt entirely, since symbol parameters may be named anything — including `sh`, which is why a `USE`'s `sh` is never checked as a shadow |
 | malformed expression | reported; that attribute falls back to its default |
 | a character in `d` where a number belongs, or a number after `Z` | reported, quoting the text around it; parsing stops there and the rest of `d` is discarded |
 | an unknown command letter in `d` | **not** reported, on the surface or in `vector_stats`; the log warns, and the rest of `d` is discarded |
@@ -309,7 +310,7 @@ A scene reports its own faults rather than drawing nothing and leaving you to gu
 | a colour that will not parse, in `f` or `s` | reported, and the shape draws **magenta** |
 | missing gradient id | reported, and the shape draws **magenta** — the same signal as an unresolved data colour, so a dangling `@id` looks like a fault rather than a design decision |
 | missing clip id | reported; the reference is ignored, so the content draws unclipped |
-| `src` text that will not parse | reported, and nothing in the scene draws. A syntax fault names the line number and prints that line; a scene that parses but holds no nodes says only `the scene text has no nodes`, with no line |
+| `src` text that will not parse | reported. A syntax fault names the line number and prints that line; a scene that parses but holds no nodes says only `the scene text has no nodes`, with no line. **Nothing draws — unless the same element also carries a `root`, in which case the root scene draws and the `src:` problem is reported over it** |
 | a symbol that uses itself, directly or round a cycle | reported, naming the chain (`a -> b -> a`); that branch is not expanded |
 
 **There is no nesting limit.** Groups, arrays, expressions, function calls and `$name[]` indices
@@ -874,6 +875,16 @@ automatically. An `L` is open — it strokes as an open run and is clickable alo
 but **an `f` on an `L` still fills it**, closing the gap from its last point to its first the
 way SVG's fill rule does.
 
+**Too few points draws nothing, and says nothing.** An `L` needs two, a `Y` needs three. Below
+that the node is simply absent from the picture with no problem reported — as is an `L` whose `p`
+holds an ODD number of values, since the last one has no pair. Check the count in the script
+rather than looking for a message.
+
+**Consecutive duplicate points are dropped** before the stroke is built, so a repeated point costs
+nothing and changes nothing. A last point equal to the FIRST is not the same thing: on an `L` it
+stays, and the shape is still open, so the closing segment is stroked — which is how to draw a
+closed outline that keeps its caps and joins at the start.
+
 ### `YS` — sampled band
 
 | Key | Meaning |
@@ -1026,7 +1037,7 @@ container, where it will be clipped away and look like nothing happened.
 |-----|---------|
 | `x`, `y`, `w`, `h` | the box the text is laid out in |
 | `text` | a literal, `"$name"`, `"$rows[i]"` for one slot of a data array, or a literal holding several `{$name}` placeholders |
-| `fmt` | printf spec for a bound **number**, e.g. `"%.1f"` |
+| `fmt` | printf spec for a bound **number**, e.g. `"%.1f"`. A spec this cannot read **prints itself** rather than the number — `fmt = "%q"` draws `%q` — and is reported from 0.11.97. A .NET composite format such as `"{0:F1}"` works and is not reported. A spec that is well formed but wrong for a number, `"{0:Z}"` or `"{0:D3}"`, draws the `missing` text |
 | `unit` | literal suffix appended after the text |
 | `missing` | what to draw when the name has no value; default `"--"`. An empty string is a value and draws nothing |
 | `size` | font size in scene units, default `12`; scales with the transform |
