@@ -65,12 +65,17 @@ props = { scene = "log", keep = 1, data = { … } }
 Off by default, deliberately. With merging always on there would be no way to clear a value,
 and the missing-name diagnostic would go quiet for any name ever sent once.
 
-**An element's payloads collapse within one chip execution: only the LAST one is delivered.**
+**An element's changes collapse within one chip execution into a single payload.**
 ScriptedScreens delivers pending changes at the end of **every** chip execution, whether or not
-the script calls `ui:commit()`, and successive changes to one element inside that execution reach
-this renderer as a single payload carrying the last of them. `data` is a single property, so a
-later payload's `data` replaces the earlier one whole rather than adding to it -- and `keep = 1`
-cannot help, because the earlier payload never arrives to be merged:
+the script calls `ui:commit()`, and successive `set_props` on one element inside that execution
+arrive as **one** payload. What that payload carries is the rule worth knowing, because the two
+halves differ:
+
+- **Ordinary properties MERGE.** A property set by an earlier call and not mentioned again
+  survives, so `set_props { f = "#f00" }` then `set_props { x = 10 }` delivers both.
+- **`data` does NOT.** It is a single property whose value is a table, so a later `data` replaces
+  the earlier one **whole**. Names sent in the first and absent from the second are gone, and
+  `keep = 1` cannot help -- the earlier table never arrives to be merged:
 
 ```lua
 function tick()
@@ -91,7 +96,11 @@ Measured in game, one variable apart: declared and patched in one execution, the
 reads `LOST`; declared at load and patched in `tick`, it reads `SURVIVED`. Confirmed again at
 0.11.91 by logging every payload the renderer receives -- an element patched twice in one
 execution produced **one** delivery, carrying only the last payload, in 77 deliveries out of 77.
-Two patches in one execution therefore lose the first as surely as a declaration does. This
+Two patches in one execution therefore lose the first's DATA as surely as a declaration does,
+while their other properties survive. Measured separately at 0.11.91: a `set_props` carrying
+`scene` and `data`, followed in the same execution by `set_props { snap = 1 }` naming neither,
+still delivered the scene and the data -- so the single payload is the element's merged state,
+not the last call's own properties. This
 bites exactly the values a `keep = 1` element exists for — the ones set once and never resent —
 and it is silent, because a name that never arrived looks the same as a name never sent.
 `examples/10-text.lua` and `12-click.lua` had this bug until 0.11.82.
