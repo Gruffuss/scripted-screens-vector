@@ -2,6 +2,24 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.84
+
+Both reported by the ScriptedScreens console builder session from reading v0.11.80, both
+confirmed here by running them first.
+
+- Fixed: **two more recursions that ended the game process.** The depth cap counted parentheses,
+  prefix `-` and `^`, but a function call's ARGUMENTS and a `$name[...]` INDEX recurse through
+  the same parser and reached neither. `abs(abs(abs(...)))` and `$a[$a[$a[...]]]` at 20,000 deep
+  both printed "Stack overflow." and exited 127; they now fall back to the attribute's default
+  like any other over-nested expression. `abs(abs(abs(1)))` and `$a[$a[0]]` are untouched.
+- Fixed: **a colour expression with one non-colour branch drew white, silently.** `IsColour`
+  checked only the top level, so `f = "=if(c,#A,5)"` and `f = "=mix(#A,1,t)"` claimed to be
+  colours, failed at evaluation, and fell through to the default paint. Every branch that can be
+  returned is now checked -- both outcomes of an `if`, both ends of a `mix`, recursively -- so
+  these are reported as a scene problem and drawn magenta, like any other colour that will not
+  parse.
+- Workshop description refreshed: it still advertised 0.11.21-0.11.30 and "fifteen examples".
+
 ## 0.11.83
 
 - Fixed: **a scene with no text captured blank.** The dither shader carries a blur's coverage in

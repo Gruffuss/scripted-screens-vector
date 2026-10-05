@@ -107,6 +107,18 @@ internal static class NodeSpanTests
         run.Check("colour expr: if between numbers is not a colour",
             !Expression.Parse("=if(t,1,2)", 0f).IsColour, "claimed to be a colour");
 
+        // EVERY branch has to be a colour, not just the first one found. Checking only the top
+        // level let these claim to be colours, fail at evaluation, and draw WHITE in silence --
+        // the exact failure the magenta-and-report path exists to prevent. The literals here
+        // cannot be parsed headless (native ECall), so these use the shapes that need none:
+        // a call whose colour branch is absent entirely.
+        run.Check("colour expr: if with a non-colour branch is not a colour",
+            !Expression.Parse("=if(1,2,3)", 0f).IsColour, "claimed to be a colour");
+        run.Check("colour expr: mix of two numbers is not a colour",
+            !Expression.Parse("=mix(1,2,0.5)", 0f).IsColour, "claimed to be a colour");
+        run.Check("colour expr: an unknown call is not a colour",
+            !Expression.Parse("=clamp(1,2,3)", 0f).IsColour, "claimed to be a colour");
+
         // Anything with a `#` in it cannot be parsed in THIS suite at all: the literal is
         // turned into a Color at parse time by Unity's parser, which is a native ECall and
         // throws headless. That is the point of the design -- no colour string survives into
@@ -291,6 +303,27 @@ internal static class NodeSpanTests
                 Mathf.Approximately(guarded.Evaluate(new EvalContext()), 42f),
                 $"{guarded.Evaluate(new EvalContext())}");
         }
+
+        // A function call's arguments and a `$name[...]` index recurse as well, and the cap
+        // reached neither until 0.11.84: `abs(abs(abs(...)))` and `$a[$a[$a[...]]]` at 20,000
+        // both ended the process (measured out of process, exit 127).
+        foreach (var (what, text) in new[]
+                 {
+                     ("a nest of function calls",
+                         "=" + string.Concat(System.Linq.Enumerable.Repeat("abs(", 400)) + "1" + new string(')', 400)),
+                     ("a nest of data indices",
+                         "=" + string.Concat(System.Linq.Enumerable.Repeat("$a[", 400)) + "0" + new string(']', 400)),
+                 })
+        {
+            var guarded = Expression.Parse(text, 42f);
+            run.Check($"recursion: {what} falls back to the attribute default",
+                Mathf.Approximately(guarded.Evaluate(new EvalContext()), 42f),
+                $"{guarded.Evaluate(new EvalContext())}");
+        }
+
+        run.Check("recursion: abs(abs(abs(1))) is still 1",
+            Mathf.Approximately(Expression.Parse("=abs(abs(abs(1)))", 0f).Evaluate(new EvalContext()), 1f),
+            $"{Expression.Parse("=abs(abs(abs(1)))", 0f).Evaluate(new EvalContext())}");
 
         // And short runs of both must still evaluate, or the cap is too tight.
         run.Check("recursion: ---1 is still -1",

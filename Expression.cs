@@ -679,13 +679,46 @@ internal sealed class Expression
         return false;
     }
 
-    /// <summary>True when this expression yields a colour, checked once at parse time.</summary>
-    internal bool IsColour =>
-        _kind == Kind.Colour
-        || (_kind == Kind.Call
-            && (string.Equals(_name, "mix", StringComparison.Ordinal)
-                || (string.Equals(_name, "if", StringComparison.Ordinal)
-                    && _args.Length == 3 && _args[1] != null && _args[1]!.IsColour)));
+    /// <summary>
+    /// True when this expression yields a colour, whatever it evaluates to. Checked once at
+    /// parse time, so a colour attribute that is not a colour is reported rather than drawn.
+    /// </summary>
+    /// <remarks>
+    /// EVERY branch that can be returned has to be a colour, not just the first one found.
+    /// Checking only the top level let `if(c,#A,5)` and `mix(#A,1,t)` claim to be colours; at
+    /// evaluation the non-colour branch simply failed, the paint fell through to its default,
+    /// and the shape drew WHITE with nothing reported -- the silent-failure shape this whole
+    /// mechanism exists to avoid.
+    /// </remarks>
+    internal bool IsColour
+    {
+        get
+        {
+            if (_kind == Kind.Colour)
+                return true;
+
+            if (_kind != Kind.Call)
+                return false;
+
+            // `if(cond, a, b)`: the condition is a number, both OUTCOMES must be colours.
+            if (string.Equals(_name, "if", StringComparison.Ordinal))
+            {
+                return _args.Length == 3
+                       && _args[1] is { IsColour: true }
+                       && _args[2] is { IsColour: true };
+            }
+
+            // `mix(a, b, t)`: both ENDS must be colours; `t` is a number.
+            if (string.Equals(_name, "mix", StringComparison.Ordinal))
+            {
+                return _args.Length == 3
+                       && _args[0] is { IsColour: true }
+                       && _args[1] is { IsColour: true };
+            }
+
+            return false;
+        }
+    }
 
     internal float Evaluate(EvalContext context)
     {
@@ -1014,7 +1047,19 @@ internal sealed class Expression
             if (!Match('['))
                 return new Expression { _kind = Kind.Scalar, _name = name };
 
-            var index = ParseExpression();
+            // An index recurses like any other nesting: `$a[$a[$a[...]]]` overflowed the
+            // stack and ended the process before this counted.
+            Enter();
+            Expression index;
+            try
+            {
+                index = ParseExpression();
+            }
+            finally
+            {
+                Leave();
+            }
+
             SkipSpace();
             if (!Match(']'))
                 throw new FormatException("expected ']'");
@@ -1063,7 +1108,16 @@ internal sealed class Expression
             {
                 while (true)
                 {
-                    args.Add(ParseExpression());
+                    // So do a call's arguments: `abs(abs(abs(...)))` was the same overflow.
+                    Enter();
+                    try
+                    {
+                        args.Add(ParseExpression());
+                    }
+                    finally
+                    {
+                        Leave();
+                    }
                     SkipSpace();
                     if (Match(',')) continue;
                     if (Match(')')) break;
