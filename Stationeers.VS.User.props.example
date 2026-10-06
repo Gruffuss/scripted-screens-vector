@@ -1,13 +1,34 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 	<PropertyGroup>
-		<!-- Parent folder of the Stationeers game install. Edit for your machine. -->
-		<SteamLibraryDirectory>C:\Program Files (x86)\Steam\steamapps\common</SteamLibraryDirectory>
+		<!-- Parent folder of the Stationeers game install. Set it for your machine and
+		     everything below is skipped. -->
+		<!-- <SteamLibraryDirectory>C:\Program Files (x86)\Steam\steamapps\common</SteamLibraryDirectory> -->
 
-		<!-- Where the built mod is copied. The default below assumes Documents is
-		     NOT redirected. If OneDrive (or anything else) has moved your
-		     Documents folder, set this to the one that actually holds
-		     modconfig.xml, or the build will report success and copy nothing:
-		     every Copy task here is ContinueOnError. -->
+		<!-- Unset: find the library that actually holds the game, so a fresh clone or
+		     worktree builds without editing this file. Each line only fires while the
+		     property is still empty, so the first hit wins. Steam's registered install
+		     path first, then the layouts people actually use; a secondary-drive library
+		     is not in the registry, which is why the plain candidates follow.
+		     If none of them match, the build stops with the "UnityEngine.CoreModule.dll
+		     not found" error, which names this property. -->
+		<_SteamRegistryRoot>$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam', 'InstallPath', null, RegistryView.Registry32, RegistryView.Default))</_SteamRegistryRoot>
+		<_StationeersProbe>Stationeers\rocketstation_Data\Managed\UnityEngine.CoreModule.dll</_StationeersProbe>
+
+		<SteamLibraryDirectory Condition="'$(SteamLibraryDirectory)' == '' and '$(_SteamRegistryRoot)' != '' and Exists('$(_SteamRegistryRoot)\steamapps\common\$(_StationeersProbe)')">$(_SteamRegistryRoot)\steamapps\common</SteamLibraryDirectory>
+		<SteamLibraryDirectory Condition="'$(SteamLibraryDirectory)' == '' and Exists('C:\Program Files (x86)\Steam\steamapps\common\$(_StationeersProbe)')">C:\Program Files (x86)\Steam\steamapps\common</SteamLibraryDirectory>
+		<SteamLibraryDirectory Condition="'$(SteamLibraryDirectory)' == '' and Exists('C:\Program Files\Steam\steamapps\common\$(_StationeersProbe)')">C:\Program Files\Steam\steamapps\common</SteamLibraryDirectory>
+		<SteamLibraryDirectory Condition="'$(SteamLibraryDirectory)' == '' and Exists('C:\SteamLibrary\steamapps\common\$(_StationeersProbe)')">C:\SteamLibrary\steamapps\common</SteamLibraryDirectory>
+		<SteamLibraryDirectory Condition="'$(SteamLibraryDirectory)' == '' and Exists('D:\SteamLibrary\steamapps\common\$(_StationeersProbe)')">D:\SteamLibrary\steamapps\common</SteamLibraryDirectory>
+		<SteamLibraryDirectory Condition="'$(SteamLibraryDirectory)' == '' and Exists('D:\Steam\steamapps\common\$(_StationeersProbe)')">D:\Steam\steamapps\common</SteamLibraryDirectory>
+		<SteamLibraryDirectory Condition="'$(SteamLibraryDirectory)' == '' and Exists('E:\SteamLibrary\steamapps\common\$(_StationeersProbe)')">E:\SteamLibrary\steamapps\common</SteamLibraryDirectory>
+		<SteamLibraryDirectory Condition="'$(SteamLibraryDirectory)' == '' and Exists('E:\Steam\steamapps\common\$(_StationeersProbe)')">E:\Steam\steamapps\common</SteamLibraryDirectory>
+		<SteamLibraryDirectory Condition="'$(SteamLibraryDirectory)' == ''">C:\Program Files (x86)\Steam\steamapps\common</SteamLibraryDirectory>
+
+		<!-- Where the built mod is copied. The default in Stationeers.VS.props assumes
+		     Documents is NOT redirected. If OneDrive (or anything else) has moved your
+		     Documents folder, set this to the one that actually holds modconfig.xml, or
+		     the build will report success and copy nothing: every Copy task there is
+		     ContinueOnError. -->
 		<!-- <StationeersDocumentsDirectory>C:\Users\$(username)\OneDrive\Documents\My Games\Stationeers</StationeersDocumentsDirectory> -->
 	</PropertyGroup>
 </Project>

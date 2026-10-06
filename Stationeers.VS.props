@@ -1,5 +1,10 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-	<Import Project="$(MSBuildThisFileDirectory)Stationeers.VS.User.props" />
+	<!-- The real props file holds machine paths and is gitignored, so a fresh CLONE or WORKTREE
+	     does not have one and an unconditional import stopped the build with a raw MSBuild error.
+	     Fall back to the tracked example, which discovers the Steam library itself. Tests\*.csproj
+	     does the same, and must: it imports this pair directly, not this file. -->
+	<Import Project="$(MSBuildThisFileDirectory)Stationeers.VS.User.props" Condition="Exists('$(MSBuildThisFileDirectory)Stationeers.VS.User.props')" />
+	<Import Project="$(MSBuildThisFileDirectory)Stationeers.VS.User.props.example" Condition="!Exists('$(MSBuildThisFileDirectory)Stationeers.VS.User.props')" />
 	<PropertyGroup>
 		<TargetFramework Condition="'$(TargetFramework)' == ''">netstandard2.1</TargetFramework>
 		<TargetFrameworkVersion Condition="'$(TargetFrameworkVersion)' == '' and '$(TargetFramework)' == 'net4.8'">v4.8</TargetFrameworkVersion>
