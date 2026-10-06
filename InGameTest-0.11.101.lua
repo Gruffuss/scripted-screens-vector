@@ -35,7 +35,6 @@
 
 local ui = ss.ui.surface("main")
 ss.ui.activate("main")
-ss.ui.allow_mcp_automation(true)   -- lets the element-level control run; a real click is unaffected
 ui:clear()
 
 local size = ui:size()
