@@ -1,10 +1,22 @@
-﻿## `so` inherited INTO an SC still becomes its scroll offset
+﻿## The work budget's figure is measured on .NET 8, not on Mono
+
+0.11.102 replaced the silent 20,000 cap on a repeat's `n` with a per-rebuild work budget of about
+a million units (one per repeat iteration, one per `YS`/`LS` sample, 25 per label). Every figure
+behind that number was measured in the offline probe, which is .NET 8; the game runs Mono and is
+slower, so the budget may be looser there than intended. What to measure in game: a repeat of a
+hidden leaf at `n = 1000000` and a nest at `n = 900` x `900`, both of which should draw, against
+the frame time -- and whether 38,000 labels is a figure TextMeshPro can actually realise, which
+nothing outside the player can answer.
+
+## `so` inherited INTO an SC still becomes its scroll offset
 
 0.11.92 stopped an `SC` passing its own `so` down as stroke opacity. The reverse is still open: a
 stroke `so` inherited from an enclosing group lands on an `SC` that declares `sov`, and is taken
 as the scroll offset. Reaching it needs the parse to tell a node's OWN keys from its inherited
-ones, which it does not currently carry -- the inherited defaults are merged into the map before
-the op-specific parse reads it. Reported from a source reading; not yet reproduced in game.
+ones. **That part is already available**: `ParseNode` takes an `own` map -- the author's own
+props, before the inherited defaults were merged in -- which the `SC` scroll offset and, since
+0.11.102, the enum-word check both read. What remains is to read `so` from it in the `SC` arm.
+Reported from a source reading; not yet reproduced in game.
 
 ## CLOSED: a scene with no `T` captured blank (2026-10-05, fixed in 0.11.83)
 

@@ -263,12 +263,19 @@ flag, so `lod` means `lod=1`. Double quotes wrap a string containing spaces.
 a space, comma or bracket; the type is decided afterwards, from the characters inside them. A
 value is a **number** when everything inside the quotes parses as one, and a string otherwise —
 so `text="700"` is the number `700`, exactly as `text=700` is, and so are `"1e3"`, `"+0"` and
-`" 0 "`, while `"700 kPa"`, `"1,000"` and `"0x1F"` are strings. **A key that wants a string reads
-a number as absent, and nothing is reported**: `text="700"` draws no label at all, `missing="0"`
-leaves the default `--`, and `id=1` leaves the node unidentified, so a later `nodes` patch for it
-reports an unknown id. To draw a bare integer, write it as a computed placeholder,
-`text="{=700}"` — that prints through `0.##`, so it suits whole numbers, not `"007"` or
-`"1.50"`.
+`" 0 "`, while `"700 kPa"`, `"1,000"` and `"0x1F"` are strings.
+
+**A key that wants free text reads a number as text, since 0.11.102**: `text=700`, `missing=0`,
+`unit=5`, `id=1`, `font`, `fmt`, `ref`, `clip` and the header's own `scene` all take one. The
+number is printed through `0.#####`, so `text="007"` draws `7` and `text="1.50"` draws `1.5`;
+where the digits matter as digits, send the value as data or write `text="7 mm"` with something
+non-numeric in it. Before 0.11.102 every one of those read as absent in silence — no label, the
+default `--`, an unidentified node whose `nodes` patch then reported an unknown id.
+
+**A key that wants a colour, an enum word or an `op` still reads a number as absent**, and still
+says nothing: `f=5` draws no fill and `op=1` drops the node. That is deliberate — those readers
+run on a `USE` too, whose attributes are symbol parameters of any name, so a `USE ref=dot s=6`
+would otherwise report `"6" is not a colour`.
 
 **An unquoted value ends at a space, at `=` `,` `[` `]` `{` `}`, or at a `#` that is not its
 first character** — which is why a `#colour` needs no quotes. Double quotes wrap a value that has
@@ -364,31 +371,42 @@ symbol parameters are arbitrary by definition.
 
 Every word-valued attribute is matched **case-insensitively** — `cover`, `Cover` and `COVER` are
 one value — and every one of them falls back rather than refusing, so a misspelt word draws
-something instead of nothing. Of the words below **only `rep` and `srep` report the typo**; the
-rest fall back in silence, and the unknown-attribute check above does not catch them, because the
-key itself is real.
+something instead of nothing. **Since 0.11.102 every one of them also reports the typo**, which
+the unknown-attribute check above cannot do, because the key itself is real. The word that spells
+the default is accepted as well as the ones that change something, so `fit=stretch`, `cap=butt`,
+`align=left`, `weight=normal` and `fr=nonzero` are words, not faults.
+
+Only what you wrote **on the node** is judged. A `G` hands `fit`, `align`, `valign`, `weight`,
+`cap`, `join` and `fr` down to its subtree, so a `T` under `G fit=cover` is not holding an `IMG`
+word by mistake; a group's own word is checked against the union of the three `fit` vocabularies,
+since the group cannot know which op will read it. `USE` and `SYM` are exempt entirely.
 
 | Key | Where | Accepted | Anything else |
 |-----|-------|----------|---------------|
-| `fit` | structure element | `stretch`, `contain`, `cover` | `stretch` |
-| `fit` | `T` | `none`, `ellipsis`, `shrink` | `none` |
-| `fit` | `IMG` | `fill`, `contain`, `cover`, `none`, `scale-down` | `fill` |
-| `cap` | stroke | `butt`, `round`, `square` | `butt` |
-| `join` | stroke | `miter`, `round`, `bevel` | `miter` |
-| `fr` | `P` | `evenodd` | `nonzero` |
-| `align` | `T` | `left`, `center`, `centre`, `right`, `justified`, `justify` | `left` |
-| `valign` | `T` | `top`, `middle`, `center`, `centre`, `bottom` | `top` |
-| `weight` | `T`, and inside `fl` | `bold`, or a number `600` or more | not bold |
-| `tile` | `IMG` | `contain`, `cover` | the natural size, as `tile = {0, 0}` |
+| `fit` | structure element | `stretch`, `contain`, `cover` | `stretch`, reported |
+| `fit` | `T` | `none`, `ellipsis`, `shrink` | `none`, reported |
+| `fit` | `IMG` | `fill`, `contain`, `cover`, `none`, `scale-down` | `fill`, reported |
+| `cap` | stroke | `butt`, `round`, `square` | `butt`, reported |
+| `join` | stroke | `miter`, `round`, `bevel` | `miter`, reported |
+| `fr` | `P` | `evenodd`, `nonzero` | `nonzero`, reported |
+| `align` | `T` | `left`, `center`, `centre`, `right`, `justified`, `justify` | `left`, reported |
+| `valign` | `T` | `top`, `middle`, `center`, `centre`, `bottom` | `top`, reported |
+| `weight` | `T`, and inside `fl` | `bold`, `normal`, or any number | not bold, reported |
+| `tile` | `IMG` | `contain`, `cover` | the natural size, as `tile = {0, 0}`, reported |
 | `rep` | `IMG` | `repeat`, `once`, `no-repeat`, `round`, `space`, `stretch` | `repeat`, reported |
 | `srep` | `IMG` | `stretch`, `repeat`, `round`, `space`, `once`, `no-repeat` | `repeat`, reported |
-| `smp` | `IMG` | `point` | smooth |
-| `units` | `GL`, `GR`, `GC` | `bbox` | scene coordinates |
-| `spread` | `GL`, `GR` | `pad`, `repeat`, `reflect`, `none` | `pad` |
+| `smp` | `IMG` | `point`, `smooth` | smooth, reported |
+| `units` | `GL`, `GR`, `GC` | `bbox` | scene coordinates, reported |
+| `spread` | `GL`, `GR` | `pad`, `repeat`, `reflect`, `none` | `pad`, reported |
+| sixth field of `sh` | any shape | `inset` | a drop shadow, reported |
+
+`ease`, on the data element, is the one word that reaches the **log alone**: that path has no
+scene to file a problem against.
 
 **Three unrelated attributes are called `fit`** — the viewbox fit, shrink-to-fit text and CSS
-`object-fit` — so a word from one is a typo in another, silently: `fit = "cover"` on a `T` is
-`none`. `center` is horizontal in `align` and vertical in `valign`, and both spell it either way.
+`object-fit` — so a word from one is a typo in another: `fit = "cover"` on a `T` is `none`, and
+reported as such since 0.11.102 unless the `T` inherited the word from a group. `center` is
+horizontal in `align` and vertical in `valign`, and both spell it either way.
 
 `rep` and `srep` read **one word list between them**, so each accepts the other's word and then
 draws it as `repeat`: `rep = "stretch"` tiles, and `srep = "once"` tiles an edge rather than
@@ -480,20 +498,22 @@ the direct lever.
 
 ### What a data value may be
 
-A `data` entry may be a **number**, a **string**, or an **array** of numbers or of strings. Those
-are the only shapes stored. A **boolean**, a nested table, and any other Lua kind are **dropped**,
-so the name is never stored at all: `$name` reads `0` and is listed as unresolved, and a colour
-bound to it draws magenta.
+A `data` entry may be a **number**, a **string**, a **boolean** (stored as `1` or `0` since
+0.11.102) or an **array** of any of those. Those are the only shapes stored. A nested table, and
+any other Lua kind, is **dropped**, so the name is never stored at all: `$name` reads `0` and is
+listed as unresolved, and a colour bound to it draws magenta.
 
-**`true` is not `1`.** A Lua boolean arrives as its own kind, and every numeric prop and attribute
-here reads numbers only, so `keep = true`, `snap = true`, `click = true` and `v = false` all read
-as absent and leave their default. Nothing is reported, because the key itself is spelled
-correctly. Write `1` and `0`.
+**`true` is `1` and `false` is `0`, since 0.11.102.** A Lua boolean arrives as its own kind, and
+every numeric prop and attribute used to read numbers only, so `keep = true`, `snap = true`,
+`click = true` and `v = false` all read as absent and left their default — which inverted the
+meaning on any key whose default is `1`. They read as written now, in a `data` payload, in an
+array inside one, and on every attribute. `1` and `0` remain the clearer spelling.
 
-**The trap `keep = 1` hides.** A dropped value carries nothing, and `keep` only replaces the names
-a payload actually brings — so `data = { alarm = 1 }` followed by `data = { alarm = false }` with
-`keep = 1` leaves `alarm` at **1**, silently. The payload that was meant to clear the alarm did
-nothing at all.
+**The trap `keep = 1` hid is closed with it.** `keep` only replaces the names a payload actually
+brings, and a boolean used to bring nothing — so `data = { alarm = 1 }` followed by
+`data = { alarm = false }` with `keep = 1` left `alarm` at **1**, silently: the payload meant to
+clear the alarm did nothing at all. It now clears it. (`keep = true` was the same fault from the
+other side: it read as `0` and wiped the values it was asked to hold.)
 
 Within an array, a slot that is not a string reads as `""`, and a hole reads `0` while the other
 slots keep their values — `{1, nil, 3}` arrives as `[1, 0, 3]`. An array **of arrays**, or of
@@ -717,12 +737,11 @@ show one:
 Which to reach for: `o` to fade something out that should stay live, `v` to switch between
 states that must not overlap.
 
-**`v` is a number, and a Lua boolean is not one.** `v = false` leaves the node **visible**: a
-boolean is neither a number nor an expression string, so the attribute falls back to its default
-of `1`, and nothing is reported. `v = true` shows for the same reason, not because it is true.
-Write `v = 0` and `v = 1`. `click`, `press`, `close`, `wrap`, `keep` and `snap` read the same way,
-and a boolean leaves each of them at its default. A shadow's `inset` is the exception that proves
-it: that one does accept a Lua `true`.
+**`v` takes a Lua boolean since 0.11.102**: `v = false` hides the node and `v = true` shows it,
+as `0` and `1` do. Before that a boolean read as absent and the attribute fell back to its
+default of `1`, so `v = false` left the node **visible** with nothing reported, and `v = true`
+showed for the wrong reason. `click`, `press`, `close`, `wrap`, `keep`, `snap`, `lod` and the
+rest read the same way now; a shadow's `inset`, which always did, is no longer the exception.
 
 **The test is a threshold**: `v` hides at or below `0.5` and shows above it, so a fraction is not
 an error. Data numbers glide, so a `v` driven by a payload swaps halfway through the glide rather
@@ -786,11 +805,22 @@ enclosing index is `i1`, the next out `i2`.
 
 `n` is structural — changing it means resending the structure element.
 
-**`n` is rounded to a whole number and capped at 20,000, and neither is reported.** A larger
-figure draws 20,000 instances; `n` in the expressions then reads 20,000 as well, so `i` runs
-`0..19999` and the arithmetic stays consistent with what was drawn rather than with what was
-written. The same cap holds for a `YS`'s and an `LS`'s sample count. It sits far past anything
-worth drawing, so it only ever catches a count that came from data rather than from a decision.
+**`n` is rounded to a whole number and is otherwise the count you wrote**, since 0.11.102. It
+used to be capped at 20,000 in silence, which refused counts that draw perfectly well — 50,000
+rects fit one surface's vertex budget whole — and because `n` reads back into the expressions the
+cap did not thin a field, it REDISTRIBUTED it: `x = "=i*W/n"` with an authored 50,000 spread
+20,000 instances over the full width. A count past 2^31 was worse still: it overflowed and drew
+nothing at all.
+
+What limits a repeat now is the **rebuild's own work budget**, and it says so. A rebuild may do
+about a million units of work — one per repeat iteration, one per `YS`/`LS` sample, 25 per label
+— and past that the rest is dropped and `vector_stats` reports `TOO LARGE at this size`, the
+same note the vertex budget uses. That covers what a per-node cap could not: a **nest** of
+repeats, whose cost is the product of its counts (20,000 × 20,000 was legal under the old cap and
+took 35 seconds of one rebuild), and a repeat whose child emits no vertices at all. A field of
+shapes usually meets the vertex budget first, at 60,000 rects or 30,000 circles, reported the
+same way. The figure suits anything a console is likely to draw; if a scene meets it, the console
+tells you.
 
 A `YS` or `LS` counts as a repeat of its `n` samples for `x`, `y` and `y2`, so `i1` there is the
 repeat around it. A `YS` reads `f`, `fo`, `fo2` and `fea_edge` **once**, as sample 0, so an `i` in
@@ -1048,8 +1078,8 @@ container, where it will be clipped away and look like nothing happened.
 | `fo` | opacity `0..1`, as on any shape; multiplied by the enclosing group's `o` |
 | `align` | `left` (default), `center`, `right`, `justified` (extra width goes between words, as CSS) |
 | `valign` | `top` (default), `middle`, `bottom` |
-| `font` | a registered TMP face, named exactly: `Family` for the regular weight and `Family Style` otherwise — `Barlow`, `Barlow Bold` — e.g. from the companion fonts mod. Case and spaces count. Omitted draws in the game's own font. **A name that is not registered is not reported**, and labels are pooled, so the label keeps whatever face it last drew: changing `Barlow Bold` to a typo and re-pushing leaves it in Barlow Bold, and the mistake only shows after a reload |
-| `weight` | `bold`, or a number ≥ 600; omitted draws the face's regular weight |
+| `font` | a registered TMP face, named exactly: `Family` for the regular weight and `Family Style` otherwise — `Barlow`, `Barlow Bold` — e.g. from the companion fonts mod. Case and spaces count. Omitted draws in the game's own font. **A name nothing is registered under draws the game's own font and is reported**, in the log and under `vector_stats`' TEXT section, since 0.11.102. Before that it did nothing at all: labels are pooled by index, so the label kept whatever face the node using that slot last rebuild had asked for, and the typo showed up as a different label's font once placement order changed. A font registers when its bundle loads, so a scene pushed before its font arrives warns and falls back — and the warning is not cleared when the font turns up |
+| `weight` | `bold`, a number ≥ 600, or `normal`; omitted draws the face's regular weight |
 | `cspace` | character spacing, default `0` |
 | `kern` | `0` turns pair kerning off for this label; on otherwise. Only a font that carries kerning pairs is affected, so a label on the game's own font is unchanged either way |
 | `wrap` | `1` lets the text run to more than one line inside its box |
@@ -1061,11 +1091,10 @@ container, where it will be clipped away and look like nothing happened.
 | `fit` | `none` (default), `ellipsis`, `shrink` |
 | `min_size` | floor for `shrink`, in scene units, default `6` |
 
-**In a `src` scene, `text`, `unit` and `missing` must not hold a bare numeral**, quoted or not: a
-value that parses as a number arrives as a number, these keys read only a string, and a number
-reads as absent. `text="700"` draws no label at all and `missing="0"` leaves the default `--`;
-neither is reported. See *Scene as text* for the rule. `fmt` is never affected, since every spec
-carries a `%`.
+**In a `src` scene a bare numeral in `text`, `unit` or `missing` arrives as a NUMBER**, quoted
+or not, and since 0.11.102 these keys read one: `text="700"` draws `700` and `missing="0"` draws
+`0`. It is printed through `0.#####`, so `"007"` draws `7` and `"1.50"` draws `1.5`. See *Scene
+as text* for the typing rule. `fmt` is never affected, since every spec carries a `%`.
 
 ```lua
 { op = "T", x = 8, y = 8, w = 120, h = 20, text = "$pressure",
@@ -1099,7 +1128,14 @@ costs the same as one.
 
 **A placeholder may be an expression:** `{=expr}` or `{=expr:%.1f}`, over `t`, data, `since()`
 or anything else an expression reads. A clock or a counter then needs no payload at all:
-`text = "uptime {=floor(t):%d} s"`.
+`text = "uptime {=floor(t):%d} s"`. The format starts at the **first** colon and runs to the end,
+exactly as `{$name:spec}` reads it — no expression can contain a colon — so a spec may hold one:
+`{=floor(t/60):%d:00}`. Before 0.11.102 that split at the last colon instead and drew `00`.
+
+**`%%` in a `fmt` or a spec is one literal percent sign**, as printf writes it: `"%.0f%%"` draws
+`8%` and `"100%%"` draws `100%`. Before 0.11.102 a spec that was nothing but `%%` drew both
+signs, and a `%%` in front of the conversion threw the whole spec away — `"100%% of %.0f"` drew
+itself, and was reported as holding no conversion when it holds one.
 
 **`f` may be a gradient.** `f = "@name"` samples the gradient at every glyph's corners, so a
 linear ramp is exact within each glyph and continuous across the label; radial and conic are
@@ -1574,9 +1610,10 @@ them — an unwrapped shadow with a second one wrapped after it — reads as the
 carrying the second as its sixth field, and the second is discarded.
 
 **The four numbers are read literally.** Unlike `rx`'s per-corner list, or a gradient's geometry
-and stops, a string in one of those four slots is not evaluated: `"=2*t"` counts as `0`, and that
-is not reported either. A shadow's offset, blur and spread therefore do not animate; its opacity
-does, through the group's `o`.
+and stops, a string in one of those four slots is not evaluated: `"=2*t"` counts as `0`. A
+shadow's offset, blur and spread therefore do not animate; its opacity does, through the group's
+`o`. Writing one anyway **is reported** since 0.11.102, naming the field, so the lost offset is
+visible rather than something to wonder about. A Lua boolean in one of the four reads `1` or `0`.
 
 **Shadows fade with their shape**: the group's `o` and the shape's `fo` multiply into the shadow,
 as CSS `opacity` takes a box-shadow with its box. Before 0.11.21 they did not, and a faded card
@@ -1636,9 +1673,9 @@ builds its own mesh above ours — so a `T` shadow is the SDF shader's underlay 
   Opaque shapes are unaffected; a translucent one will read darker than the mockup. Geometry
   only — the text underlay draws strictly behind its glyphs and has no such problem.
 - **`inset`** — a sixth field `"inset"`, a number above `0.5`, or a Lua `true`. **In a `src`
-  scene `true` is the string `"true"`, which is not `"inset"`**, so it silently draws an ordinary
-  outset shadow; write `"inset"` there. Draws inside the shape, over the fill and
-  under the stroke: the shape moved by `dx`/`dy` and shrunk by `spread`, inverted, blurred and
+  scene `true` is the string `"true"`, which is not `"inset"`**, so it draws an ordinary outset
+  shadow — reported since 0.11.102, where it used to be silent; write `"inset"` there. Draws
+  inside the shape, over the fill and under the stroke: the shape moved by `dx`/`dy` and shrunk by `spread`, inverted, blurred and
   clipped to the shape, as CSS draws it. Needs a **convex** outline (`R`, `C`, a convex `Y`
   or `P`); a concave one is refused with a problem rather than leaking past its edges. Costs
   roughly three times the vertices of an outset shadow of the same blur, since its rings are cut
@@ -1670,10 +1707,13 @@ and `mix(#FF0000,#FF000000,0.5)` are the same colour.
 
 **Colours are not a general type.** Every other value in an expression is a number — a 32-bit
 RGBA does not survive one — so they exist only where a colour is asked for. `if(hover,1,2)` is a
-number. **A colour read as a number is `0`, and nothing is reported** — `x = "=#5FD9A8"` and
-`x = "=mix(#A,#B,0.5)"` both leave the attribute at `0` in silence. The other direction is
-louder: an expression in a colour attribute that does not give a colour is reported as a scene
-problem and drawn magenta.
+number. **A colour read as a number is `0`, and since 0.11.102 that is reported** —
+`x = "=#5FD9A8"`, `x = "=mix(#A,#B,0.5)"` and even `x = "=#5FD9A8+1"` leave the attribute at `0`
+and say so, wherever a number is wanted: an attribute, a `{=...}` placeholder, an array index or
+a gradient stop's position. The value is unchanged, so nothing moves — what is new is that the
+scene shows the problem border instead of drawing at 0 in silence. The other direction was always
+louder: an expression in a colour attribute that does not give a colour is reported and drawn
+magenta.
 
 A literal becomes a colour when the scene is parsed, never later, because Unity's colour parser
 cannot run on the thread that builds the geometry.
@@ -1928,17 +1968,25 @@ USE ref=led x=40 y=20 r=6 col=#E23D3D
 longer string it splices textually, which is what makes it work in expressions —
 `y = "=%top+i*4"`.
 
-**Substitution has no name boundary.** The splice is a plain text replacement, so a parameter
-whose name begins another parameter's name rewrites it: with `w = 10` and `wide` both in play,
-`x = "=%wide*2"` becomes `"=10ide*2"`. Which of two colliding names lands first is the order the
-parameters arrive in, so it is not a thing to rely on. A `%name` that is the *whole* value is
-matched by exact name first and is safe; only the spliced form collides. The names in play
-include ones you never declared: everything the `USE` carries, so `ref`, `x`, `y`, `o` and
-`clip`, and, where the `SYM` has no `params` map, its own `id` and `c` — so a parameter called
-`idx` or `col` collides with one of those. The collision itself is **not reported**: what reaches
-the problem list is whatever the mangled text then fails as, a bad expression falling back to the
-attribute's own default, or a `text` string that draws exactly as it came out. Keep parameter
-names so that none begins another.
+**A `%name` ends where a name ends**, since 0.11.102: at the first character that is not a
+letter, digit or `_`, and the longest parameter that matches wins. So `%i` and `%idx` are two
+parameters even when both are in play, and `%col` is not read out of `%colour`.
+
+Before that the splice was a plain text replacement and a parameter whose name began another's
+rewrote it — with `i = 3` and `idx = 7`, `"i=%i idx=%idx"` drew `i=3 idx=3dx`, and
+`x = "=%i*10+%idx"` reported a bad expression and fell back to the attribute's default. Which
+name landed first was the order the parameters arrive in, and that order moves: a parameter the
+instance overrides goes to the back of the list, so one `USE` drew correctly and another did
+not. It was never something to work around, because the names in play include ones you never
+declared — everything the `USE` carries, so `ref`, `x`, `y`, `o` and `clip`, and, where the
+`SYM` has no `params` map, its own `id` and `c`.
+
+The names are still all in play, so `%x` and `%id` resolve to them: that part is unchanged, and
+a parameter you want for yourself needs a name of its own. A `%name` nothing declares is now left
+**exactly as written**, where before it spliced any shorter name that matched (`%wpx` gave
+`10px`); in an expression or a number that then reports the real text, and in plain text it
+draws as it stands. `%` is ordinary text otherwise, so a `fmt` spec inside a symbol body is
+untouched.
 
 Substitution happens once, at parse time, not through a scope in the evaluator: symbol
 parameters are structure, not animation, so an instance costs exactly what writing the nodes

@@ -546,7 +546,8 @@ root = {
 **Every attribute on the `USE` is a parameter.** `params` only supplies defaults for the ones
 an instance leaves out. `%name` on its own keeps the parameter's type, so a number stays a
 number; inside a longer string it splices textually, which is what makes `y = "=%top+i*4"`
-work.
+work. A `%name` ends at the first character that is not a letter, digit or `_`, so two
+parameters whose names begin alike do not collide.
 
 Substitution happens once, at parse time. An instance therefore costs exactly what writing the
 nodes out would have cost — this saves *authoring*, not drawing.
