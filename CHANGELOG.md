@@ -2,6 +2,35 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.104
+
+### Fixed
+
+- **A payload carrying no `data` prop replaced the scene's data with nothing.** `ReadData` clears
+  every map and returns early when the prop is absent, and that empty context still reached the
+  graphic and was applied as a full payload. One behaviour, two faults, both measured on a
+  console:
+
+  **Two elements naming one scene lost one of them.** Data is keyed by SCENE NAME, so an element
+  carrying only `nodes` reached the same graphic as the element carrying `data` and wiped it. A
+  page declaring `data = {n = 7.6}` on one element and `nodes = {...}` on another drew `--` for
+  `$n`, and `vector_stats` listed it as unresolved with no problem reported. Both elements
+  deliver now.
+
+  **`since($name)` restarted on every `nodes` patch.** The wipe dropped the arrival stamps, so
+  the next real payload re-stamped every name and the timer began again. A `nodes`-only payload
+  arriving every tick held `since($n)` near zero for ever. It now counts from the last time the
+  name actually arrived, whatever else is patched in between.
+
+  `data = {}` still means "clear everything": that payload HAS the prop. Only the prop's absence
+  is inert.
+
+### Measured
+
+17-scene fingerprint byte-identical, unit suite exit 0, release build 0 warnings and 0 errors.
+`InGameTest-0.11.104.lua` carries both halves: three elements naming one scene, and a
+`nodes`-only payload on every tick with `since($n)` required to climb past 2 and keep climbing.
+
 ## 0.11.103
 
 Two unrelated pieces of work in one release: a published value re-encoded, and three

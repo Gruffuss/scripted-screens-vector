@@ -318,19 +318,35 @@ internal static class VectorElementPatch
                 : element.Props;
         }
 
-        if (graphic != null)
+        // A payload carrying NO `data` prop must not touch evaluator data at all. `ReadData`
+        // clears every map and returns early when the prop is absent, so an empty context used
+        // to arrive here and REPLACE the scene's data wholesale. That one behaviour caused two
+        // separate faults, both measured on a console on 2026-10-06:
+        //   - two elements naming ONE scene: `ApplyData` keys by scene name, so a second element
+        //     carrying only `nodes` reached the same graphic and wiped the first's data. A page
+        //     declaring `data` on one element and `nodes` on another left `$n` UNRESOLVED, with
+        //     nothing reported.
+        //   - `since($name)` restarted after a `nodes` patch: the wipe dropped `ArrivedAt`, so
+        //     the next real payload re-stamped every name. That is why a consumer had moved its
+        //     geometry patches onto a separate element in the first place -- working around this.
+        // `data = {}` still means "clear": that is a payload that HAS the prop. Only its absence
+        // is inert now.
+        if (HasProp(element.Props, "data"))
         {
-            if (graphic.SetData(context))
+            if (graphic != null)
+            {
+                if (graphic.SetData(context))
+                    _payloadBuffer = new EvalContext();
+            }
+            else if (PendingData.TryGetValue(key, out var waiting))
+            {
+                waiting.MergeFrom(context);   // a later patch must not drop an earlier one
+            }
+            else
+            {
+                PendingData[key] = context;
                 _payloadBuffer = new EvalContext();
-        }
-        else if (PendingData.TryGetValue(key, out var waiting))
-        {
-            waiting.MergeFrom(context);   // a later patch must not drop an earlier one
-        }
-        else
-        {
-            PendingData[key] = context;
-            _payloadBuffer = new EvalContext();
+            }
         }
     }
 
