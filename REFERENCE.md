@@ -1118,7 +1118,7 @@ container, where it will be clipped away and look like nothing happened.
 |-----|---------|
 | `x`, `y`, `w`, `h` | the box the text is laid out in |
 | `text` | a literal, `"$name"`, `"$rows[i]"` for one slot of a data array, or a literal holding several `{$name}` placeholders |
-| `fmt` | printf spec for a bound **number**, e.g. `"%.1f"`. A spec this cannot read **prints itself** rather than the number — `fmt = "%q"` draws `%q` — and is reported from 0.11.100. A .NET composite format such as `"{0:F1}"` works and is not reported. A spec that is well formed but wrong for a number, `"{0:Z}"` or `"{0:D3}"`, draws the `missing` text |
+| `fmt` | printf spec for a bound **number**, e.g. `"%.1f"`. A spec holding no conversion **prints itself** rather than the number — `fmt = "%q"` draws `%q` — and is reported when it could be a conversion mistyped: it holds a letter, or a `%` with something after it. One of pure punctuation and digits is literal text you asked for and is silent: `"%%"` draws `%`, `"50%"` draws `50%`, `"]"` draws `]`, `"{{0}}"` draws `{0}`. **Empty is the default format**, as no `fmt` at all is. A .NET composite format works and is not reported: `"{0:F1}"` draws `1.2`, `"{0:D3}"` draws `001`, `"{0,6:0.0}"` draws `   1.3`. A spec no number has a conversion for, `"{0:Z}"`, draws the `missing` text and is reported |
 | `unit` | a literal suffix, added once after everything else the label prints. **Only a label that reads data takes it**: `text = "$name"`, `"$rows[i]"`, or a literal holding `{$…}` or `{=…}` placeholders. A plain literal ignores it, unreported |
 | `missing` | what to draw when the name has no value; default `"--"`. An empty string is a value and draws nothing |
 | `size` | font size in scene units, default `12`; scales with the transform |
@@ -1172,6 +1172,13 @@ Each placeholder resolves as `text = "$name"` would: a string as it is, a number
 format, and `missing` in its place when the name has no value, while the rest of the text still
 shows. A `{` not followed by `$` or `=` is ordinary text, and a label whose printed characters
 did not change makes no new string, so a line of readouts costs the same as one.
+
+**A placeholder's spec may be a .NET composite format**, the braces counted, so `{$v:{0:F1}}`
+draws `1.2` and `{$v:{0} kPa}` draws `1.25 kPa`. Before 0.11.103 the FIRST `}` ended the
+placeholder, so every composite format was cut in half and the label drew its `missing` text with
+a problem beside it, while the same spec as the node's `fmt` printed correctly. A spec whose
+braces do not balance — `{$v:x{{y}` — leaves no closer, so the placeholder stays ordinary text, as
+one never closed does. An empty spec, `{$v:}`, is the default format.
 
 **`unit` only follows text that came from data.** It is added after a bound string, after a bound
 number and its `fmt` — `fmt = "%.1f kPa"` with `unit = " U"` draws `12.3 kPa U` — and after the
@@ -1317,10 +1324,19 @@ unit, and formatting it in Lua costs a `string.format` per label per tick:
 
 The chip then sends the number it already had. `fmt` takes the printf spec you would have
 passed to `string.format`: `f`, `e`, `g`, `d`, `i`, `x`, `X`, with precision. Width and flags
-are ignored — lay text out with `align` and a box instead. A spec holding no conversion at all
-**prints itself** where the number should be, and one a number cannot take draws the `missing`
-text; both are reported from 0.11.100. A .NET composite format works too, so `"{0,8:0.0} kPa"`
-is a legitimate `fmt`.
+are ignored — lay text out with `align` and a box instead. A .NET composite format works too, so
+`"{0,8:0.0} kPa"` is a legitimate `fmt`, and a whole-number one prints rather than failing:
+`"{0:D3}"` draws `001`.
+
+**What is reported, and what is not.** A spec no number has a conversion for — `"{0:Z}"` — draws
+the `missing` text, and is always reported. A spec holding no conversion at all **prints itself**
+where the number should be, and that is reported only when it could be a conversion you mistyped:
+it holds a letter, or a `%` with something after it. So `"%q"`, `"nonsense"` and `"N2"` are
+reported, while `"%%"` (one percent sign), `"50%"`, `"]"` and `"{{0}}"` print themselves in
+silence — nothing in them can be a conversion, so they are the literal text you wrote. An
+**empty** `fmt` is the default format, not an empty one: it draws the number through `0.##`.
+Before 0.11.103 those four literals were reported, which put the problem border on consoles
+drawing exactly as written, and an empty `fmt` printed nothing at all, so the label vanished.
 
 A name may hold a string or a number. The string wins, so a payload that deliberately sends
 `"OFFLINE"` for a numeric readout shows that word rather than a formatted zero.

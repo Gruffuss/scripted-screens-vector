@@ -124,6 +124,10 @@ internal static class Program
         PrintfTests.KeepsSurroundingText(run);
         PrintfTests.UnreadableSpecsAreLeftAlone(run);
         PrintfTests.RepeatedCallsAgree(run);
+        FormatReportTests.ReportsOnlyWhatANumberCannotGoThrough(run);
+        FormatReportTests.ACompositeFormatSurvivesAPlaceholder(run);
+        FormatReportTests.BraceEscapesInASpec(run);
+        FormatReportTests.AnEmptySpecIsTheDefaultFormat(run);
 
         Console.WriteLine();
         TextShadowTests.OffsetScale(run);

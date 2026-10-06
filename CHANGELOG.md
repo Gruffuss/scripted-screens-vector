@@ -4,6 +4,10 @@ ScriptedScreens Vector, newest first.
 
 ## 0.11.103
 
+Two unrelated pieces of work in one release: a published value re-encoded, and three
+faults in the text-format path. Every fix was watched failing first; the regression tests
+are `Tests/NodeSpanTests.cs` and `Tests/FormatReportTests.cs`.
+
 ### Changed
 
 - **`ver` is re-encoded as `major*1000000 + minor*1000 + patch`, so this release reads `11103`
@@ -33,6 +37,60 @@ ScriptedScreens Vector, newest first.
   and from major 17 up two adjacent patch numbers read equal (17.0.0 and 17.0.1 both read
   `17000000`). Seven exact digits is the whole budget; widening one field narrows another. Those
   limits are asserted in `Tests/NodeSpanTests.cs` so they stay measured facts.
+
+### Fixed
+
+- **A `fmt` that renders correctly was reported, and the magenta problem border went with it.** An
+  empty spec, `%%`, `50%` and `]` each drew exactly what they drew before 0.11.100 and each
+  carried "holds no conversion", so a consumer's correctly rendered widgets came back with the
+  border. 0.11.100 asked whether the output came back EQUAL TO THE SPEC, which is true of every
+  spec that prints itself — and printing itself is what a label of literal text does.
+
+  **The rule now: report only when a NUMBER CANNOT GO THROUGH THE SPEC.** Either `string.Format`
+  refuses it for the float AND for the rounded long (`{0:Z}`, which draws the `missing` text), or
+  two samples far apart print the same characters — the number never reached the output — AND the
+  spec holds a letter or a `%` with something after it, which are the only two shapes a conversion
+  can take (printf's `%f`, `%d`, `%x`, .NET's `F2`, `D3`, `X`). A spec that drops the number but
+  cannot hold a conversion at all is literal text written on purpose, and says nothing. Both
+  checks are the same function, so a placeholder's spec and a node's `fmt` answer alike.
+
+  Measured with `v = 1.25`, each spec as a `fmt` and as a placeholder's spec. Now silent: the
+  empty spec (`1.25`), `%%` (`%`), `50%`, `]`, `{{0}}` (`{0}`). Still reported: `%q`, `nonsense`,
+  `N2`, `%-`, `{0:Z}`. Newly reported: `x{{y`, which draws `x{y` and drops the number. Unchanged
+  and silent: `%.1f`, `%x`, `%.0f%%`, `100%% of %.0f`, `{0:F1}`, `{0:D3}`, `{0} kPa`, `{0,6:0.0}`.
+
+  **Where the rule gives up**, rather than pretending otherwise: it cannot separate a mistyped
+  conversion from literal text that happens to hold a letter. `x{{y` is reported and `{{0}}` is
+  not, and both drop the number. Only the letter tells them apart.
+
+- **An empty `fmt` left the label INVISIBLE.** `fmt = ""` ran the value through an empty composite
+  format, which consumed the number and printed no characters at all, so the label vanished from
+  the console — and the only thing said about it was that the spec held no conversion. An empty
+  spec is the DEFAULT format now, as an absent one is: `fmt = ""` and `{$v:}` both draw `1.25`.
+
+- **A .NET composite format inside a placeholder was cut in half.** `text = "<{$v:{0:F1}}>"` drew
+  `<--}>` while the same `{0:F1}` as the node's `fmt` drew `1.2`: one value, one format, two
+  answers. The placeholder ended at the FIRST `}`, which is inside the spec for every composite
+  format, so the formatter was handed `{0:F1` and no number can take that. The braces are counted
+  now. Measured: `{0:F1}` `<--}>` -> `<1.2>`, `{0:D3}` `<--}>` -> `<001>`, `{0} kPa` `<-- kPa}>`
+  -> `<1.25 kPa>`, `{0,6:0.0}` `<--}>` -> `<   1.3>`, `{{0}}` `<{0}}>` -> `<{0}>`. A spec whose
+  braces do not balance (`{$v:x{{y}`) has no closer, so the placeholder stays ordinary text,
+  which is what one never closed already did. **This one was found while measuring the report
+  above; nobody had hit it.**
+
+### Docs
+
+- **The `fmt` row said `{0:D3}` draws the `missing` text.** It draws `001` — on a whole binding
+  already at 0.11.100, through a placeholder since 0.11.101. Corrected, and the reporting rule
+  above is written out in the row and in the `T` prose, with the brace counting in the placeholder
+  section.
+- **0.11.101's entry described half of its own fix.** Completed in place.
+
+### Measured
+
+Both `fmt` tables re-run whole, nineteen specs down both routes, plus the inherited `fmt` in a
+placeholder. The 17-scene fingerprint is byte-identical at all three `t` values; unit suite 444,
+up from 398, every new row watched failing first.
 
 ## 0.11.102
 
@@ -216,6 +274,15 @@ failing on 0.11.101 first; the regression tests are `Tests/SweepTests.cs`, and
   which `string.Format` refuses — it retries as a long now, which is what the whole-binding path
   already did and the only reading that can satisfy `{0:X}` and `{0:F1}` from one argument.
   All three now print identically either way.
+
+  **Completed in 0.11.103: the second cause is wider than hex, and this entry said nothing about
+  the third change the same commit made.** The slow path's retry as a long is what lets ANY
+  whole-number .NET format print through a placeholder. Measured against 0.11.100 with `v = 1.25`:
+  `text = "<{$v}>"` with `fmt = "{0:D3}"` drew `<-->` and draws `<001>` after this commit, and
+  `"{0:D2}"` drew `<-->` and draws `<01>`. On a whole binding `{0:D3}` already drew `001` at
+  0.11.100 — with a false problem report beside it, because 0.11.100's check tested with a float
+  only. The same commit gave that check the same retry, so it mirrors the draw path, which cleared
+  the false report on `%x` and on `{0:D3}`.
 
 ### Docs
 
