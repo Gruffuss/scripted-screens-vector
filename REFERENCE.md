@@ -732,10 +732,23 @@ than when the payload lands; send that name with `snap = 1` to switch in one fra
 
 **`m` is a CSS matrix**, `x' = a·x + c·y + e`, `y' = b·x + d·y + f`, and it is the innermost
 factor, as in `transform: translate() rotate() scale() matrix()`: points go through the
-matrix first, then the scale, rotation and translation. Stroke widths scale by
-`sqrt(|ad − bc|)`. A matrix of any other length is a problem, not a silent identity. **`a` is the
-origin of the whole transform list, `m` included**, as CSS `transform-origin` is: `m = {2, 0, 0,
+matrix first, then the scale, rotation and translation. A matrix of any other length is a
+problem, not a silent identity. **`a` is the origin of the whole transform list, `m` included**,
+as CSS `transform-origin` is: `m = {2, 0, 0,
 2, 0, 0}` with `a = {50, 50}` scales about the point 50,50. `t` is applied outside it.
+
+**A stroke goes through the matrix with its shape, so it has no single width.** `m`, like `s`,
+`r` and `t`, applies to the finished outline: the stroke is built in the shape's own units and
+then transformed along with it. Under a uniform scale `k` every stroke is `k × sw` wide and a
+rotation changes nothing, but under an uneven scale or a skew the width depends on which way the
+line runs. A line running in direction `d`, in the shape's own units, comes out
+`sw · |ad − bc| / |M·d|` wide, where `M·d = (a·dx + c·dy, b·dx + d·dy)` is that direction sent
+through the matrix. So under `m = {3, 0, 0, 1, 0, 0}` a horizontal line keeps its `sw`, a vertical
+one is three times it, and a circle's outline is thin at the top and bottom and thick at the
+sides, exactly as CSS draws it. A dash stretches the same way, its lengths being in the shape's
+own units too. `s = {sx, sy}` follows the same rule, and nested groups use the product of every
+matrix above the shape. `sqrt(|ad − bc|)` is not what sets a stroke width: it is the one number a
+group carries for the things that are sized once, a label's `size` among them.
 
 **Text follows a skew or an uneven scale** from `m` or `s = {sx, sy}`: the letters lean and
 stretch with the group, as CSS transforms them. The sizes that travel with the text — `size`,
@@ -1417,7 +1430,7 @@ non-overlapping contours, approximate where contours partially overlap.
 | Key | Meaning |
 |-----|---------|
 | `s` | stroke paint, same forms as `f` |
-| `sw` | width in scene units, **centred on the path**; scales with the transform |
+| `sw` | width in scene units, **centred on the path**; it goes through the transform with the outline, so an uneven scale or a skew makes the width depend on which way the line runs — see `G` |
 | `so` | stroke opacity |
 | `cap` | `butt` (default), `round`, `square` |
 | `join` | `miter` (default), `round`, `bevel` |
@@ -1776,6 +1789,12 @@ units, so it moves with the camera and with every enclosing group's scale — a 
 feather at roughly 3.9 screen pixels across its shorter side, half at 2.6, none at 1.3 or below.
 The lever is a smaller `fea`; the hard cutoff this replaced popped on and off as the camera moved,
 which was worse.
+
+**An uneven `m` or `s` breaks the pixel figure outright.** The automatic width is one number of
+local units, taken from the group's single scale (`sx`, or `sqrt(|ad − bc|)` for an `m`), and is
+then stretched with the shape like any other geometry, so it is 1.3 pixels only where the two axes
+agree. Under `m = {3, 0, 0, 1, 0, 0}` a line's ramp reaches 0.75 screen pixels past each side of a
+horizontal run and 2.25 past each side of a vertical one.
 
 **The ring around a filled contour is the only thing this touches.** A stroke's feather and a
 `YS`'s `fea_edge` take the width asked for whatever the shape's size, so a thin soft-edged band is
