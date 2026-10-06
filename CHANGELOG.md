@@ -27,6 +27,9 @@ ScriptedScreens Vector, newest first.
   fill and a shadow need three, so a two-point `Y` draws its outline and nothing inside it. My
   first measurement used stroke-only for `L` and fill-only for `Y` and generalised from each.
 - **A two-point `SP close = 1` is filled, shadowed and stroked**, not left as an open curve.
+  **Corrected 2026-10-06: this was wrong.** The spline sampler reopens a two-point ring, so
+  `close = 1` changes nothing there — measured, 7 triangles of zero area either way. Reported
+  by the mod's consumers against the source.
 - **A third copy of "a spec that cannot be read renders `missing`"** — the claim corrected in the
   `fmt` table two commits ago appears again in the `T` prose, and was still wrong there.
 

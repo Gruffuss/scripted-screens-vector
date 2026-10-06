@@ -1309,10 +1309,12 @@ Catmull-Rom, so the curve passes **through** its points rather than being pulled
 last point back to the first, and every tangent is taken around the ring, so the seam is as
 smooth as any other point on the curve. A closed spline takes a fill, a shadow and a `blur` like
 any other closed shape; an open one takes only the fill.
-**Three points is the useful minimum, but two are not refused**: a
-two-point `SP` is filled, shadowed and stroked exactly as `close = 1` asks, and simply encloses
-the sliver between one curve and its return. Since 0.11.74; before it, a rounded blob had to be
-written as a `P`.
+**Three points is the real minimum.** Two are not refused, but `close = 1` has no effect on
+them: the ring is reopened before sampling, because two points enclose no area and the wrapped
+tangents collapse onto the same line. A two-point `SP` therefore draws exactly what the same
+curve drawn open does — measured, both emit 7 triangles of zero area, against 1,951 units of
+filled area for three points and 3,397 for four. With feathering on, the 156 units that appear
+are the feather skirt along the line, not a fill. Write three points, or an `L`.
 
 ---
 
