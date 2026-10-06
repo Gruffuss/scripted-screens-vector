@@ -52,9 +52,16 @@ Constraints that are not negotiable when this is built:
   `load-failed` (the file arrived and is not a font this engine reads) or `loader-unavailable`.
   Those five map straight onto what a report should tell whoever can act, which is the whole
   reason for asking: a player at a console cannot read the log.
-  **The tokens are the INTENDED contract, not a measured one** — the fonts mod has not provoked
-  the failure paths on a console yet and carries that as unverified on its side. Do not quote them
-  as measured behaviour until it says otherwise.
+  **The tokens are the INTENDED contract, not a measured one**, and they will never all be equally
+  verified. The fonts mod's own ranking: `download-failed`, `disabled` and `load-failed` are
+  provokable for real (a 404 on an allowed host, a switched-off file, a non-font file) and will be
+  genuine evidence; `face-limit` needs 48 page faces in one session and `loader-unavailable` needs
+  the loader unready for a full 60 seconds, which does not happen — both are reachable only through
+  a temporary build, which checks the arithmetic and the delivery path, NOT that the situation
+  occurs. Keep those two in the weaker column permanently, even after they are reported done.
+  `loader-unavailable`'s whole history is that shape: an unbounded wait nobody ever saw hang, now a
+  bounded one nobody will see fire — the value is that a caller cannot be left waiting for ever,
+  not that the path is common.
 - **Do NOT build request dedup here.** `RequestFont` already deduplicates by absolute URI: fifteen
   consoles declaring one link produce ONE download, every joined caller's callback still fires, and
   a caller arriving after the link finished gets the stored result immediately. Two edges: the key
