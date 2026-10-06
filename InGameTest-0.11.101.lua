@@ -5,8 +5,10 @@
 --
 -- WHAT SHOULD BE SEEN, and what to do
 --
---   A  CLICK THE PLACEHOLDER TEXT ("click the empty box above me"), which is empty vector
---      space: the dashed box covers it and the green square is well to its left.
+--   A  CLICK THE TEXT INPUT ITSELF. The vector element is drawn ON TOP of it, so the click
+--      only reaches the input if the raycast filter lets it through. A caret appearing in
+--      the input IS the pass. Before 0.11.98 the element swallowed it and the input could
+--      never be focused at all. The green square is well to its left, so it is not in the way.
 --      0.11.98 made the element an ICanvasRaycastFilter, so the click should reach the TEXTINPUT
 --      behind it and focus it (a caret appears). Before 0.11.98 the vector element swallowed it
 --      and the input could never be focused at all.
@@ -45,7 +47,7 @@ if size then W, H = size.w, size.h end
 ui:element({
     id = "behind", type = "textinput",
     rect = { unit = "px", x = 70, y = 40, w = 150, h = 28 },
-    props = { value = "", placeholder = "click the empty box above me" },
+    props = { value = "", placeholder = "CLICK ME - I am behind the vector layer" },
 })
 
 local hit
@@ -56,7 +58,7 @@ ui:element({
     rect = { unit = "px", x = 10, y = 10, w = 220, h = 90 },
     props = { scene = "ray", src = table.concat({
         "SCENE w=110 h=45 fit=stretch size=4 f=#EAF4F8",
-        'T x=2 y=1 w=106 h=5 size=4 text="A  click the EMPTY space, then the square"',
+        'T x=2 y=1 w=106 h=5 size=4 text="A  click the INPUT, then the square"',
         -- a dashed outline so the element's extent is visible; not clickable
         "R x=1 y=7 w=108 h=36 f=none s=#53646F sw=0.5 dash=[2,2]",
         'R id=sq x=4 y=12 w=16 h=16 f="=if(hover,#F5D76E,#5FD9A8)" click=1 fea=0',

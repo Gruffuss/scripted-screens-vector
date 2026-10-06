@@ -1,4 +1,4 @@
-﻿-- 0.11.102: the values the parser used to read as nothing and say nothing about.
+-- 0.11.102: the values the parser used to read as nothing and say nothing about.
 --
 -- Every row is a DRAWN result, so most of the page reads off one capture. Each subject sits
 -- beside the control that already worked, so a row that looks right for the wrong reason shows
@@ -78,7 +78,8 @@ ui:element({
         'T x=90 y=27 w=58 h=5 size=3 f=#5A7085 text="both must read 7.65"',
 
         "R id=1 x=4 y=36 w=10 h=10 f=#53646F fea=0",
-        'T x=18 y=38 w=130 h=5 size=3 f=#5A7085 text="id=1, patched: must be RED not grey"',
+        "R id=two x=16 y=36 w=10 h=10 f=#53646F fea=0",
+        'T x=30 y=38 w=118 h=5 size=3 f=#5A7085 text="both patched: LEFT id=1 (number), RIGHT id=two"',
 
         'T x=2 y=50 w=146 h=5 size=4 text="D  fmt and placeholders"',
         'T x=4  y=57 w=66 h=7 size=5 text="$n" fmt="100%% of %.0f"',
@@ -179,18 +180,14 @@ ui:element({
 
 -- The data elements. Declared here and patched only from `tick`: declaring an element and
 -- patching it in the SAME chip execution loses the declaration's data.
+-- `data` and `nodes` are DIFFERENT props, so they ride on ONE element. Two elements naming the
+-- same scene do not both deliver: measured 2026-10-06, the second left `$n` UNRESOLVED and the
+-- `id = 1` patch unapplied, and the mod said nothing about either.
 ui:element({
     id = "text-data", type = "vector",
     rect = { unit = "px", x = 0, y = 0, w = 1, h = 1 },
-    props = { scene = "text", keep = 1, data = { n = 7.6 } },
-})
-
--- `id = 1` reached by a patch: the number has to identify the node for this to land. A
--- separate element from the data one, since one element carries one `data`.
-ui:element({
-    id = "text-patch", type = "vector",
-    rect = { unit = "px", x = 0, y = 0, w = 1, h = 1 },
-    props = { scene = "text", nodes = { ["1"] = { f = "#E23D3D" } } },
+    props = { scene = "text", keep = 1, data = { n = 7.6 },
+              nodes = { ["1"] = { f = "#E23D3D" }, ["two"] = { f = "#5FD9A8" } } },
 })
 
 -- `alarm = 1` now, and `alarm = false` from the second tick: the payload that did nothing.
