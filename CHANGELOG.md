@@ -187,8 +187,8 @@ failing on 0.11.101 first; the regression tests are `Tests/SweepTests.cs`, and
 
 ### Docs
 
-- **My own point-count paragraph from the previous commit was wrong twice**, and the console
-  builder session caught both. An ODD value count is not an error: the last value is dropped and
+- **My own point-count paragraph from the previous commit was wrong twice**, and a downstream
+  tool's authors caught both. An ODD value count is not an error: the last value is dropped and
   the rest are used, so `{10,10,60,10,60}` is a two-point line, while `{10,10,60}` is left with one
   point and draws nothing. And the minimum is per PAINT, not per op: a stroke needs two points, a
   fill and a shadow need three, so a two-point `Y` draws its outline and nothing inside it. My
@@ -270,7 +270,7 @@ Fourteen specs, each checked against what it draws: the six that format correctl
 the two where `fmt` is unreachable report nothing, and the five unusable ones plus the previously
 silent `{$v:%q}` all report. Fingerprint byte-identical to 0.11.99, unit suite 359.
 
-**This is my own regression from 0.11.97, found by the console builder session within hours of
+**This is my own regression from 0.11.97, found downstream within hours of
 pinning it.** The 0.11.97 check was written with a guard against exactly this failure — a `{0:F1}`
 test — and the guard was too narrow: `{0:F1}` is the one composite format the fast path happens to
 split.
@@ -299,8 +299,8 @@ split.
 
 ### Measured
 
-Fingerprint byte-identical to 0.11.98, unit suite 359. Both faults were reported by the console
-builder session from reading the source, and both reproduced exactly as described.
+Fingerprint byte-identical to 0.11.98, unit suite 359. Both faults were reported from a reading
+of the source, and both reproduced exactly as described.
 
 ## 0.11.98
 
@@ -811,7 +811,7 @@ overflow.", exit 127, nothing catchable and nothing logged.
   parser. Refused as a malformed expression, so the attribute falls back to its default as it
   does for any other.
 
-Reported by the ScriptedScreens console builder, whose own validator already rejected all three
+Reported downstream, by a validator that already rejected all three
 before generating a scene; these close them for scripts it did not write.
 
 ## 0.11.76
