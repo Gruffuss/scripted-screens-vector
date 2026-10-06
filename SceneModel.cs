@@ -551,8 +551,6 @@ internal sealed class VecScene
 /// </remarks>
 internal static class SceneParser
 {
-    private const int MaxRepeat = 20000;
-
     /// <summary>
     /// The symbols currently being expanded, innermost last, so a `USE` that reaches one of
     /// them is a cycle. Parsing is main-thread only, but this is `[ThreadStatic]` like every
@@ -1510,7 +1508,7 @@ internal static class SceneParser
             case "RP":
             {
                 node.Op = VecOp.Repeat;
-                node.RepeatCount = Mathf.Clamp(Mathf.RoundToInt(PropNumber(map, "n", 0f)), 0, MaxRepeat);
+                node.RepeatCount = Count(map, "n");
 
                 // OFF by default. Shedding instances makes a field pop in and out and
                 // visibly dims it, because apparent density drops with the count. Temporal
@@ -1600,7 +1598,7 @@ internal static class SceneParser
             case "LS":
                 // Stroked sibling of YS: n samples of x/y joined into one open path.
                 node.Op = VecOp.SampledLine;
-                node.RepeatCount = Mathf.Clamp(Mathf.RoundToInt(PropNumber(map, "n", 0f)), 0, MaxRepeat);
+                node.RepeatCount = Count(map, "n");
                 node.X = Attr(map, "x", 0f);
                 node.Y = Attr(map, "y", 0f);
                 break;
@@ -1823,7 +1821,7 @@ internal static class SceneParser
                 // the connected-surface primitive RP cannot express -- RP instantiates
                 // separate shapes, which is what produces a staircase instead of a curve.
                 node.Op = VecOp.Band;
-                node.RepeatCount = Mathf.Clamp(Mathf.RoundToInt(PropNumber(map, "n", 0f)), 0, MaxRepeat);
+                node.RepeatCount = Count(map, "n");
                 node.X = Attr(map, "x", 0f);
                 node.Y = Attr(map, "y", 0f);
                 node.Y2 = Attr(map, "y2", 0f);
@@ -2592,6 +2590,32 @@ internal static class SceneParser
             "BEVEL" => JoinStyle.Bevel,
             _ => JoinStyle.Miter,
         };
+    }
+
+    /// <summary>A repeat count: the number the author wrote, guarded against the int range.</summary>
+    /// <remarks>
+    /// This used to be clamped to 20,000 with nothing said, and that cap refused VALID input:
+    /// 50,000 rects fit the vertex budget whole, measured (400,000 vertices, nothing dropped,
+    /// and a rect field fits to 60,000). Worse, `n` reads back into the expressions, so the
+    /// clamp did not thin a field, it REDISTRIBUTED it -- `x = "=i*W/n"` with an authored
+    /// 50,000 spread 20,000 instances across the full width instead of drawing the part of the
+    /// field that fits. What a rebuild can actually afford is a question for the rebuild, and
+    /// `Tessellator`'s work budget answers it there, out loud.
+    ///
+    /// The guard that remains is an int-range guard for input that is WRONG, and it clamps in
+    /// FLOAT space, before the rounding, because `Mathf.RoundToInt` of anything past 2^31 is
+    /// `int.MinValue`: `n = 3000000000` came back as 0 once clamped, so an enormous count drew
+    /// NOTHING, silently. The cap was not even a ceiling at the extreme. NaN is 0 likewise.
+    /// </remarks>
+    private static int Count(SS.UiProp[] map, string key)
+    {
+        var authored = PropNumber(map, key, 0f);
+        if (float.IsNaN(authored) || authored <= 0f)
+            return 0;
+
+        // Below int.MaxValue by enough that the rounding cannot reach it.
+        const float Most = 2000000000f;
+        return authored >= Most ? (int)Most : Mathf.RoundToInt(authored);
     }
 
     /// <summary>Reads a flat array of numbers, used for point lists and dash patterns.</summary>

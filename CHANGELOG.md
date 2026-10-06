@@ -138,6 +138,35 @@ failing on 0.11.101 first; the regression tests are `Tests/SweepTests.cs`.
   mod project): the unit suite does not run the mod's analyser set, so it was green while the
   mod would not have compiled. Noted here because the lesson is the check, not the typo.
 
+- **A repeat's `n` was clamped to 20,000 with nothing said, and past 2^31 it drew nothing at
+  all.** Two faults in one line, on `RP`, `LS` and `YS`.
+
+  The cap refused valid input: 50,000 rects fit the vertex budget whole (400,000 vertices,
+  nothing dropped; a rect field fits to 60,000, circles to 30,000), and `n` reads back into the
+  expressions, so clamping it did not thin a field -- it REDISTRIBUTED it. `x = "=i*W/n"` with
+  an authored 50,000 spread 20,000 instances over the full width instead of drawing the part of
+  the field that fits. And `Mathf.RoundToInt` of anything past 2^31 is `int.MinValue`, which the
+  clamp then turned into 0: measured, `n = 2147483647`, `n = 3000000000` and `n = 1e10` all drew
+  NOTHING, silently. The cap was not a ceiling at the extreme.
+
+  What replaces it is a per-rebuild WORK BUDGET that reports itself through the same `TOO LARGE`
+  note the vertex budget uses, because a cap on one node was the wrong shape for the real
+  problem. Measured: two counts both AT the old cap, `RP n=20000 { RP n=20000 { ... } }`, is
+  400,000,000 iterations and was legal -- 35.6 s for one rebuild on an idle machine, 64 s on a
+  loaded one, and the capture path runs `Emit` on the MAIN thread. It is 250 ms and a reported
+  refusal now. The budget also covers the two places the vertex budget is blind: a repeat whose
+  child emits no vertices (100,000,000 hidden iterations ran for 9 s), and a `YS`/`LS` that
+  evaluates and lists its samples before any vertex exists (10,000,000 samples cost 1.4 s and
+  150 MB and then did not fit a mesh anyway -- now 0 ms and refused). Labels weigh more than a
+  geometry iteration, since they reach TextMeshPro rather than the mesh: about 38,000 draw,
+  measured at 33 ms, where 1,000,000 cost 854 ms and 817 MB.
+
+  Behaviour for a scene with an authored `n` over 20,000: `n` is now the count it asked for, so
+  `i` runs to it. A field the budget cuts short draws its first part and reports TOO LARGE,
+  where before it drew a thinner full-width field and said nothing. No scene in this repo or in
+  the docs has an `n` of five digits or more. The budget figure is measured on .NET 8 and
+  **wants re-measuring on Mono**, which the game runs.
+
 ## 0.11.101
 
 ### Fixed

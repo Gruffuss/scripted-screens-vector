@@ -107,6 +107,66 @@ internal static class Tessellator
     /// </remarks>
     [ThreadStatic] private static string? _starved;
 
+    /// <summary>Work charged against <see cref="WorkBudget"/> so far this rebuild.</summary>
+    [ThreadStatic] private static long _workUnits;
+
+    /// <summary>
+    /// What one rebuild may do, in work units, before it is refused and says so.
+    /// </summary>
+    /// <remarks>
+    /// The vertex budget already bounds everything that reaches a mesh, and for a field of
+    /// shapes it is the only limit needed. It cannot see three things, all measured:
+    ///
+    /// * a repeat whose child emits NO vertices -- a hidden leaf, `fo = 0`, an empty group.
+    ///   100,000,000 iterations of a hidden leaf ran for 9 s, and nothing stopped it.
+    /// * a `YS`/`LS` evaluating its samples, which happens before any vertex exists: 10,000,000
+    ///   samples cost 1.4 s and 150 MB of worker memory and then did not fit a mesh anyway.
+    /// * a NEST of repeats. Both counts could sit at the old 20,000 cap, which is what makes a
+    ///   per-node cap the wrong shape: 20,000 x 20,000 is 400,000,000 iterations, measured at
+    ///   35.6 s for ONE rebuild (64 s on a loaded machine) with the cap in force.
+    ///
+    /// A counter that spans the rebuild covers all three, and it REPORTS, through the same
+    /// `Starved` note the vertex budget uses, where the cap said nothing. Live rebuilds run on
+    /// a worker, so a long one only wastes a core -- but the capture path calls `Emit` on the
+    /// main thread, where 35 s is the game stopped dead.
+    ///
+    /// The figure is measured on .NET 8: 1,000,000 trivial iterations cost 98 ms hidden and
+    /// 317 ms through a zero-opacity leaf. The game is Mono and slower, so **this wants
+    /// re-measuring there**; it is deliberately far above any real scene (a 900 x 900 nest,
+    /// 810,000 iterations, draws).
+    /// </remarks>
+    private const long WorkBudget = 1000000L;
+
+    /// <summary>
+    /// What one label weighs, so the same budget bounds text as well as geometry.
+    /// </summary>
+    /// <remarks>
+    /// A label emits no vertices here -- it becomes a `TextPlacement` the main thread hands to
+    /// TextMeshPro -- so the vertex budget never sees it. Measured offline: 1,000,000
+    /// placements cost 854 ms and 817 MB on the worker, before TMP has realised a single glyph,
+    /// and that last part is not measurable outside the player at all.
+    ///
+    /// At 25 units each -- plus the repeat's own unit per iteration -- the budget allows about
+    /// 38,000 labels, measured at 33 ms. That is deliberately ABOVE the 20,000 the old silent
+    /// cap allowed, so nothing that used to draw stops drawing, and far below the million that
+    /// does not fit a frame. The right figure for the player is not knowable from here.
+    /// </remarks>
+    private const long LabelUnits = 25L;
+
+    /// <summary>
+    /// Charges <paramref name="units"/> of work to this rebuild. True when the budget is spent,
+    /// in which case the caller stops and the note says what was dropped.
+    /// </summary>
+    private static bool Spend(long units, string op)
+    {
+        _workUnits += units;
+        if (_workUnits <= WorkBudget)
+            return false;
+
+        _starved ??= op + " (too large to draw here)";
+        return true;
+    }
+
     /// <summary>Index triples for one radial band, reused so a fill allocates nothing.</summary>
     [ThreadStatic] private static List<int>? _ringIndices;
 
@@ -268,6 +328,7 @@ internal static class Tessellator
 
         stats.Starved = PeekStarved();
         _starved = null;
+        _workUnits = 0L;
 
         stats.Scrolls.Clear();
         if (ScrollsFound != null)
@@ -779,6 +840,11 @@ internal static class Tessellator
                 if (Starved(vh, 1, "a repeat"))
                     return;
 
+                // One unit per iteration, so a NEST costs the product of its counts -- which is
+                // the whole point: both counts can be legal and their product absurd.
+                if (Spend(1L, "a repeat"))
+                    return;
+
                 // `n` stays the authored count inside expressions: reducing it would
                 // change where instances sit, not just how many there are, so a thinned
                 // field would redistribute itself rather than simply thin out.
@@ -1097,6 +1163,9 @@ internal static class Tessellator
 
             case VecOp.Text:
             {
+                if (Spend(LabelUnits, "a label"))
+                    break;
+
                 CollectText(vh, scene, node, context, stack.Peek(), vh.ShapeCount);
                 _emitted++;
                 break;
@@ -2339,6 +2408,17 @@ internal static class Tessellator
         context.PopRepeat();
 
         var used = CurveSamples(samples, lastX - firstX, frame.Scale);
+
+        // Refused BEFORE the samples are evaluated and the two lists allocated. The vertex
+        // check further down runs on the finished strip, so a band that could never fit one
+        // mesh still paid for every sample first: 1.4 s and 150 MB at n = 10,000,000, measured.
+        // `used * 2` in long, since two vertices per sample overflows an int on its own.
+        if (Spend(used, "a band")
+            || Starved(vh, (int)System.Math.Min(used * 2L, int.MaxValue), "a band"))
+        {
+            return;
+        }
+
         var stride = (samples - 1) / (float)(used - 1);
 
         var top = new List<Vector2>(used);
@@ -2599,6 +2679,14 @@ internal static class Tessellator
                 context.PopRepeat();
 
                 var used = CurveSamples(samples, lastX - firstX, frame.Scale);
+
+                // As for a band: the samples are evaluated and listed before any vertex exists,
+                // so the vertex budget cannot see them. A stroked line drops near-duplicate
+                // points, so an `LS` never starved at all -- it just ran, 1.6 s and 136 MB at
+                // n = 10,000,000, measured.
+                if (Spend(used, "a line"))
+                    return;
+
                 var stride = (samples - 1) / (float)(used - 1);
 
                 points = new List<Vector2>(used);

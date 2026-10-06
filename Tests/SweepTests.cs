@@ -75,6 +75,7 @@ internal static class SweepTests
         EnumTyposAreReported(run);
         PercentPairs(run);
         PlaceholderFormatStartsAtTheFirstColon(run);
+        RepeatCountIsNotTruncated(run);
     }
 
     /// <summary>C21: a number in a slot that holds free text or an identifier.</summary>
