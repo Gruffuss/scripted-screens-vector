@@ -682,7 +682,9 @@ an `IMG`.
 **`blur` blurs flat fills, on every closed shape.** Each flat fill under the group is drawn as
 its own blurred silhouette, the same geometry a shadow uses, which is
 exactly a Gaussian blur of that one shape. Strokes, gradient fills, pictures and text are drawn
-sharp. A `P` blurs its outer contour, so a blurred path with holes blurs as though it had none —
+sharp, and so is the fill of an open `L`, `LS` or `SP`: an `f` closes such a shape for its fill
+and not for this. A `P` blurs its outer contour, so a blurred path with holes blurs as though it
+had none —
 the same approximation its shadow already makes. Until 0.11.74 only `R` and `C` blurred and
 every other shape came out sharp. Two overlapping shapes are each blurred on their own and then composited, which a browser
 does the other way round; for soft glows, blobs and out-of-focus backdrops the difference does
@@ -871,9 +873,22 @@ subpath anywhere casts no shadow, is left sharp by a `blur` and answers no click
 ### `L`, `Y` — polyline, polygon
 
 `p` is a flat array of alternating coordinates: `{x, y, x, y, ...}`. `Y` closes
-automatically. An `L` is open — it strokes as an open run and is clickable along that stroke —
-but **an `f` on an `L` still fills it**, closing the gap from its last point to its first the
-way SVG's fill rule does.
+automatically. An `L` is open: its stroke is an open run with a cap at each end, and nothing is
+drawn from its last point back to its first.
+
+**An open `L`, `LS` or `SP` that has an `f` is filled anyway.** The fill is taken as though the
+shape were closed, joining the last point back to the first the way SVG's fill rule does, while
+the stroke stays open — so three sides of a box with an `f` draw a filled square with one side
+missing from its outline. The `f` may be the shape's own or one passed down by a `G` or the scene
+root: a stroke-only line inside a group that sets `f` comes out filled unless it says
+`f = "none"`.
+
+**Nothing else about an open shape is closed.** It casts no shadow, outset or inset, even with an
+`f`, and nothing is reported; a `blur` leaves its fill sharp; its stroke takes caps instead of a
+closing segment; and its stroke is what answers a click, while with no stroke the closed-up area
+answers — see Clicks. Write `Y`, or `SP` with `close = 1`, where the shape has to be closed for
+all of those. A `P` has its own rule, given under `P`: a lone open subpath is filled, but an open
+subpath beside others is not.
 
 **Too few points, and what each paint needs, differ — and nothing is reported either way.**
 A STROKE needs two points; a FILL and a shadow need three. So a two-point `Y` draws its outline
@@ -930,8 +945,11 @@ the *same* curve. Nothing is dropped, unlike count LOD on a repeat.
 
 ### `LS` — sampled polyline
 
-Same sampling rule as `YS` (`n`, `x`, `y`), stroked rather than filled. The line-chart and
-waveform primitive.
+Same sampling rule as `YS` (`n`, `x`, `y`), drawn as a stroke. The line-chart and waveform
+primitive. It is open, and follows the open-shape rules under `L` above: an `f` on it, or one
+inherited from a group, fills the area between the line and the straight chord from its last
+sample back to its first, and it casts no shadow. That fill needs three samples, as a polygon
+needs three points; with two, only the line draws.
 
 ### `SC` — scroll container
 
@@ -1237,14 +1255,15 @@ reach for `T` is what a label cannot do at all, not the budget.
 |-----|---------|
 | `p` | flat point array `{x, y, x, y, ...}` |
 | `seg` | segments per span, rounded to a whole number and held to `1..32`; default `8`. `seg = 64` draws 32, unreported |
-| `close` | `1` wraps the curve into a closed ring, which can then be filled |
+| `close` | a literal `1` wraps the curve into a closed ring, which can then be shadowed and blurred. Without it the curve is open: an `f` still fills it, between the curve and the chord from its last point back to its first, but an open `SP` casts no shadow and takes no `blur` |
 
 Catmull-Rom, so the curve passes **through** its points rather than being pulled toward them.
 
 **`close = 1`** is to `SP` what `Y` is to `L`: the curve runs through one further span, from the
 last point back to the first, and every tangent is taken around the ring, so the seam is as
 smooth as any other point on the curve. A closed spline takes a fill, a shadow and a `blur` like
-any other closed shape. **Three points is the useful minimum, but two are not refused**: a
+any other closed shape; an open one takes only the fill.
+**Three points is the useful minimum, but two are not refused**: a
 two-point `SP` is filled, shadowed and stroked exactly as `close = 1` asks, and simply encloses
 the sliver between one curve and its return. Since 0.11.74; before it, a rounded blob had to be
 written as a `P`.
@@ -1467,7 +1486,10 @@ Outside a repeat it is the bare id, unchanged.
 **An OPEN shape is clickable along its stroke, not across the area it would enclose** (0.11.78):
 an `L` drawing three sides of a box answers clicks on those three lines, not in the middle.
 A **closed** shape answers inside its outline whether or not it is filled, which is how a scene
-makes an invisible hit area; so does an open shape with no stroke at all.
+makes an invisible hit area; so does an open shape with no stroke at all. That holds for a FILLED
+open shape too — an `f` closes it for the fill and not for the hit area — so a filled `L` with a
+stroke answers on the stroke and not across its fill, and one without a stroke answers over the
+whole closed-up area.
 
 **Every drawn shape except `YS` can be clicked: `R`, `C`, `L`, `Y`, `SP`, `LS` and `P`.** A `P` is
 clickable over its outer contour, holes included. **A `YS` records no hit area at all** — put a
@@ -1588,7 +1610,8 @@ kept a full-strength halo. The shadow colour's own alpha is separate and unaffec
 ```
 
 Available on **`R`, `C`, a closed `Y`, a closed `P`, an `SP close = 1`, and `T`**: any shape the
-renderer knows the closed outline of. Everything but
+renderer knows the closed outline of. An open `L`, `LS` or `SP` is not on that list: its `sh`
+draws nothing, whatever its `f`, and nothing is reported. Everything but
 text is drawn as geometry — no offscreen pass, no shader — by stacking contours from `-3σ` to
 `+3σ` carrying the closed-form coverage of a blurred edge, `0.5·erfc(d / (σ√2))`. Ring count
 follows the blur's on-screen size.
