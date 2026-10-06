@@ -986,15 +986,36 @@ internal sealed class TextLayer
 
     /// <summary>
     /// Resolves a family name through TMP's own registry, which is what the companion fonts
-    /// mod populates. An unknown name leaves the current face rather than blanking the label.
+    /// mod populates.
     /// </summary>
-    private static void ApplyFont(TextMeshProUGUI label, string family)
+    /// <remarks>
+    /// A name no face is registered under used to do NOTHING: no report, and no reset either.
+    /// The pool is by index, so the label kept whatever face the node that used that object
+    /// last rebuild had asked for -- a typo on one label showed up as another label's font,
+    /// and only once placement order changed, which is as confusing as a fault gets. It now
+    /// falls back to the game's own face, like a label with no `font` at all, and says so.
+    ///
+    /// Reported through <see cref="Warn"/> rather than the scene's problem list: the registry
+    /// is TMP runtime state and fills as asset bundles come in, so this is not a question the
+    /// parser could answer -- `SceneModel` compiles without TextMeshPro and must keep doing so.
+    /// The wording is "not registered", not "does not exist", because a scene pushed before its
+    /// font arrives is in exactly this state and the warning is never cleared.
+    /// </remarks>
+    private void ApplyFont(TextMeshProUGUI label, string family)
     {
         if (label.font != null && label.font.name == family)
             return;
 
         if (MaterialReferenceManager.TryGetFontAsset(TMP_TextUtilities.GetSimpleHashCode(family), out var asset))
+        {
             label.font = asset;
+            return;
+        }
+
+        Warn($"font \"{family}\" is not registered; drawn in the game's own font");
+
+        if (_defaultFont != null && label.font != _defaultFont)
+            label.font = _defaultFont;
     }
 
     private static void Place(RectTransform rect, Rect where)

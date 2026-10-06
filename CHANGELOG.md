@@ -125,6 +125,19 @@ failing on 0.11.101 first; the regression tests are `Tests/SweepTests.cs`.
   widens the border to any scene whose patches carry a malformed expression, which before was
   visible only in the log.
 
+- **A `font` name no face is registered under did nothing at all.** No report, and no reset
+  either: labels are pooled by index, so the label kept whatever face the node that used that
+  object last rebuild had asked for -- a typo on one label showed up as a different label's
+  font, and only once placement order changed (a repeat whose count grew, a scroll container
+  gaining a row). It now falls back to the game's own face, like a label with no `font`, and
+  says so in the log and in `vector_stats`. Measured offline: the name reaches the text layer
+  with 0 problems and 0 log lines, and the registry lookup answers false for it -- the layer
+  itself needs a live TextMeshPro and has NOT been seen in game.
+
+- **An analyser error in the `%%` fix itself** (`CA1865`, caught by a compile-only pass over the
+  mod project): the unit suite does not run the mod's analyser set, so it was green while the
+  mod would not have compiled. Noted here because the lesson is the check, not the typo.
+
 ## 0.11.101
 
 ### Fixed

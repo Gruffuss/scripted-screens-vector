@@ -462,7 +462,7 @@ internal static class Printf
         // no conversion, when it holds one.
         var percent = spec.IndexOf('%', System.StringComparison.Ordinal);
         while (percent >= 0 && percent + 1 < spec.Length && spec[percent + 1] == '%')
-            percent = spec.IndexOf("%", percent + 2, System.StringComparison.Ordinal);
+            percent = spec.IndexOf('%', percent + 2);
 
         // No conversion anywhere, so there is nothing to format -- but `%%` still means one
         // percent sign, and `fmt = "%%"` used to draw two.
