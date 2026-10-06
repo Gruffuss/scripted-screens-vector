@@ -1,8 +1,10 @@
 -- Everything that shipped without ever being seen on a console. Nothing here is new; each row
 -- is a thing that has only ever been checked offline, or not at all.
 --
--- 1 `ver`   must read major*10000 + minor*100 + patch of the RUNNING build: 1176 on
---           0.11.76, 1180 on 0.11.80. The point of `ver` is
+-- 1 `ver`   must read major*1000000 + minor*1000 + patch of the RUNNING build: 11103 on
+--           0.11.103, 12000 on 0.12.0. Re-encoded in 0.11.103; it was
+--           major*10000 + minor*100 + patch, under which 0.11.100 and 0.12.0 both read
+--           1200. The point of `ver` is
 --           an exported scene that can tell it is running on a mod too old to draw it, so the
 --           number has to be right, not merely present.
 -- 2 x % 0   must print 0 and must not hang or blank the scene. A divide guard that is wrong
@@ -54,7 +56,7 @@ ui:element({
             { op = "R", x = 0, y = 0, w = 200, h = 200, f = "#0B1622", fea = 0 },
 
             { op = "T", x = 4, y = 3, w = 192, h = 6,
-              text = "1 ver = {=ver}   (= major*10000+minor*100+patch)" },
+              text = "1 ver = {=ver}   (11103 on 0.11.103)" },
             { op = "T", x = 4, y = 11, w = 192, h = 6,
               text = "2 5 % 0 = {=5%0}   3 255 as hex = {=255:%x}" },
 

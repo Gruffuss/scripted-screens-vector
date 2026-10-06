@@ -2,6 +2,38 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.103
+
+### Changed
+
+- **`ver` is re-encoded as `major*1000000 + minor*1000 + patch`, so this release reads `11103`
+  where 0.11.102 read `1202`.** This changes a published value, and a scene that compares `ver`
+  to a literal must have that literal rewritten on the new scale: `lt(ver,1162)` becomes
+  `lt(ver,11062)`.
+
+  A stale literal is not silently inverted in the common idiom. Measured on the new encoding
+  with the floors `1162`, `1202` and `9999`: on 0.11.62 (`11062`), 0.11.103 (`11103`) and
+  0.99.99 (`99099`) every one of them reads `lt` false, so an un-updated "update your mod"
+  banner stays hidden rather than appearing wrongly, and an older mod still compares its own
+  old-scale number against the old literal exactly as before. What does change meaning is a
+  literal used as a FLOOR from below: `gt(ver,1200)`, written to mean "0.12.0 or newer", reads
+  true on 0.11.103 (`11103 > 1200`), which it should not.
+
+  The old formula was `major*10000 + minor*100 + patch`, which left the patch field two digits
+  and had already run out of them. 0.11.100 and 0.12.0 both read `1200`, 0.11.101 and 0.12.1 both
+  read `1201`, and ordering INVERTED: 0.12.0 (`1200`) compared below 0.11.101 (`1201`), so a
+  scene doing `lt(ver, FLOOR)` to show an "old mod" banner showed it on a NEWER mod. Measured on
+  0.11.102 before the change, then after: 0.11.99/0.11.100/0.12.0 read `1199`/`1200`/`1200` and
+  now read `11099`/`11100`/`12000`, with no two versions sharing a number and none out of order.
+
+  The new widths have a ceiling of their own, named rather than hidden: three digits per field
+  means a patch of 1000 lands on the next minor (0.11.1000 and 0.12.0 both read `12000`) and a
+  minor of 1000 lands on the next major (0.1000.0 and 1.0.0 both read `1000000`). The value is a
+  float, as every expression value is, so above 16777216 consecutive integers no longer survive
+  and from major 17 up two adjacent patch numbers read equal (17.0.0 and 17.0.1 both read
+  `17000000`). Seven exact digits is the whole budget; widening one field narrows another. Those
+  limits are asserted in `Tests/NodeSpanTests.cs` so they stay measured facts.
+
 ## 0.11.102
 
 A sweep of the values the parser read as nothing and said nothing about. Every one was watched
@@ -892,7 +924,7 @@ along it for `sat` to pick a point on.
 
 ## 0.11.62
 
-- Added: **`ver`**, an expression variable carrying the running mod's version as `major*10000 + minor*100 + patch` (0.11.62 is `1162`). It is usable anywhere an expression is. The degradation is the feature: on a mod too old to know the name, the expression fails to parse and the attribute falls back to **its own default**, so `G v="=lt(ver,1162)" { ...banner... }` shows an "update the mod" notice on exactly the versions that cannot draw what follows, and hides itself on the ones that can. The parse failure is also reported as a problem, which is a diagnostic rather than a fault.
+- Added: **`ver`**, an expression variable carrying the running mod's version as `major*10000 + minor*100 + patch` (0.11.62 is `1162`). It is usable anywhere an expression is. The degradation is the feature: on a mod too old to know the name, the expression fails to parse and the attribute falls back to **its own default**, so `G v="=lt(ver,1162)" { ...banner... }` shows an "update the mod" notice on exactly the versions that cannot draw what follows, and hides itself on the ones that can. The parse failure is also reported as a problem, which is a diagnostic rather than a fault. **That encoding is no longer current: 0.11.103 re-encoded `ver` as `major*1000000 + minor*1000 + patch`, and the formula above held only up to 0.11.102.**
 
 ## 0.11.61
 
