@@ -1,4 +1,58 @@
-﻿## The work budget's figure is measured on .NET 8, not on Mono
+﻿## A page cannot ASK for a font, only name one that is already there
+
+`font=` on a `T` looks a face up by name, so a page can only use faces the fonts mod has already
+registered — the ones a player dropped in the fonts folder, plus the game's own. The fonts mod can
+also fetch a font on request, and that capability is reachable only from mod code today, not from
+a page.
+
+What is wanted: a page declares the font it needs **in its Lua props, the way it declares
+everything else here**, and the mod does the asking — no C# on the author's side. Something of the
+shape `fonts = { "<a font link>" }` on the element or in the scene header, with the labels drawing
+in the fallback face until the faces arrive and a rebuild when they do, since the fetch is
+asynchronous and returns the face names it registered.
+
+Constraints that are not negotiable when this is built:
+- The fonts mod decides which hosts may be fetched from, and its default is deliberately narrow.
+  This must go through that setting and must not widen it — a font file is parsed by native code on
+  every player's machine, so "any CDN" is not an option.
+- A font that never arrives, a link that is refused, and a face name that does not match what
+  arrived must each be REPORTED, not silently fall back. Everything else in this format reports a
+  mistake the author made.
+- It is an addition: a page that names no font behaves exactly as it does now.
+
+**The fonts mod's side is answered, from its source (2026-10-06). Do not re-derive this:**
+
+- `RequestFont(link, done)` — **the signature will not change, and it will never gain an
+  overload.** Both consumers resolve it with `GetMethod("RequestFont")` by name alone, so a second
+  overload would throw `AmbiguousMatchException` at reflection time, breaking both at once with no
+  compile error anywhere. A richer call would get a DIFFERENT NAME instead.
+- **The two failures arrive differently, and a page must handle both.** A refused request —
+  malformed, not http(s), a host outside the allowed set, loader not running — returns **`false`
+  synchronously and never calls back**, so the return value must be read; waiting for a callback
+  there waits for ever. An accepted request that loads nothing — download failed, file switched
+  off, face cap reached — **calls back with an EMPTY array**. That is the "never arrived" signal.
+- **Accepted means exactly one callback, always.** Asking this question found a hole on their side:
+  the loader waited without limit for conditions a request cannot influence, so a callback could
+  simply never arrive and a page could not tell "still loading" from "never coming". That wait is
+  bounded now and gives up through the same delivery path. Fixed on their side the same day.
+- **The callback runs on the main thread**, from a coroutine, so a scene may be rebuilt directly
+  inside it.
+- **A label already drawn keeps the face it resolved to**, so rebuilding when the callback lands is
+  not an optimisation, it is the mechanism that makes the font appear at all.
+- **The names that come back are the font's own** (`Manrope`, `Manrope Bold`), NOT derived from the
+  link — so an author cannot know what to write in `font=` without loading it once. Checking the
+  author's name against the array the callback delivers, and reporting a mismatch, is the answer to
+  that, and is why that report is on the list above rather than optional.
+
+Still unanswered, and deliberately not asked yet: an empty array does not say WHY nothing loaded
+(the reason is only in the log). The fonts mod offered to add a reason if this needs to tell a
+failed download from a disabled file — worth asking when this is actually built, not before, since
+it is their work for a feature that is not scheduled.
+
+Unanswered here: whether a request belongs per element or per scene, and what a page should do
+about a face that arrives after a capture has already been taken.
+
+## The work budget's figure is measured on .NET 8, not on Mono
 
 0.11.102 replaced the silent 20,000 cap on a repeat's `n` with a per-rebuild work budget of about
 a million units (one per repeat iteration, one per `YS`/`LS` sample, 25 per label). Every figure
