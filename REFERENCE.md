@@ -804,14 +804,23 @@ and `mod(i, cols)`.
 
 ### `R` — rectangle
 
-`x`, `y`, `w`, `h`, plus optional `rx` / `ry` corner radii. `rx` alone gives circular
-corners. Given as a list, **write all four**: a missing corner is `0`, not copied from another as
-CSS shorthand copies it, so `{ 10, 10, 10 }` leaves the bottom-left sharp. Corners given that way
-are circular — `ry` is not read when `rx` is a list. Radii too large for the box shrink as CSS shrinks them: one `rx` to half the
-shorter side, and per-corner radii all by the same factor wherever the two along one side add
-up to more than that side. Corners are true arcs.
+`x`, `y`, `w`, `h`, plus an optional corner radius `rx`. **Corners are true circular arcs and
+`rx` is their radius.** There is no elliptical corner: `ry` is not a second radius, and
+`rx = 8, ry = 3` draws exactly the corners `rx = 8` draws.
+
+**`ry` is a switch, and that is all it is.** With a single `rx`, an `ry` below `0.01` — `0`, a
+negative number, or an expression that happens to give one — draws the whole rectangle with
+square corners whatever `rx` says, as does `rx = 0`, which is why `ry = 8` on its own is square.
+Any larger `ry` changes nothing. Neither case is reported, so leave `ry` out unless you mean the
+switch. The square-or-round decision is carried by the outline every other stage reads, so a
+clickable `R`'s hit area and its shadow go square along with it.
 
 **Per-corner radii:** `rx = { tl, tr, br, bl }`, CSS order. A zero corner is a sharp point.
+**Write all four**: a missing corner is `0`, not copied from another as CSS shorthand copies it,
+so `{ 10, 10, 10 }` leaves the bottom-left sharp, and `{ 8 }` rounds the top-left corner alone.
+With a list `ry` is not read at all — absent, `0` or `100` all draw the same shape. Radii too
+large for the box shrink as CSS shrinks them: one `rx` to half the shorter side, and per-corner
+radii all by the same factor wherever the two along one side add up to more than that side.
 
 ```lua
 { op = "R", x = 0, y = 0, w = 60, h = 24, rx = { 12, 12, 0, 0 }, f = "#12202F" }
@@ -958,7 +967,7 @@ needs three points; with two, only the line draws.
 | `id` | string | **required** — the scroll position is stored under it |
 | `x`, `y`, `w`, `h` | number/expr | the viewport box, in the enclosing coordinates |
 | `ch` | number/expr | total content height; at or below `h` nothing scrolls |
-| `rx` / `ry` | number/expr | corner radii, same rules and per-corner form as `R` |
+| `rx` / `ry` | number/expr | the corner radius, exactly as on `R`: `rx` is the radius or a four-corner list, and `ry` only switches the rounding off |
 | `o` | number/expr | container opacity, multiplied into all descendants |
 | `so` | number/expr | a scroll offset to jump to — applied only when `sov` changes |
 | `sov` | number/expr | version for `so`; required with it |
@@ -1277,7 +1286,7 @@ written as a `P`.
 | `x`, `y`, `w`, `h` | the box |
 | `src` | URL (`https://`, `file://`, `data:`); PNG, JPEG, BMP, or the first frame of a GIF |
 | `fit` | `fill` (default, stretch), `contain`, `cover`, `none` (one scene unit per texel), `scale-down` (`contain` if the picture is larger than the box, else `none`) — CSS `object-fit` |
-| `rx` / `ry` | corner radii, as `R` |
+| `rx` / `ry` | the corner radius, exactly as on `R`, under a plain picture, a nine-slice or a `tile` alike: `rx` is the radius or a four-corner list, and `ry` only switches the rounding off |
 | `o` | opacity `0..1`, multiplied by the enclosing group's |
 | `uv` | `{u0, v0, u1, v1}`: the part of the picture shown, fractions of the texture, **v from the top**; default `{0, 0, 1, 1}` |
 | `at` | `{ax, ay}`: where the picture sits in the room `fit` leaves it, fractions of the free space; default `{0.5, 0.5}` (centred), CSS `object-position` |
