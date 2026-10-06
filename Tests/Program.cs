@@ -127,6 +127,8 @@ internal static class Program
         FormatReportTests.ReportsOnlyWhatANumberCannotGoThrough(run);
         FormatReportTests.ACompositeFormatSurvivesAPlaceholder(run);
         FormatReportTests.BraceEscapesInASpec(run);
+        FormatReportTests.ABraceAfterTheCloserIsTheLabelsOwn(run);
+        FormatReportTests.AnUnclosedPlaceholderIsReported(run);
         FormatReportTests.AnEmptySpecIsTheDefaultFormat(run);
 
         Console.WriteLine();
@@ -197,6 +199,7 @@ internal static class Program
         RequirementTests.PointerScope(run);
         RequirementTests.PositionAndHover(run);
         SweepTests.Run(run);
+        PatchPathTests.Run(run);
         ImageDecodeTests.Run(run);
         EasingTests.Curves(run);
         EasingTests.Payload(run);

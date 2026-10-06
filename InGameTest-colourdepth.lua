@@ -49,7 +49,7 @@ local src = table.concat({
 
     -- 4  the control: the same depth as an ordinary NUMERIC attribute, which always worked
     'T x=6 y=114 w=188 h=6 size=5 f=#53646F text="4  control: same depth as a number, not a colour"',
-    'R x=6 y=122 w=188 h=18 f=#7FB2F0 fea=0 o="=1+0*(' .. deep .. ')"',
+    'R x=6 y=122 w=188 h=18 f=#7FB2F0 fea=0 fo="=1+0*(' .. deep .. ')"',
 
     'T x=6 y=150 w=188 h=10 size=8 f=#5FD9A8 text="OK -- the game is still running"',
     'T x=6 y=168 w=188 h=24 size=4 f=#53646F wrap=1 text="Before 0.11.95 rows 1-3 ended the process. Row 4 never did: the same number as an ordinary attribute took the iterative path."',

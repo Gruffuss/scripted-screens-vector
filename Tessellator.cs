@@ -300,7 +300,23 @@ internal static class Tessellator
         _repeatPiece = false;
         context.ResetRepeats();
 
-        var shapes = EmitCore(vh, scene, context, target, screenPixelsPerUnit, screenSizeKnown);
+        int shapes;
+        try
+        {
+            shapes = EmitCore(vh, scene, context, target, screenPixelsPerUnit, screenSizeKnown);
+        }
+        finally
+        {
+            // The ablation switches belong to ONE rebuild. They are [ThreadStatic] on a thread
+            // that also PARSES: a capture rebuilds inline on the main thread, and the parser
+            // cuts a static clip there through `Tessellator.Outline`, which reaches
+            // `RectOutline` and reads `NoEval`. Left set, one capture of a `noeval = 1` scene
+            // turned every clip rectangle parsed afterwards -- any scene, any surface, for the
+            // rest of the session -- into the fixed 2x2 box at 40,40, with nothing reported.
+            NoFill = false;
+            NoFeather = false;
+            NoEval = false;
+        }
 
         System.Array.Copy(OpMilliseconds, stats.OpMilliseconds, stats.OpMilliseconds.Length);
         System.Array.Copy(OpCounts, stats.OpCounts, stats.OpCounts.Length);
@@ -2364,10 +2380,16 @@ internal static class Tessellator
             // one flat shape. CSS's blur radius is the standard deviation, a shadow's is twice it.
             if (frame.Blur > 0.0001f && closed && !paint.IsGradient)
             {
-                var colour = paint.Colour;
-                colour.a *= paint.Alpha;
-                Shadow.Emit(vh, outline, new VecShadow(0f, 0f, 2f * frame.Blur, 0f, colour, false),
-                    frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+                // `nofill` removes this too: the blurred silhouette IS the fill. Skipped
+                // inside the branch rather than before it, so the shape does not fall
+                // through to the sharp fill below and measure MORE than it does normally.
+                if (!NoFill)
+                {
+                    var colour = paint.Colour;
+                    colour.a *= paint.Alpha;
+                    Shadow.Emit(vh, outline, new VecShadow(0f, 0f, 2f * frame.Blur, 0f, colour, false),
+                        frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+                }
             }
             else
             {
@@ -2403,10 +2425,10 @@ internal static class Tessellator
 
         // Curve LOD needs the on-screen width, which needs the two end points. Evaluating
         // them first costs two samples and saves however many the distance allows.
-        context.PushRepeat(0, samples);
+        context.PushRepeat(0, samples, sample: true);
         var firstX = node.X.Evaluate(context);
         context.PopRepeat();
-        context.PushRepeat(samples - 1, samples);
+        context.PushRepeat(samples - 1, samples, sample: true);
         var lastX = node.X.Evaluate(context);
         context.PopRepeat();
 
@@ -2433,7 +2455,7 @@ internal static class Tessellator
             // walks the same curve with fewer segments rather than a different curve.
             var i = k == used - 1 ? samples - 1 : k * stride;
 
-            context.PushRepeat(i, samples);
+            context.PushRepeat(i, samples, sample: true);
             var x = node.X.Evaluate(context);
             top.Add(new Vector2(x, node.Y.Evaluate(context)));
             bottom.Add(new Vector2(x, node.Y2.Evaluate(context)));
@@ -2450,7 +2472,7 @@ internal static class Tessellator
         // Nothing warned; the wrong one silently evaluated to 0. Paint is per-shape rather
         // than per-sample so it binds to sample 0 — the point is that `i1` now means the same
         // thing in every attribute of the node.
-        context.PushRepeat(0, samples);
+        context.PushRepeat(0, samples, sample: true);
 
         // Per-column opacity ramp: `fo` at the sampled edge, `fo2` at the opposite one.
         var ramped = node.EdgeOpacity != null;
@@ -2663,6 +2685,7 @@ internal static class Tessellator
     private static void EmitPath(MeshBuilder vh, VecScene scene, VecNode node, EvalContext context, Frame frame)
     {
         List<Vector2> points;
+        var sampled = false;
 
         switch (node.Op)
         {
@@ -2674,10 +2697,10 @@ internal static class Tessellator
 
                 // Same curve LOD as a band: fractional indices walk the author's own curve
                 // at a step suited to how large it is actually drawn.
-                context.PushRepeat(0, samples);
+                context.PushRepeat(0, samples, sample: true);
                 var firstX = node.X.Evaluate(context);
                 context.PopRepeat();
-                context.PushRepeat(samples - 1, samples);
+                context.PushRepeat(samples - 1, samples, sample: true);
                 var lastX = node.X.Evaluate(context);
                 context.PopRepeat();
 
@@ -2696,11 +2719,12 @@ internal static class Tessellator
                 for (var k = 0; k < used; k++)
                 {
                     var i = k == used - 1 ? samples - 1 : k * stride;
-                    context.PushRepeat(i, samples);
+                    context.PushRepeat(i, samples, sample: true);
                     points.Add(new Vector2(node.X.Evaluate(context), node.Y.Evaluate(context)));
                     context.PopRepeat();
                 }
 
+                sampled = true;
                 break;
             }
 
@@ -2716,11 +2740,22 @@ internal static class Tessellator
         if (points.Count < 2)
             return;
 
+        // An `LS`'s paint is resolved INSIDE a sample frame, exactly as a `YS`'s is, so that
+        // `i` means one thing in every attribute of the node: the sample. Outside it, `i` in
+        // `f`, `fo`, `s` and `sw` meant the *enclosing* repeat while `i` in `x` and `y` meant
+        // the sample, and nothing warned. Paint is per-shape rather than per-sample, so it
+        // binds to sample 0 and the enclosing index is `i1`, as on a `YS`.
+        if (sampled)
+            context.PushRepeat(0, node.RepeatCount, sample: true);
+
         // The same fill-and-stroke a rectangle or an ellipse gets, rather than a copy of it:
         // this path had its own three lines, which is why a polygon, a polyline and a spline
         // were the shapes a `blur` left sharp and -- worse -- the shapes that registered no
         // hit at all, so `press`, `xy` and `drag` on them did nothing and said nothing.
         FillAndStroke(vh, scene, node, context, frame, points, node.Closed);
+
+        if (sampled)
+            context.PopRepeat();
     }
 
     /// <summary>The largest closed subpath, which is the outer contour by the same rule the
@@ -2784,10 +2819,16 @@ internal static class Tessellator
                 var paint = ResolvePaint(scene, node, context, frame, stroke: false);
                 if (!paint.IsGradient)
                 {
-                    var colour = paint.Colour;
-                    colour.a *= paint.Alpha;
-                    Shadow.Emit(vh, outer, new VecShadow(0f, 0f, 2f * frame.Blur, 0f, colour, false),
-                        frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+                    // `nofill` removes it here as well; `blurred` is still set, so the sharp
+                    // fill does not take its place.
+                    if (!NoFill)
+                    {
+                        var colour = paint.Colour;
+                        colour.a *= paint.Alpha;
+                        Shadow.Emit(vh, outer, new VecShadow(0f, 0f, 2f * frame.Blur, 0f, colour, false),
+                            frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+                    }
+
                     blurred = true;
                 }
             }
@@ -2962,7 +3003,7 @@ internal static class Tessellator
         // radiates from the focus follows it exactly. Ear clipping instead produces slivers
         // reaching across the shape, and subdividing a sliver only yields smaller slivers --
         // hence the residual streaking that survived the refinement fix.
-        if (holes == null && RadialBandsFit(contour, paint))
+        if (holes == null && !NoFill && RadialBandsFit(contour, paint))
         {
             FillRadialBands(vh, contour, paint, frame.Matrix, frame.Scale);
         }
@@ -3559,10 +3600,15 @@ internal static class Tessellator
         if (HitsFound == null || outline.Count == 0)
             return;
 
-        if (context.RepeatDepth > 0)
+        // The INSTANCE index, which skips a `YS`/`LS` sample frame: a sampled shape records
+        // ONE hit area for its whole curve, so a sample number cannot name it, and
+        // `EvalContext.Pointer` compares this very number back against the region's -- so the
+        // two have to be read the same way. The innermost frame gave every instance of a
+        // repeated `LS` the id "ln:0".
+        var instance = context.InstanceIndex;
+        if (instance >= 0)
         {
-            id = id + ":" + Mathf.RoundToInt(context.Index(0))
-                     .ToString(System.Globalization.CultureInfo.InvariantCulture);
+            id = id + ":" + instance.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         var canvas = new Vector2[outline.Count];
@@ -3591,7 +3637,7 @@ internal static class Tessellator
             CanvasToLocal = node is { ReportsPosition: true } ? AffineInverse(matrix) : Matrix4x4.identity,
             LocalBounds = node is { ReportsPosition: true } ? BoundsOf(outline) : default,
             Scope = _idPath?.ToArray(),
-            Index = context.RepeatDepth > 0 ? Mathf.RoundToInt(context.Index(0)) : -1,
+            Index = instance,
         });
     }
 

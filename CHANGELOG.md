@@ -2,6 +2,112 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.105
+
+Thirteen faults from the reference sweep, every one of them a silence or a disagreement between
+two paths that should have agreed. Five of them change what an existing scene reports, and are
+under **Changed**; one of those, `o` on a shape, will put the problem border on a scene that
+draws correctly today, which is the point of it.
+
+### Fixed
+
+- **After one `nodes` patch, a key a group had handed down read as one the author had written on
+  the node.** A node is re-parsed from its own props MERGED with its group's `style` defaults —
+  it has to be, or a patch would drop every inherited default — and the patch path handed that
+  merged map to the checks that ask "did the author write this key HERE". Measured:
+  `G fit=cover { T id=lbl text=hi }` parses clean, and the first `nodes = { lbl = { w = 60 } }`
+  reports `T: fit "cover" is not none, ellipsis or shrink`; the problem list is never cleared, so
+  the border stayed for the life of the scene. The same merge handed an ancestor's `so` to an
+  `SC` carrying `sov`, and the scroll list jumped to 0.5 after a patch naming neither key. A node
+  now keeps what its author wrote beside its merged props, and a patch adds to it.
+- **An ablation switch outlived the rebuild that set it.** `NoEval` is written at the top of
+  `EmitCore` and was never cleared, and it is read by `RectOutline`, which is also on the PARSE
+  path — so after one capture of a scene whose root carried `noeval = 1`, every clip rectangle
+  parsed afterwards, on any scene and any surface, for the rest of the session, was cut as a
+  fixed 2×2 box at (40,40), in silence. Cleared at the rebuild boundary now, where `Emit`
+  already did this for the repeat stack.
+- **An escaped brace could not be written inside a placeholder spec, though it could in a node
+  `fmt`.** 0.11.103 found the closing `}` by COUNTING braces, which reads `{{` as two opens, so
+  `{$v:x{{y}` never terminated: the whole label stayed literal text and said nothing, while the
+  same `x{{y` as a `fmt` drew `x{y` and was reported. The spec is now read as the composite
+  format it is, so both routes agree — narrowed so that nothing before the placeholder's own `:`
+  is a spec, `}}` needs a `{{` to pair with, and a format item is skipped whole. `{$v}}`,
+  `{{$v}}`, `{{{$v}}}`, `{$v:{0:F1}}`, `{$v:{0} kPa}` and `{$v:{{0}}}` all draw exactly what
+  they drew before.
+- **An unclosed placeholder was silent.** `text = "a {$press"` drew `a {$press` and reported
+  nothing, which is the same mistake `{$v:%q}` carries and reports. It draws the same characters
+  and now carries a problem, so no scene moves a pixel. `{$v:{0:F1}`, whose only `}` belongs to
+  its format item, and `{$v:{{`, whose escape leaves no closer, report the same way.
+- **A `nodes`, `data` or `ease` table whose keys all read as numbers was dropped in silence.**
+  ScriptedScreens serialises such a Lua table as a LIST, so a table keyed `["1"]` arrived with
+  its keys destroyed and the three readers that expect a map returned without a word — which
+  defeated 0.11.102's rule that a numeric `id` is patchable, because an offline test never
+  crosses the Lua-to-host bridge. The collapse is undone on this side: slot `i` is the name
+  `i + 1`, so a numeric id or data name must be a positive integer. The same recovery runs where
+  two patches queued before the structure are merged.
+- **`if` was not lazy past expression depth 256**, and nor were `and`, `or`, `mod` and a numeric
+  `mix`. Above that depth, evaluation leaves recursion for an explicit stack, and that walk
+  evaluated every node in the tree. The value was never wrong — every operator here is total —
+  but a `$name` read only in an untaken branch was recorded as unresolved, so a scene that was
+  correct at depth 256 reported an unresolved data name at 257. The walk is staged now. `step`
+  is deliberately unchanged: it always reads both arguments.
+- **An `LS`'s paint keys were evaluated outside the sample frame.** `f`, `fo`, `s`, `sw` and
+  `fea_edge` saw `i` as the enclosing repeat index while `i` in the same node's `x`/`y` meant
+  the sample, and `hover`/`down` in an `LS`'s paint applied to every instance of a repeated
+  clickable line instead of the one under the pointer. `EmitBand` fixed exactly this for `YS` in
+  0.11.98 and `LS` was left behind. `i1` now means the same thing in every attribute of the
+  node, and a repeated clickable `LS` keeps its own instance index.
+- **A stray `unit` on a plain literal was silent.** `unit` follows a bound string, a bound number
+  and its `fmt`, or a literal holding placeholders; on a plain literal it was read and never
+  printed, so `text = "OK" unit = " kPa"` drew `OK` and said nothing. It still draws `OK`, and
+  now reports the unit. A `unit` a group handed down, and a label with no `text` at all, stay
+  silent.
+- **`nofill` missed two of the six interior-fill paths** — a radial-gradient fill, and a flat
+  fill under a `blur`, both on a shape and on a `P` — so every ablation subtraction taken with it
+  attributed zero cost to those two. Measured: 18,265, 1,361 and 1,361 vertices under
+  `nofill = 1` before, 0 after, with the flat-fill controls unmoved. A measuring switch only; no
+  shipped page, example or test scene sets it.
+- **`true` and `false` written in scene text are read as 1 and 0** wherever a number is read.
+  0.11.102 made a Lua boolean read that way and left the expression grammar behind, so
+  `R v=false` became the identifier `false`, was reported as an unknown variable, and fell back
+  to `v`'s default of 1 — VISIBLE, the opposite of what the author wrote. Lower case only, as
+  every other name in the grammar is and as Lua spells them.
+
+### Changed
+
+- **`o` on anything but a `G`, `USE`, `SC` or `IMG` now shows the problem border.** `o` is group
+  opacity and is read on those four ops only; everywhere else — a shape, a `T`, an `RP`, an `LS`,
+  a gradient or clip def, the scene header — it sat in the single union of known keys because
+  four ops read it, so it was accepted and read by nothing. `R w=10 h=10 f=#fff o=0.5` drew FULLY
+  OPAQUE with nothing in `vector_stats` to say why. Nothing draws differently: `fo` fades a fill,
+  `so` a stroke, and an enclosing `G` fades a subtree. `style = { o = 0.5 }` is unaffected and
+  stays silent on the groups below it that read it. **This changes an existing scene** that
+  carries a stray `o`.
+- **An `=` expression or a `$` binding in an attribute read as a literal number now shows the
+  problem border.** About thirty attributes are read by literal-only readers whose String arm
+  falls through to the fallback, and twenty-four of them had no other check, so a computed value
+  was dropped with an EMPTY problem list. The literal reading itself is unchanged and still
+  documented; only the silence is gone. `keep`, `snap` and `ease` on a data element are not
+  covered — they are read where there is no scene to report to.
+- **`click`, `press`, `xy`, `hoverev`, `drag` or `drop` with no `id` now shows the problem
+  border.** All four `RecordHit` call sites skip a node with no id, so the shape drew, registered
+  no hit region, answered no clicks and said nothing — and the id is the value `on_click`
+  receives, so there was nothing to send. A `USE` is exempt, its attributes being symbol
+  parameters. The guide's own `hover`/`down` example was one of these and is fixed with it: 0 hit
+  regions before, 1 after, same vertices, triangles and bounds.
+- **A `C` whose radius is written under the wrong name, or is a negative literal, now shows the
+  problem border.** Either radius at or below `0` draws nothing — an empty outline, not even
+  counted as a shape — and nothing said so, so `C cx=50 cy=50 ry=8` was silently invisible. `ry`
+  with no `rx` anywhere, and a negative literal on either radius, are reported. An explicit
+  `rx = 0` stays silent, as `R w=0` does, because a scene generated from a zero datum writes
+  exactly that; so do an expression radius, a bare `C` sized by a `nodes` patch, and a negative
+  arriving in a patch — the problem list is never cleared, and one frame of a shrink animation at
+  `0` would mark the scene for good.
+- **A `nodes` table written as a plain LIST is now reported** (`nodes = { { w = 42 } }`, or one
+  built with `table.insert`). It carries no ids, never reached a node and was dropped without a
+  word. Its entries are looked up under the names `1` upwards, and an id it cannot find says the
+  table arrived as a list.
+
 ## 0.11.104
 
 ### Fixed

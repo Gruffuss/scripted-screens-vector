@@ -121,7 +121,9 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
 - Defaults for a whole scene go on the `SCENE` line (or the structure's props): `size`, `f`,
   `fea`, `sw` and the rest are inherited by every node, like a `G`'s `style`. `fit` is the one
   key the root keeps to itself.
-- Any number can be an expression: a string starting with `=`.
+- Most numbers can be an expression: a string starting with `=`. Counts and switches (`n`,
+  `click`, ...), point lists and the scene's `w`/`h` take a literal only, and an expression there
+  is reported, not evaluated — REFERENCE's "literal number only" list has them all.
   - Variables: `t` seconds, `i` repeat index from 0, `n` repeat count, `i1 i2` outer repeat
     indices, `$name` data value, `$arr[k]` array element (0-based), `sy`/`vh` scroll offset
     and viewport height.

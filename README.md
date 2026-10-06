@@ -176,8 +176,10 @@ expression reading it, because that path re-parses nothing at all.
 
 ## Making things move
 
-Any numeric attribute can be an expression: a string starting with `=`, over `t` (seconds),
-`i` (repeat index), and `$name` (data values).
+Most numeric attributes can be an expression: a string starting with `=`, over `t` (seconds),
+`i` (repeat index), and `$name` (data values). A few are read once as a literal number — counts
+and switches such as `n` and `click`, point lists, and the scene's own `w` and `h` — and an
+expression in one of those is reported rather than evaluated; `REFERENCE.md` lists every one.
 
 ```lua
 { op = "R", x = 10, y = "=100-$fill*100", w = 40, h = "=$fill*100", f = "#2E8B6E" }
@@ -596,7 +598,9 @@ node is not an element. One handler serves the whole scene.
 
 `click = 1` is opt-in and separate from having an `id`, since an id is also a patch target.
 A scene with no clickable node stays transparent to the pointer exactly as before, so
-decoration never steals a click from a button underneath it.
+decoration never steals a click from a button underneath it. **A clickable node does need an
+`id`, though**, because the id is the value `on_click` receives: one without an id registered no
+hit region at all, drew normally and took no clicks, and from 0.11.105 that is reported.
 
 A click lands on what is **drawn**: inside the node's own outline and inside any clip it is
 drawn through, in draw order, last match wins. Every shape can be clicked — `R`, `C`, `L`, `Y`,
@@ -605,8 +609,8 @@ area it would enclose, because that area was never drawn: an `L` making three si
 answers on the three lines, not in the middle. Close it (`Y`, or `SP close = 1`) to claim the
 inside. A circle does not take clicks in its corners,
 a turned shape answers along its own edges, and a list row scrolled out of sight takes
-nothing. An invisible `R` with `fo = 0` and `click = 1` makes a hit area of any size and costs
-no geometry.
+nothing. An invisible `R` with an `id`, `fo = 0` and `click = 1` makes a hit area of any size and
+costs no geometry.
 
 **Holding, hovering, dragging.** `click` reports the completed click; four more flags report
 the rest, all through the same `on_click`, and all opt-in so a scene without them behaves
@@ -632,7 +636,7 @@ CSS's `:hover` and `:active` cost one redraw on this client and nothing on the n
 
 ```
 G id=save {
-  R click=1 x=10 y=10 w=60 h=18 rx=4 f=#2E8B6E fo="=0.8+0.2*hover"
+  R click=1 id=save_box x=10 y=10 w=60 h=18 rx=4 f=#2E8B6E fo="=0.8+0.2*hover"
   T x=10 y=13 w=60 h=12 text=SAVE align=center size=8 f=#EAF4F8 fo="=1-0.3*down"
 }
 ```

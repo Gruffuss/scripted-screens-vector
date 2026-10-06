@@ -67,6 +67,7 @@
         <Compile Include="PrintfTests.cs" />
         <Compile Include="FormatReportTests.cs" />
         <Compile Include="SweepTests.cs" />
+        <Compile Include="PatchPathTests.cs" />
         <Compile Include="TextShadowTests.cs" />
         <Compile Include="RadialFillTests.cs" />
         <Compile Include="TextOrderTests.cs" />

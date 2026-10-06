@@ -40,7 +40,7 @@ from the **element**, always, so a `scene=` on a `SCENE` line does not pair anyt
 |------|------|---------|
 | `scene` | string | matching scene id |
 | `data` | map | named numbers and strings (a string may be a colour), and arrays of either; see **What a data value may be** below |
-| `nodes` | map | geometry patches by node `id` — see below |
+| `nodes` | map | geometry patches by node `id` — see below. A numeric id works; it must be a POSITIVE integer |
 | `keep` | number | `1` makes the payload a patch: names it omits keep their values |
 | `snap` | number | `1` applies this payload's numbers and number arrays at once instead of easing them in |
 | `ease` | map | per-name glide timing: `{ name = seconds }` or `{ name = { seconds, "curve", delay } }` |
@@ -60,6 +60,16 @@ does not re-expand and a group default changed by a patch does not reach what is
 descendant also keeps only the inherited keys on the whitelist -- anything inherited outside it
 is lost. Patch the leaf you mean rather than a group above it, and send a new structure when the
 children themselves have to change.
+
+**A node `id` may be a NUMBER**, and so may a `data` or `ease` name: `id = 1` is indexed as the
+name `1`, and `nodes = { ["1"] = { w = 42 } }` reaches it. It has to be a **positive integer**.
+ScriptedScreens serialises a Lua table as a LIST whenever every one of its keys reads as a
+positive integer — a numeric-looking string key included — and the mod turns that back into the
+names `1` upwards, which is exactly what was written. Keys of zero or below are dropped by the
+host before the mod sees them, leaving an empty table and nothing to report. A `nodes` table
+written as a plain LIST, with `table.insert` or `{ { w = 42 } }`, therefore arrives naming the
+nodes `1`, `2`, `3`: it reaches those ids if they exist and is **reported** as an unknown id if
+they do not.
 
 Use it for a change no expression can express — a different op, a new gradient reference, a
 count. For anything that is only a *value*, prefer `data` and an expression: that path needs
@@ -270,7 +280,9 @@ so `text="700"` is the number `700`, exactly as `text=700` is, and so are `"1e3"
 number is printed through `0.#####`, so `text="007"` draws `7` and `text="1.50"` draws `1.5`;
 where the digits matter as digits, send the value as data or write `text="7 mm"` with something
 non-numeric in it. Before 0.11.102 every one of those read as absent in silence — no label, the
-default `--`, an unidentified node whose `nodes` patch then reported an unknown id.
+default `--`, an unidentified node whose `nodes` patch then reported an unknown id. The `id`
+side has worked since 0.11.102; the patch KEY only since the host's list collapse was undone,
+because a `nodes` table whose keys were all numbers never arrived as a map at all.
 
 **A key that wants a colour, an enum word or an `op` still reads a number as absent**, and still
 says nothing: `f=5` draws no fill and `op=1` drops the node. That is deliberate — those readers
@@ -319,6 +331,16 @@ A scene reports its own faults rather than drawing nothing and leaving you to gu
 | missing clip id | reported; the reference is ignored, so the content draws unclipped |
 | `src` text that will not parse | reported. A syntax fault names the line number and prints that line; a scene that parses but holds no nodes says only `the scene text has no nodes`, with no line. **Nothing draws — unless the same element also carries a `root`, in which case the root scene draws and the `src:` problem is reported over it** |
 | a symbol that uses itself, directly or round a cycle | reported, naming the chain (`a -> b -> a`); that branch is not expanded |
+| a computed value in an attribute read as a literal number | reported from 0.11.105, as `RP "rows": n "=$k" is read as a plain number and is not evaluated; write a number`. The value falls back as it always did. `keep`, `snap` and `ease` on a data element are not covered: they are read where there is no scene to report to |
+| `o` on anything that does not composite its contents as a unit | reported from 0.11.105, as `R: o is group opacity, read on G, USE, SC and IMG only; fo fades a fill and so a stroke, or put this inside a G` — on any other node, on the scene header, and on a `GL`, `GR`, `GC` or `CP` def. An `o` arriving through a `style` map is not the author writing it there and stays silent |
+| `click`, `press`, `xy`, `hoverev`, `drag` or `drop` with no `id` | reported from 0.11.105, as `R: click (or press, xy, hoverev, drag, drop) needs an id; the id is the value on_click receives`. The node drew and registered no hit region. A `USE` is exempt, its attributes being symbol parameters |
+| a `C` with `ry` and no `rx`, or a negative radius literal | reported from 0.11.105, as `C "dot": rx is missing, so nothing is drawn` (or `rx is negative` / `ry is negative`). An explicit `0`, an expression radius, a bare `C` sized by patch and a patched value are silent |
+| `unit` on a label that prints no value | reported from 0.11.105, as `T: unit " kPa" follows a value, and this label prints no value, so nothing prints the unit` |
+| a `{` placeholder in `text` that is never closed | reported from 0.11.105, as `T: text "{$v" opens a placeholder that is never closed, so it prints itself instead of a value` |
+| a `nodes` table that arrived as a LIST | reported per name it cannot find, saying the table came as a list. Its patches are named `1` upwards |
+
+**A check on what the AUTHOR wrote judges the node's own attributes** — on the first parse and on every `nodes` patch of it. A key a group handed down in its `style` is never reported as the node's own, which is what keeps a working `style` default off the problem list. A check on a VALUE's range runs on the first parse only, because the list is never cleared and a patched value is one frame of a series.
+
 
 **There is no nesting limit.** Groups, arrays, expressions, function calls and `$name[]` indices
 nest as deep as you like: a scene 100,000 levels deep parses and draws. Nothing here recurses —
@@ -883,8 +905,17 @@ radii all by the same factor wherever the two along one side add up to more than
 on its own is the circle `rx = ry = 20`, so `ry` is written only for an ellipse. Unlike an `R`'s
 corner `ry`, this one is a true second radius — `rx = 20, ry = 8` is the flattened ellipse.
 
-**Either radius at or below `0` draws nothing, and nothing is reported.** `ry = 20` on its own is
-therefore invisible, since `rx` is still `0`; so are `rx = 20, ry = 0` and any negative on either.
+**Either radius at or below `0` draws nothing**, so `ry = 20` on its own is invisible — `rx` is
+still `0` — and so are `rx = 20, ry = 0` and any negative on either. Two of those are reported:
+**`ry` written with no `rx` anywhere**, which is a radius under the wrong name, and a **negative
+literal** on either radius, which no size means. Three stay silent on purpose: an explicit
+`rx = 0`, which is what a scene generated from a zero datum writes and is the drawing it asked
+for; a radius that is an **expression**, which a shrink animation takes through `0` on every
+cycle; and a negative arriving in a `nodes` **patch**, which is one frame of a value a script
+computes. The problem list is never cleared for the life of a scene, which is why the last two
+are not reported — one frame below zero would mark the scene for good. A `C` with no radius at
+all is silent too: `nodes` is the geometry patch, so a circle declared bare and sized by patch
+is an ordinary thing to write.
 There is no minimum, unlike a radial gradient's `r`, which becomes `0.0001`: an `rx = 20,
 ry = 0.0001` ellipse draws, as a horizontal sliver.
 
@@ -1126,7 +1157,7 @@ container, where it will be clipped away and look like nothing happened.
 | `x`, `y`, `w`, `h` | the box the text is laid out in |
 | `text` | a literal, `"$name"`, `"$rows[i]"` for one slot of a data array, or a literal holding several `{$name}` placeholders |
 | `fmt` | printf spec for a bound **number**, e.g. `"%.1f"`. A spec holding no conversion **prints itself** rather than the number — `fmt = "%q"` draws `%q` — and is reported when it could be a conversion mistyped: it holds a letter, or a `%` with something after it. One of pure punctuation and digits is literal text you asked for and is silent: `"%%"` draws `%`, `"50%"` draws `50%`, `"]"` draws `]`, `"{{0}}"` draws `{0}`. **Empty is the default format**, as no `fmt` at all is. A .NET composite format works and is not reported: `"{0:F1}"` draws `1.2`, `"{0:D3}"` draws `001`, `"{0,6:0.0}"` draws `   1.3`. A spec no number has a conversion for, `"{0:Z}"`, draws the `missing` text and is reported |
-| `unit` | a literal suffix, added once after everything else the label prints. **Only a label that reads data takes it**: `text = "$name"`, `"$rows[i]"`, or a literal holding `{$…}` or `{=…}` placeholders. A plain literal ignores it, unreported |
+| `unit` | a literal suffix, added once after everything else the label prints. **Only a label that reads data takes it**: `text = "$name"`, `"$rows[i]"`, or a literal holding `{$…}` or `{=…}` placeholders. A plain literal ignores it, **and is reported** |
 | `missing` | what to draw when the name has no value; default `"--"`. An empty string is a value and draws nothing |
 | `size` | font size in scene units, default `12`; scales with the transform |
 | `f` | colour; **a label with no `f` draws white**, where a shape with no `f` draws no fill |
@@ -1180,20 +1211,37 @@ format, and `missing` in its place when the name has no value, while the rest of
 shows. A `{` not followed by `$` or `=` is ordinary text, and a label whose printed characters
 did not change makes no new string, so a line of readouts costs the same as one.
 
-**A placeholder's spec may be a .NET composite format**, the braces counted, so `{$v:{0:F1}}`
-draws `1.2` and `{$v:{0} kPa}` draws `1.25 kPa`. Before 0.11.103 the FIRST `}` ended the
-placeholder, so every composite format was cut in half and the label drew its `missing` text with
-a problem beside it, while the same spec as the node's `fmt` printed correctly. A spec whose
-braces do not balance — `{$v:x{{y}` — leaves no closer, so the placeholder stays ordinary text, as
-one never closed does. An empty spec, `{$v:}`, is the default format.
+**A placeholder's spec may be a .NET composite format**, read the way the formatter that runs it
+reads one, so `{$v:{0:F1}}` draws `1.2` and `{$v:{0} kPa}` draws `1.25 kPa`. Inside the spec `{{`
+is an escaped brace, a `{0…}` format item ends at its own `}`, and `}}` is an escaped brace once a
+`{{` has appeared to need one — so an escape means the same there as in a node `fmt`:
+`{$v:{{0}}}` draws `{0}`, and `{$v:x{{y}` draws `x{y` and is reported, exactly as `fmt = "x{{y"`
+is. Before 0.11.103 the FIRST `}` ended the placeholder, so every composite format was cut in
+half and the label drew its `missing` text with a problem beside it; 0.11.103 counted braces
+instead, which read `{{` as two opens, so an escaped brace could not be written inside a
+placeholder at all.
+
+**A `}` straight after the closing `}` is the label's own**, not half of an escape: `{$v}}` draws
+`1.25}`, `{{$v}}` draws `{1.25}`, `{$v:%.1f}}` draws `1.2}` and `{"a":{$v}}` draws `{"a":1.25}`.
+Only a spec that holds a `{{` reads a later `}}` as one escaped brace, which is what lets
+`{$v:{{0}}}` work. A lone literal `}` inside a spec cannot be written; put it after the
+placeholder instead.
+
+**A placeholder with no closing `}` left over — `{$press`, or `{$v:{0:F1}` whose only `}` belongs
+to its format item — is ordinary text and is reported.** An empty spec, `{$v:}`, is the default
+format.
 
 **`unit` only follows text that came from data.** It is added after a bound string, after a bound
 number and its `fmt` — `fmt = "%.1f kPa"` with `unit = " U"` draws `12.3 kPa U` — and after the
 last character of a literal that holds placeholders, once, however many of them there are.
-**On a plain literal it does nothing, and nothing is reported:** `text = "hello", unit = " kPa"`
-draws `hello`, so write the unit into the text. Two bound cases drop it as well — a name with no
-value draws `missing` on its own, `--` rather than `-- kPa`, and so does a `fmt` that cannot
-format the number — while inside a literal with placeholders it always follows, so
+**On a plain literal it does nothing, and says so:** `text = "hello", unit = " kPa"` draws
+`hello` and reports the unit, so write the unit into the text instead. The report is for a unit
+written **on that label**: one a group handed down in its `style` map is working for the bound
+readouts under it and is never reported on a plain-literal label beside them, and a label with
+no `text` at all prints nothing either way — the missing label is the fault there, and its text
+may still arrive by patch. Two bound cases drop the unit as well — a name with no value draws
+`missing` on its own, `--` rather than `-- kPa`, and so does a `fmt` that cannot format the
+number — while inside a literal with placeholders it always follows, so
 `text = "p {$nope} k", unit = " U"` draws `p -- k U` while the name is unresolved.
 
 **A placeholder may be an expression:** `{=expr}` or `{=expr:%.1f}`, over `t`, data, `since()`
@@ -1471,6 +1519,14 @@ Applies to every shape node **except `IMG`**, which draws no fill, stroke or sha
 its only paint key is `o`. A `T` takes `f`, `fo` and `sh` and is never stroked, and a `YS` is
 filled but never stroked.
 
+**`o` is GROUP opacity and is read on `G`, `USE`, `SC` and `IMG` only.** On any other op — a
+shape, a `T`, an `RP`, an `LS`, a gradient or clip def, or the scene header — it was accepted
+and then read by nothing, so the node drew fully opaque; it is **reported** there now. `fo`
+fades a fill, `so` a stroke, `fo2` a band's second edge, and an enclosing `G o = …` fades a
+whole subtree as one. The report is for an `o` written on that node: `style = { o = 0.5 }`
+hands `o` to every node below, where the groups read it and everything else ignores it, and
+that stays silent.
+
 ### Fill
 
 | Key | Meaning |
@@ -1572,6 +1628,14 @@ travels as the event's *value* rather than its id. One handler serves the whole 
 `click = 1` is opt-in and separate from `id`, because an id is also how a node is patched and
 patch targets are common; making all of them swallow clicks would be a surprise. A scene with
 no clickable node stays transparent to the pointer exactly as before.
+
+**`click` with no `id` is reported from 0.11.105**, as
+`R: click (or press, xy, hoverev, drag, drop) needs an id; the id is the value on_click receives`.
+The id is the whole payload — a click sends it as the event's value, `press = 1` sends `down:id` —
+so a hit region without one would have nothing to answer with, and the node registered none at
+all. Before 0.11.105 it drew normally and took no clicks, with nothing said. The same applies to
+`press`, `xy`, `hoverev`, `drag` and `drop`, each of which makes a node clickable on its own. A
+`USE` is exempt: its attributes are symbol parameters of any name, `click` included.
 
 **A click lands on what is drawn:** inside the node's own outline and inside any clip it is
 drawn through. Where regions overlap, the one drawn last wins. Before 0.11.21 it was the outline's bounding rectangle, so a circle took clicks
@@ -1840,7 +1904,10 @@ all, silently.
 into the attributes of every node below, whatever its `op`, exactly as though it had been written
 there — including a key that node does not read, which does nothing, and a key the renderer does
 not know at all, which is **reported on every node below it**, so one typo in a root `style`
-fills the problem list. `style = { w = 40, h = 12 }` sizes a row of bare `R`s. The transform keys
+fills the problem list. A key a node does not read stays silent even where writing it on the node
+would be reported — `o` on a shape, `unit` on a plain literal, an enum word from another op's
+vocabulary — because those checks judge what the author wrote on the node itself, on the first
+parse and on every `nodes` patch of it. `style = { w = 40, h = 12 }` sizes a row of bare `R`s. The transform keys
 are the trap: `style = { s = {2, 2} }` reaches every descendant `G` as well, and each level
 scales again.
 
@@ -2185,20 +2252,27 @@ These take a **literal number only**, and an expression in one of them is not ev
 - and, by exception, the text settings `cspace` `lh` `weight`, the miter limit `ml`, and the
   `size` inside `fl`.
 
-**Nothing is reported for most of them.** A flag, a count or a single number falls back to its
-own default: `ztext` to `1`, `kern` to on, `seg` to `8`, `ml` to `4`, a scene `w` to `100`. A
-number inside a list reads as `0` instead of its default, so `m = { "=$k", 0, 0, 1, 0, 0 }` is
-the matrix `{ 0, 0, 0, 1, 0, 0 }`. Where the **whole** list is one string, `m`, `slice`, `bw`,
-`uv`, `sh` and `oc` are reported, `p` and `dash` are not, and a `p` that is a string draws
-nothing. An `fl` whose `size` is a string is reported as not a number. Sent from a Lua table, a
-value that only looks like a number — the string `"3"` — is read as `3` by the keys above and
-not at all by these.
+**An `=` or a `$` in one of them is reported from 0.11.105**, as
+`RP "rows": n "=$k" is read as a plain number and is not evaluated; write a number`. The value
+still falls back exactly as it always did: a flag, a count or a single number to its own default
+— `ztext` to `1`, `kern` to on, `seg` to `8`, `ml` to `4`, a scene `w` to `100` — and a number
+inside a list to `0` rather than to that default, so `m = { "=$k", 0, 0, 1, 0, 0 }` is still the
+matrix `{ 0, 0, 0, 1, 0, 0 }` and a `p` that is one string still draws nothing. A list is read
+element by element, so one computed entry among six is reported as well. Where the **whole**
+value is one string, `m`, `slice`, `bw` and `uv` also keep their own length message, so one
+mistake there prints two lines; `sh` and `oc` are reported by their own check alone, as are
+`weight`, which is not one of its words, and the `size` inside `fl`, which is not a number.
+**A data element's `keep`, `snap` and `ease` are the silence that is left**: they are read off
+the data element, which has no scene to report to. Sent from a Lua table, a value that only
+looks like a number — the string `"3"` — is read as `3` by the keys above and not at all by
+these, and is not reported: it is a number, only spelled as a string.
 
 Two ways to reach a literal-only key with a number you worked out. A **symbol parameter** is
 substituted while the scene is parsed and keeps its type, so `RP n = "%count"` under
-`USE count = 5` draws five — an expression passed the same way still reads `0`. Data cannot
-reach them at all: to make a `click` follow data, put the node inside a group whose `v` is the
-expression.
+`USE count = 5` draws five — an expression passed the same way still reads `0`, and from
+0.11.105 it is reported on the node the parameter lands on, not on the `USE`, whose own
+attributes may be named anything and are never judged. Data cannot reach them at all: to make a
+`click` follow data, put the node inside a group whose `v` is the expression.
 
 **Write the `=`, even where it looks optional.** In the table form the parser drops a leading `=`
 if it finds one, so both spellings reach it; in the `src` text form the `=` is what makes the

@@ -508,22 +508,29 @@ internal static class VectorElementPatch
     /// </remarks>
     private static SS.UiValue MergeNodePatches(SS.UiValue earlier, SS.UiValue later)
     {
-        if (earlier.Type != SS.UiValueType.Map || earlier.Map == null)
+        // Both sides go through `NamedMap`: a patch naming only numeric ids arrives as an
+        // array, and this answered "not a map" and returned the other patch WHOLE -- dropping
+        // one of two patches queued before the structure arrived, which is the fault this
+        // merge exists to stop, one type down.
+        var earlierMap = SceneParser.NamedMap(earlier);
+        var laterMap = SceneParser.NamedMap(later);
+
+        if (earlierMap == null)
             return later;
 
-        if (later.Type != SS.UiValueType.Map || later.Map == null)
+        if (laterMap == null)
             return earlier;
 
-        var byId = new Dictionary<string, SS.UiProp>(earlier.Map.Length + later.Map.Length,
+        var byId = new Dictionary<string, SS.UiProp>(earlierMap.Length + laterMap.Length,
             StringComparer.Ordinal);
 
-        foreach (var node in earlier.Map)
+        foreach (var node in earlierMap)
         {
             if (!string.IsNullOrEmpty(node.Key))
                 byId[node.Key] = node;
         }
 
-        foreach (var node in later.Map)
+        foreach (var node in laterMap)
         {
             if (string.IsNullOrEmpty(node.Key))
                 continue;

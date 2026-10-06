@@ -16,6 +16,7 @@ internal sealed class EvalContext
 {
     private readonly List<float> _indices = new(4);
     private readonly List<float> _counts = new(4);
+    private readonly List<bool> _samples = new(4);
 
     /// <summary>Seconds since the scene was first shown.</summary>
     internal float Time { get; set; }
@@ -143,7 +144,8 @@ internal sealed class EvalContext
         if (scope == null || ScopeId == null || System.Array.IndexOf(scope, ScopeId) < 0)
             return 0f;
 
-        return index < 0 || RepeatDepth == 0 || Mathf.RoundToInt(Index(0)) == index ? 1f : 0f;
+        var instance = InstanceIndex;
+        return index < 0 || instance < 0 || instance == index ? 1f : 0f;
     }
 
     /// <summary>`since($name)`: seconds since `name` last arrived, or a long time for one never sent.</summary>
@@ -348,16 +350,43 @@ internal sealed class EvalContext
     /// </remarks>
     internal HashSet<string> Missing { get; } = new(StringComparer.Ordinal);
 
-    internal void PushRepeat(float index, float count)
+    /// <summary>
+    /// Pushes a repeat frame. <paramref name="sample"/> marks a `YS`/`LS` sample frame: `i`
+    /// and `n` read it like any other, but it names a point along one shape rather than an
+    /// instance of one, so it is not what identifies a hit region or a hovered node.
+    /// </summary>
+    internal void PushRepeat(float index, float count, bool sample = false)
     {
         _indices.Add(index);
         _counts.Add(count);
+        _samples.Add(sample);
     }
 
     internal void PopRepeat()
     {
         _indices.RemoveAt(_indices.Count - 1);
         _counts.RemoveAt(_counts.Count - 1);
+        _samples.RemoveAt(_samples.Count - 1);
+    }
+
+    /// <summary>
+    /// The innermost REPEAT index, skipping sample frames; -1 outside any repeat. This is what
+    /// identifies one instance of a repeated node, so it is what a hit region records and what
+    /// `hover` and `down` compare against. Reading the innermost frame instead told a sampled
+    /// shape that it was instance 0 of itself.
+    /// </summary>
+    internal int InstanceIndex
+    {
+        get
+        {
+            for (var at = _indices.Count - 1; at >= 0; at--)
+            {
+                if (!_samples[at])
+                    return Mathf.RoundToInt(_indices[at]);
+            }
+
+            return -1;
+        }
     }
 
     /// <summary>
@@ -369,6 +398,7 @@ internal sealed class EvalContext
     {
         _indices.Clear();
         _counts.Clear();
+        _samples.Clear();
     }
 
     /// <summary>How many repeats enclose the node being walked. 0 outside any.</summary>
@@ -607,6 +637,9 @@ internal sealed class Expression
 
     /// <summary>True when nothing but a literal number is involved.</summary>
     internal bool IsConstant => _kind == Kind.Constant;
+
+    /// <summary>That literal, where <see cref="IsConstant"/> is true; 0 otherwise.</summary>
+    internal float ConstantValue => _kind == Kind.Constant ? _value : 0f;
 
     internal static Expression Constant(float value)
     {
@@ -987,36 +1020,146 @@ internal sealed class Expression
     }
 
     /// <summary>
+    /// How this node reads its arguments: <paramref name="probe"/> is the one argument it must
+    /// evaluate before it can decide whether it reads any other (-1 when it decides nothing),
+    /// and the return value is how many leading arguments it reads whatever they hold.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors what <see cref="Invoke"/> and the operator arms of <see cref="Evaluate"/>
+    /// actually read. Nearly everything reads all its arguments; the exceptions are the whole
+    /// list: `if`, `and` and `or` read the FIRST and then decide, `mod` guards on its DIVISOR
+    /// and returns before it reads the dividend, so the one it always reads is the SECOND, and a
+    /// numeric `mix` reads none -- <see cref="Invoke"/> has no case for it, because a mix is a
+    /// colour, read by <see cref="EvaluateColour"/>. `step` reads argument 1 before argument 0
+    /// but always reads both, so it needs nothing here: the set of names it records in
+    /// <see cref="EvalContext.Missing"/> is the same either way. One switch rather than two
+    /// predicates: this runs per node of a deep tree.
+    /// </remarks>
+    private int EagerArgs(out int probe)
+    {
+        probe = -1;
+
+        if (_kind != Kind.Call)
+            return _args.Length;
+
+        switch (_name)
+        {
+            case "if":
+            case "and":
+            case "or":
+                probe = 0;
+                return 0;
+
+            case "mod":
+                probe = 1;
+                return 0;
+
+            case "mix":
+                return 0;
+
+            default:
+                return _args.Length;
+        }
+    }
+
+    /// <summary>
+    /// Which argument is still needed once the probed one is in the memo, or -1 when none is.
+    /// Mirrors <see cref="Invoke"/>: `if` takes one branch, `and` stops on a false left operand,
+    /// `or` on a true one, and `mod` answers 0 for a zero divisor without reading the dividend.
+    /// </summary>
+    private int LazyBranch(EvalContext context)
+    {
+        switch (_name)
+        {
+            case "if": return NonZero(Arg(0, context)) ? 1 : 2;
+            case "and": return NonZero(Arg(0, context)) ? 1 : -1;
+            case "or": return NonZero(Arg(0, context)) ? -1 : 1;
+            case "mod": return Mathf.Approximately(Arg(1, context), 0f) ? -1 : 0;
+            default: return -1;
+        }
+    }
+
+    /// <summary>
     /// Evaluates a deep tree with an explicit stack, bottom up, memoising each node's value so
     /// the ordinary switch can read its children instead of calling into them.
     /// </summary>
+    /// <remarks>
+    /// Stage-driven rather than collect-everything-then-evaluate, and that is what makes it
+    /// LAZY. The first version listed EVERY node and evaluated all of them, so past
+    /// <see cref="DeepTree"/> an `if` evaluated the branch it does not take, `and`/`or` their
+    /// right-hand side, `mod` a dividend it discards and a numeric `mix` all three of its
+    /// arguments. The VALUE came out the same -- every operator here is total -- but the work
+    /// was done, and a data name read only there was recorded in
+    /// <see cref="EvalContext.Missing"/>, so a scene that is correct at depth 256 reported an
+    /// unresolved data name at 257.
+    ///
+    /// Stage 0 pushes what the node always reads, stage 1 runs for a node that decides, once its
+    /// probed argument is known, and pushes the one argument it chose, stage 2 evaluates. The
+    /// node's own frame goes on before its arguments, so it pops after them and the memo holds
+    /// every value the ordinary switch will read. A node with nothing to resolve first is
+    /// evaluated where it is found, which keeps the common node at one push and one pop.
+    /// </remarks>
     private float EvaluateDeep(EvalContext context)
     {
         var memo = new Dictionary<Expression, float>(ReferenceComparer.Instance);
-        var order = new List<Expression>(64);
-        var pending = new Stack<Expression>();
-        pending.Push(this);
-
-        // Post-order: push a node, then its children; reversing the visit order afterwards
-        // leaves every child before its parent.
-        while (pending.Count > 0)
-        {
-            var node = pending.Pop();
-            order.Add(node);
-
-            foreach (var child in node._args)
-            {
-                if (child != null)
-                    pending.Push(child);
-            }
-        }
+        var pending = new Stack<(Expression Node, int Stage)>();
+        pending.Push((this, 0));
 
         _memo = memo;
         try
         {
-            for (var i = order.Count - 1; i >= 0; i--)
+            while (pending.Count > 0)
             {
-                var node = order[i];
+                var (node, stage) = pending.Pop();
+
+                if (stage == 0)
+                {
+                    var eager = node.EagerArgs(out var probe);
+
+                    if (probe >= 0)
+                    {
+                        pending.Push((node, 1));
+
+                        var first = probe < node._args.Length ? node._args[probe] : null;
+                        if (first != null)
+                            pending.Push((first, 0));
+
+                        continue;
+                    }
+
+                    if (eager == 0)
+                    {
+                        // A leaf, or a numeric `mix`: nothing to resolve first, nothing to read.
+                        memo[node] = node.Evaluate(context);
+                        continue;
+                    }
+
+                    pending.Push((node, 2));
+
+                    // Pushed in reverse, so argument 0 comes off the stack first and the names
+                    // an argument reports land in the order the recursive path records them.
+                    for (var i = eager - 1; i >= 0; i--)
+                    {
+                        var child = node._args[i];
+                        if (child != null)
+                            pending.Push((child, 0));
+                    }
+
+                    continue;
+                }
+
+                if (stage == 1)
+                {
+                    // The probed argument is in the memo, so Arg reads it instead of descending.
+                    var branch = node.LazyBranch(context);
+                    pending.Push((node, 2));
+
+                    if (branch >= 0 && branch < node._args.Length && node._args[branch] != null)
+                        pending.Push((node._args[branch]!, 0));
+
+                    continue;
+                }
+
                 memo[node] = node.Evaluate(context);
             }
 
@@ -1598,6 +1741,19 @@ internal sealed class Expression
 
         private static Expression Variable(string name)
         {
+            // `true` is 1 and `false` is 0, because 0.11.102 made a LUA boolean read as 1 and 0
+            // everywhere a number is read and scene text has no boolean type of its own: `R
+            // v=false` written in text became the identifier `false`, was reported as an unknown
+            // variable, and fell back to the attribute's DEFAULT -- which for `v` is 1, so the
+            // node the author hid stayed on screen. Measured on 0.11.104: `v=false` and `v=true`
+            // both evaluated to 1, each with the problem `expression "false": unknown variable
+            // 'false'`. Lower case only, as every other name here is and as Lua spells them.
+            if (name == "true")
+                return Constant(1f);
+
+            if (name == "false")
+                return Constant(0f);
+
             if (name == "ver")
                 return Constant(VersionNumber);
 

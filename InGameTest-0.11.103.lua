@@ -23,9 +23,17 @@
 --        %q        -> %q        prints itself where a number was meant
 --      and ONE more, in column C ONLY:
 --        x{{y      -> x{y       drops the number AND holds a letter, so it reads as a typo.
---                               It CANNOT be written inside a placeholder: the brace count reads
---                               {{ as two opens, so `{$v:x{{y}` never terminates and stays
---                               literal. Found by the offline check before this page was pushed.
+--                               It cannot be written inside a placeholder ON THIS BUILD: the
+--                               brace count reads {{ as two opens, so `{$v:x{{y}` never
+--                               terminates and stays literal. Found by the offline check before
+--                               this page was pushed.
+--                               SUPERSEDED after 0.11.104: the spec is read as a composite
+--                               format now, so `{$v:x{{y}` draws x{y and IS reported, and the
+--                               B-column row for it is on the page that carries that change.
+--                               Everything this page DRAWS is unchanged by it, and its PASS
+--                               line below still holds, which is why the drawn rows are left
+--                               exactly as they were seen on a console. The three prose rows at
+--                               y=102..116 describe this build, not the current one.
 --
 --   C  the same specs as a NODE fmt rather than a placeholder. They must agree with B, row for
 --      row: one function serves both checks now.

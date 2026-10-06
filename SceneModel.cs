@@ -267,6 +267,19 @@ internal sealed class VecNode
     /// </summary>
     internal SS.UiProp[]? SourceProps;
 
+    /// <summary>
+    /// The props the AUTHOR wrote on this node, inherited defaults excluded. Kept beside
+    /// <see cref="SourceProps"/>, for identified nodes only.
+    /// </summary>
+    /// <remarks>
+    /// Both are needed, and they are not the same question. A re-parse has to see the merged
+    /// map or the node would lose every default its group handed down; an author-intent check
+    /// -- "did the author write `so` here", "is this enum word theirs", "is `o` on a shape" --
+    /// has to see only what they wrote, because a `style` map hands every key it holds to
+    /// everything below it. `ParseNode` reads this as its `own` argument.
+    /// </remarks>
+    internal SS.UiProp[]? OwnProps;
+
     // --- T only -------------------------------------------------------------
     internal string? TextLiteral;
     internal string? TextData;
@@ -628,6 +641,13 @@ internal static class SceneParser
         // scenes here.
         CheckWord(props, "fit", scene, "SCENE", "stretch", "contain", "cover");
 
+        // The header is the same silence: the root is not a group, and `o` is not one of the
+        // paint keys a root hands down, so it reached nothing at all. The documented
+        // `style = { o = 0.5 }` is a different thing and still works, on the groups below that
+        // read it -- it is a `style` key here, not an `o`. Nothing the HOST writes into these
+        // props is called `o`, so an `o` here is always the author's.
+        CheckGroupOpacity(props, scene, "SCENE", scene.Id);
+
         ParseDefs(PropValue(props, "defs"), scene);
 
         // Defaults on the scene root, inherited by everything in it exactly as a `G`'s are.
@@ -689,15 +709,80 @@ internal static class SceneParser
         }
     }
 
+    /// <summary>
+    /// A prop whose value is a map keyed by names the AUTHOR chose, recovered when the host
+    /// collapsed it into an array.
+    /// </summary>
+    /// <remarks>
+    /// ScriptedScreens serialises a Lua table as an ARRAY whenever every one of its keys reads
+    /// as a positive integer, and a numeric-looking string key counts: `{ ["1"] = ... }`
+    /// arrives as an array of one with the key gone. `nodes`, `data` and `ease` are all keyed
+    /// by author names, and a name is allowed to be a number -- `id = 1` has been patchable
+    /// since 0.11.102 and `$1` is a name the expression parser reads -- so a payload naming
+    /// ONLY numeric ids reached the `Type != Map` tests as an array and was dropped without a
+    /// word. Measured on a console: `nodes = { ["1"] = ... }` did nothing, while
+    /// `nodes = { ["1"] = ..., ["two"] = ... }` applied both, because one non-numeric key is
+    /// what keeps the whole table a map.
+    ///
+    /// The collapse is reversible: the host writes the key `n` into slot `n - 1`, so slot `i`
+    /// is the name `i + 1`, printed exactly as a numeric `id` is printed. None of these three
+    /// props has a legitimate array form -- each is a map of name to value -- so an array here
+    /// is always a collapsed map. A sparse table leaves holes, key 3 with no key 2, and a hole
+    /// is `Nil`: dropped, so the names do not shift.
+    ///
+    /// NOT recoverable, and not reportable either: a table whose numeric keys are all zero or
+    /// negative collapses to an EMPTY array, indistinguishable from `{}`. A numeric id or data
+    /// name must be a positive integer.
+    /// </remarks>
+    internal static SS.UiProp[]? NamedMap(SS.UiValue? value)
+    {
+        if (value == null)
+            return null;
+
+        if (value.Value.Type == SS.UiValueType.Map)
+            return value.Value.Map;
+
+        if (value.Value.Type != SS.UiValueType.Array || value.Value.Array == null)
+            return null;
+
+        var source = value.Value.Array;
+        var recovered = new List<SS.UiProp>();
+
+        for (var i = 0; i < source.Length; i++)
+        {
+            // A hole is `Nil` and is DROPPED rather than carried: every reader here ignores
+            // one, but `VectorElementPatch.MergeNodePatches` does not, and a later patch's
+            // hole would overwrite an earlier patch for that same name.
+            if (source[i].Type == SS.UiValueType.Nil)
+                continue;
+
+            recovered.Add(new SS.UiProp
+            {
+                Key = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Value = source[i],
+            });
+        }
+
+        return recovered.ToArray();
+    }
+
     private static bool PatchNodesCore(SS.UiProp[] props, VecScene scene)
     {
-        var patch = PropValue(props, "nodes");
-        if (patch?.Type != SS.UiValueType.Map || patch.Value.Map == null)
+        var raw = PropValue(props, "nodes");
+        var patch = NamedMap(raw);
+        if (patch == null)
             return false;
+
+        // A patch written as a LIST -- `nodes = { { w = 42 } }`, or one built with
+        // `table.insert` -- carries no node ids at all, and arrives in the same collapsed shape
+        // as a genuine numeric-keyed map. It never reached a node and never said why, so the
+        // recovery turns it into a report rather than leaving it silent: the names it is being
+        // looked up under are the slot numbers, which is the one fact that explains it.
+        var collapsed = raw!.Value.Type == SS.UiValueType.Array;
 
         var changed = false;
 
-        foreach (var entry in patch.Value.Map)
+        foreach (var entry in patch)
         {
             if (string.IsNullOrEmpty(entry.Key)
                 || entry.Value.Type != SS.UiValueType.Map || entry.Value.Map == null)
@@ -707,24 +792,45 @@ internal static class SceneParser
 
             if (!scene.Identified.TryGetValue(entry.Key, out var target))
             {
-                scene.Problem($"patch for unknown node id \"{entry.Key}\"");
+                scene.Problem($"patch for unknown node id \"{entry.Key}\""
+                              + (collapsed
+                                  ? "; the nodes table arrived as a list, so its patches were"
+                                    + " named 1 upwards -- a patch is keyed by node id"
+                                  : string.Empty));
                 continue;
             }
 
+            var patchedNode = target.List[target.Index];
             var merged = Merge(target.Props, entry.Value.Map);
 
-            var replacement = ParseNode(merged, scene);
+            // Two maps, two questions. `merged` is what the node now IS -- its own props, the
+            // defaults its group handed down, and the patch on top -- and the re-parse needs
+            // every one of them. `authored` is what the AUTHOR has written on this node, the
+            // declaration plus every patch since, and the intent checks need only that.
+            //
+            // Passing no `own` left `own ??= map` falling back to `merged`, and `target.Props`
+            // is itself the merged map (set a few lines below, and at the end of `ParseNode`),
+            // so after ONE patch an inherited key read as one the author had typed on the node.
+            // Measured on 0.11.104: `G fit=cover { T id=lbl text=hi }` parses clean and the
+            // first `nodes = { lbl = { w = 60 } }` reports `T: fit "cover" is not none,
+            // ellipsis or shrink` -- the problem border, for the life of the scene, on a scene
+            // the reference tells authors to write. The same merge handed an ancestor's `so`
+            // (stroke opacity everywhere but an `SC`) to an `SC` carrying `sov`, and the list
+            // jumped to 0.5 after a patch that named neither key.
+            var authored = Merge(patchedNode.OwnProps ?? entry.Value.Map, entry.Value.Map);
+
+            var replacement = ParseNode(merged, scene, null, authored, patching: true);
             if (replacement == null)
                 continue;
 
             // Children are not patchable and are kept as they were, so a patch on a group
             // does not cost a re-parse of everything under it.
-            var previous = target.List[target.Index];
-            if (replacement.Children.Count == 0 && previous.Children.Count > 0)
-                replacement.Children.AddRange(previous.Children);
+            if (replacement.Children.Count == 0 && patchedNode.Children.Count > 0)
+                replacement.Children.AddRange(patchedNode.Children);
 
             replacement.Id = entry.Key;
             replacement.SourceProps = merged;
+            replacement.OwnProps = authored;
 
             target.List[target.Index] = replacement;
             changed = true;
@@ -793,11 +899,16 @@ internal static class SceneParser
         into.Eased.Clear();
         into.KeepUnmentioned = PropNumber(props, "keep", 0f) > 0.5f;
 
-        var data = PropValue(props, "data");
-        if (data == null || data.Value.Type != SS.UiValueType.Map || data.Value.Map == null)
+        // `data` collapses to an array exactly as `nodes` does, and `$1` is a name the
+        // expression parser reads, so `data = { ["1"] = 5 }` with `w = "=$1*2"` was dropped
+        // too. `data = {}` is an empty table, which the host ALSO delivers as an empty ARRAY:
+        // `NamedMap` answers a zero-length array rather than null, so the clears above still
+        // stand and `data = {}` keeps meaning "clear".
+        var data = NamedMap(PropValue(props, "data"));
+        if (data == null)
             return;
 
-        foreach (var entry in data.Value.Map)
+        foreach (var entry in data)
         {
             if (string.IsNullOrEmpty(entry.Key))
                 continue;
@@ -898,11 +1009,13 @@ internal static class SceneParser
     /// </remarks>
     private static void ReadEasing(SS.UiProp[] props, EvalContext into)
     {
-        var timings = PropValue(props, "ease");
-        if (timings?.Type != SS.UiValueType.Map || timings.Value.Map == null)
+        // Keyed by the same author names as `data`, so `ease = { ["1"] = 0.5 }` collapsed
+        // into an array and was dropped with it.
+        var timings = NamedMap(PropValue(props, "ease"));
+        if (timings == null)
             return;
 
-        foreach (var entry in timings.Value.Map)
+        foreach (var entry in timings)
         {
             if (string.IsNullOrEmpty(entry.Key))
                 continue;
@@ -1314,7 +1427,10 @@ internal static class SceneParser
     /// One union rather than a set per op. It catches the error that actually happens -- a
     /// typo, `fille` or `strke` -- which otherwise vanishes silently because unknown keys are
     /// ignored by design. It does NOT catch a real key on the wrong op, `rx` on a band say;
-    /// that needs per-op sets and risks rejecting combinations that are merely unusual.
+    /// that needs per-op sets and risks rejecting combinations that are merely unusual. The
+    /// exceptions are checked one key at a time instead, and against what the author wrote on
+    /// the node rather than the merged map: the enum words in `CheckWords`, and `o` in
+    /// `CheckGroupOpacity`.
     /// </remarks>
     private static readonly HashSet<string> KnownKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -1352,19 +1468,108 @@ internal static class SceneParser
         "visor_anchor_look", "visor_anchor_ref", "visor_anchor_dx", "visor_anchor_dy",
     };
 
+    /// <summary>
+    /// Every attribute read as a LITERAL number, where an `=` expression or a `$` data name is
+    /// dropped and nothing else already reports it.
+    /// </summary>
+    /// <remarks>
+    /// The literal half is by design and documented: a count, a flag and a point list are read
+    /// once, when the scene is parsed, and the geometry they decide is baked there. The SILENCE
+    /// was not. Measured on 0.11.104: `RP n="=$k"` drew nothing, `click="=$k"` was not
+    /// clickable, `p="=$k"` had no points and `p=[1,"=$k",3,4]` read that corner as 0 -- every
+    /// one of them with an EMPTY problem list, so an author who wrote the obvious thing had
+    /// nothing to read anywhere.
+    ///
+    /// `m`, `slice`, `bw` and `uv` are here for their ELEMENTS: a whole value that is one string
+    /// is already caught by their own length and range checks, but `m=["=$k",0,0,1,0,0]` is six
+    /// entries long and `slice=[1,1,"=$k",1]` is four and non-negative, so both passed in
+    /// silence. The price is one duplicate line where the whole value is a string.
+    ///
+    /// Left out because something already reports them: a shadow's four numbers
+    /// (`ParseShadow`), `weight` (`CheckWord`) and an `fl`'s `size` (`FirstLineStyle`). `keep`,
+    /// `snap` and `ease` are literal-only too and are NOT here: they live on the DATA element,
+    /// which `ReadData` reads with no scene to report to.
+    ///
+    /// `w` and `h` are in <see cref="SceneLiteralKeys"/> instead, since on a NODE they take an
+    /// expression; this set is judged on every op except the header.
+    /// </remarks>
+    private static readonly HashSet<string> LiteralKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "n", "lod", "seg", "close", "mid", "kern", "wrap",
+        "click", "press", "xy", "hoverev", "drag", "drop",
+        "cspace", "lh", "ml",
+        "p", "dash", "m", "slice", "bw", "uv",
+    };
+
+    /// <summary>The scene header's literal-only keys, judged only on the header.</summary>
+    private static readonly HashSet<string> SceneLiteralKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "w", "h", "nofill", "nofeather", "noeval", "ztext",
+    };
+
+    /// <summary>Reports a computed value written where only a literal number is read.</summary>
+    /// <remarks>
+    /// An `=` is an expression and a `$` is a data name; both are dropped whole and the key
+    /// keeps its default. `%param` is NOT reported: a symbol parameter is substituted before the
+    /// node is parsed and keeps its type, so `RP n="%count"` under `USE count=5` really does
+    /// draw five. An array is scanned element by element as well, since a point list is the one
+    /// of these an author is most likely to try to compute.
+    /// </remarks>
+    private static void CheckLiteral(SS.UiProp prop, VecScene scene, string? op, string? id)
+    {
+        var text = ComputedText(prop.Value);
+
+        if (text == null && prop.Value.Type == SS.UiValueType.Array && prop.Value.Array != null)
+        {
+            foreach (var item in prop.Value.Array)
+            {
+                text = ComputedText(item);
+                if (text != null)
+                    break;
+            }
+        }
+
+        if (text == null)
+            return;
+
+        scene.Problem($"{op ?? "node"}{(string.IsNullOrEmpty(id) ? "" : " \"" + id + "\"")}: "
+                      + $"{prop.Key} \"{text}\" is read as a plain number and is not evaluated; "
+                      + "write a number");
+    }
+
+    /// <summary>The text of a value asking to be computed -- an `=` expression or a `$` name.</summary>
+    private static string? ComputedText(SS.UiValue value)
+    {
+        if (value.Type != SS.UiValueType.String || string.IsNullOrEmpty(value.String))
+            return null;
+
+        var text = value.String!;
+        return text[0] == '=' || text[0] == '$' ? text : null;
+    }
+
     private static void Validate(SS.UiProp[] map, VecScene scene, string? op, string? id)
     {
+        var header = string.Equals(op, "SCENE", StringComparison.OrdinalIgnoreCase);
+
         foreach (var prop in map)
         {
-            if (string.IsNullOrEmpty(prop.Key) || KnownKeys.Contains(prop.Key))
+            if (string.IsNullOrEmpty(prop.Key))
                 continue;
 
-            // Symbol parameters are arbitrary by definition, so a USE is exempt.
+            // Symbol parameters are arbitrary by definition, so a USE is exempt -- from the
+            // literal check as well, since a parameter spliced into a slot that DOES evaluate
+            // (`USE v="=t*2"` into a body reading `x=%v`) is an expression in the right place.
             if (string.Equals(op, "USE", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(op, "SYM", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
+
+            if (header ? SceneLiteralKeys.Contains(prop.Key) : LiteralKeys.Contains(prop.Key))
+                CheckLiteral(prop, scene, op, id);
+
+            if (KnownKeys.Contains(prop.Key))
+                continue;
 
             // The header is checked with op "SCENE", and its own vocabulary -- the node list,
             // the defs, the debug switches, the keys the host reads for itself -- is not in the
@@ -1380,14 +1585,23 @@ internal static class SceneParser
     }
 
     private static VecNode? ParseNode(SS.UiProp[] map, VecScene scene, SS.UiProp[]? inherited = null,
-                                      SS.UiProp[]? own = null)
+                                      SS.UiProp[]? own = null, bool patching = false)
     {
         var op = PropString(map, "op");
         if (string.IsNullOrEmpty(op))
             return null;
 
-        // What the author wrote on THIS node, before inherited defaults were merged in. Only the
-        // `SC` scroll offset needs it; with no style to inherit the merged map already is it.
+        // What the author wrote on THIS node, before inherited defaults were merged in. The
+        // `SC` scroll offset needs it, and so does every author-intent check: a `style` map
+        // hands every key it holds to everything below it, so the merged map cannot tell an
+        // inherited key from one the author typed. With no style to inherit it already IS the
+        // merged map, which is why the fallback is right for a scene that uses none.
+        //
+        // `patching` says this is a re-parse of a `nodes` patch rather than a first parse. It
+        // is NOT a licence to skip the intent checks -- a stray key written in a patch is still
+        // the author's mistake -- but a check on a VALUE'S RANGE cannot run here: a patched
+        // value is one frame of a series a script computes, `Problems` is never cleared, and a
+        // report on a radius that is negative for one tick would border the scene for good.
         own ??= map;
 
         var node = new VecNode();
@@ -1561,12 +1775,44 @@ internal static class SceneParser
                 break;
 
             case "C":
+            {
                 node.Op = VecOp.Ellipse;
                 node.X = Attr(map, "cx", 0f);
                 node.Y = Attr(map, "cy", 0f);
                 node.Rx = Attr(map, "rx", 0f);
                 node.Ry = HasKey(map, "ry") ? Attr(map, "ry", 0f) : node.Rx;
+
+                // Either radius at or below 0 draws nothing -- an empty outline, skipped, not
+                // even counted as a shape -- and nothing said so. Two ways in are mistakes:
+                //
+                // * `ry` written and no `rx` anywhere. `rx` is the radius that defaults, and
+                //   `ry` falls back to IT, so `C cx=50 cy=50 ry=8` is a radius under the wrong
+                //   name. Judged on `own` for the `ry` and on the merged map for the `rx`: a
+                //   radius handed down by a group's `style` is a radius, and a radius that
+                //   arrives by PATCH is not a mistake at all -- `nodes` is the geometry patch,
+                //   so a `C` declared bare and sized later is the ordinary shape of that.
+                // * a NEGATIVE literal, which no size and no datum means. First parse only: a
+                //   patched radius is one frame of a series a script computes, and `Problems`
+                //   never clears, so one tick below zero would border the scene for good --
+                //   the same trap that keeps an expression radius out of this.
+                //
+                // An explicit `rx = 0` stays SILENT: a scene generated from a zero datum writes
+                // exactly that and draws what it asked for, which is what `R w=0` does too.
+                var radius = HasKey(own, "ry") && !HasKey(map, "rx") ? "rx is missing"
+                    : patching ? null
+                    : node.Rx.IsConstant && node.Rx.ConstantValue < 0f ? "rx is negative"
+                    : node.Ry.IsConstant && node.Ry.ConstantValue < 0f ? "ry is negative"
+                    : null;
+
+                if (radius != null)
+                {
+                    var circle = PropText(map, "id");
+                    scene.Problem($"C{(string.IsNullOrEmpty(circle) ? "" : " \"" + circle + "\"")}: "
+                                  + $"{radius}, so nothing is drawn");
+                }
+
                 break;
+            }
 
             case "L":
             case "Y":
@@ -1662,7 +1908,7 @@ internal static class SceneParser
                 // instead and reported `%%`, `50%` and `]`, which draw what they always drew.
                 node.TextUnit = PropText(map, "unit");
                 if (node.TextLiteral != null)
-                    node.TextParts = TextTemplate(node.TextLiteral, node.TextFormat);
+                    node.TextParts = TextTemplate(node.TextLiteral, node.TextFormat, scene);
 
                 // Only a `fmt` a NUMBER actually goes through is worth reporting. A label of
                 // literal text with a leftover `fmt` formats nothing, so flagging it put the
@@ -1682,6 +1928,27 @@ internal static class SceneParser
                 else if (node.TextData != null)
                 {
                     CheckFormat(node.TextFormat, scene);
+                }
+
+                // `unit` is appended after a bound string, after a bound number and its `fmt`,
+                // and once after a literal that holds placeholders -- and after nothing else.
+                // On a PLAIN literal it was read, stored and never printed, so
+                // `text = "OK" unit = " kPa"` drew `OK` and said nothing: the author asked for
+                // a suffix and did not get one.
+                //
+                // Three things it must not report. An EMPTY unit prints nothing wherever it
+                // lands. A unit the author did NOT write here, handed down by a `style` map
+                // that is working for the bound readouts under it, is not their mistake -- so
+                // this reads `own`. And a label with no text at all prints nothing either way:
+                // the missing label is the fault there, and its text may still arrive by
+                // patch, so a report would outlive the fault (`Problems` is never cleared).
+                var writtenUnit = PropText(own, "unit");
+                if (!string.IsNullOrEmpty(writtenUnit) && node.TextLiteral != null
+                                                       && node.TextParts == null
+                                                       && node.TextData == null)
+                {
+                    scene.Problem($"T: unit \"{writtenUnit}\" follows a value, and this label "
+                                  + "prints no value, so nothing prints the unit");
                 }
 
                 var missing = PropText(map, "missing");
@@ -1852,6 +2119,12 @@ internal static class SceneParser
         Validate(map, scene, op, PropText(map, "id"));
         CheckWords(own, scene, op!);
 
+        // `node.Op` is the discriminator, not the op word, because `USE` collapses to a group
+        // and reads `o` like one. Every case above assigns `node.Op`, so there is no default
+        // arm to be caught out by.
+        if (node.Op is not (VecOp.Group or VecOp.Scroll or VecOp.Image))
+            CheckGroupOpacity(own, scene, op!, PropText(map, "id"));
+
         ParseFill(map, node, scene, op);
         ParseStroke(map, node, scene);
 
@@ -1885,8 +2158,26 @@ internal static class SceneParser
         node.DropTarget = PropNumber(map, "drop", 0f) > 0.5f;
         node.Clickable = PropNumber(map, "click", 0f) > 0.5f || node.Pressable || node.HoverEvents || node.ReportsPosition
                          || node.Draggable || node.DropTarget;
+
+        // `click` and its family exist only to send this node's id to the chip: a click sends
+        // the id as the event's value, `press = 1` sends `down:id`, a drag reports
+        // `dragstart:id`. With no id there is nothing to send, so all four RecordHit call sites
+        // skip the node -- it drew, took no clicks, and said nothing about it. A `USE` or a
+        // `SYM` is exempt because its attributes are symbol parameters of any name, the same
+        // reason `Validate` exempts them.
+        if (node.Clickable && string.IsNullOrEmpty(node.Id)
+            && !string.Equals(op, "USE", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(op, "SYM", StringComparison.OrdinalIgnoreCase))
+        {
+            scene.Problem($"{op}: click (or press, xy, hoverev, drag, drop) needs an id; "
+                          + "the id is the value on_click receives");
+        }
+
         if (!string.IsNullOrEmpty(node.Id))
+        {
             node.SourceProps = map;
+            node.OwnProps = own;
+        }
 
         // Only what this node knows about ITSELF. Everything that depends on its children is
         // folded in by FoldUpwards once the whole tree exists -- children are queued now, so
@@ -2108,6 +2399,13 @@ internal static class SceneParser
                 CheckWord(map, "units", scene, op, "bbox");
                 CheckWord(map, "spread", scene, op, "pad", "repeat", "reflect", "none");
             }
+
+            // A def's keys go through the same `Validate` and the same union, so `o` was
+            // accepted here too and read by nothing. `SYM` is excluded on purpose: its
+            // attributes are its parameter DEFAULTS, so an `o` on one is a parameter named `o`
+            // and is substituted into the body, exactly as `Validate` exempts it.
+            if (op is "GL" or "GR" or "GC" or "CP")
+                CheckGroupOpacity(map, scene, op, id);
 
             if (op == "SYM" && !string.IsNullOrEmpty(id))
             {
@@ -2664,9 +2962,9 @@ internal static class SceneParser
     /// <summary>
     /// Splits `"set {$press:%.1f} kPa, trip {$trip:%.0f}"` into literals and bindings, or returns
     /// null when the text holds no `{$`. A placeholder without its own format takes the node's
-    /// `fmt`; one never closed stays literal text.
+    /// `fmt`; one never closed stays literal text and is reported.
     /// </summary>
-    internal static TextPart[]? TextTemplate(string body, string? fallbackFormat)
+    internal static TextPart[]? TextTemplate(string body, string? fallbackFormat, VecScene? scene = null)
     {
         var open = NextPlaceholder(body, 0);
         if (open < 0)
@@ -2679,7 +2977,14 @@ internal static class SceneParser
         {
             var close = Closing(body, open);
             if (close < 0)
+            {
+                // The author opened a placeholder and got their own text back where a value was
+                // meant, which is the fault `{$v:%q}` carries -- and that one is reported. What
+                // is DRAWN does not change: the text stays literal, as it always has.
+                scene?.Problem($"T: text \"{body[open..]}\" opens a placeholder that is never "
+                               + "closed, so it prints itself instead of a value");
                 break;
+            }
 
             if (open > at)
                 parts.Add(TextPart.Text(body[at..open]));
@@ -2728,7 +3033,7 @@ internal static class SceneParser
         return parts.ToArray();
     }
 
-    /// <summary>The `}` that closes the placeholder opened at <c>open</c>, counting braces.</summary>
+    /// <summary>The `}` that closes the placeholder opened at <c>open</c>.</summary>
     /// <remarks>
     /// Taking the FIRST `}` cut a .NET composite format in half, since every one of them carries
     /// a brace: `{$v:{0:F1}}` handed the formatter `{0:F1`, which no number can take, so the
@@ -2736,18 +3041,79 @@ internal static class SceneParser
     /// node's `fmt` printed correctly. `{0:D3}`, `{0} kPa` and `{0,6:0.0}` broke identically, and
     /// `{{0}}` lost one of its closers and drew `{0}}`.
     ///
-    /// A spec whose braces do not balance (`{$v:{{`) has no closer by this reading and the
-    /// placeholder stays literal text, which is what an unclosed placeholder already did.
+    /// COUNTING braces instead -- 0.11.103 -- fixed those and broke the ESCAPE, because `{{` read
+    /// as two opens: a placeholder could not hold an escaped brace at all. `{$v:x{{y}` never
+    /// terminated, so the whole text stayed literal and nothing was said, while the same `x{{y`
+    /// as a node `fmt` drew `x{y` and WAS reported -- the node-versus-placeholder divergence the
+    /// brace count was added to end, back one layer down.
+    ///
+    /// So the SPEC, and only the spec, is read the way the formatter that will run it reads a
+    /// composite format: `{{` is an escaped brace, a lone `{` opens a format item that ends at
+    /// its own `}` and carries no escapes, `}}` is an escaped brace once a `{{` has appeared to
+    /// need one, and the first `}` left over closes the placeholder.
+    ///
+    /// Each of those three narrowings pays for labels that 0.11.103 draws correctly, and reading
+    /// the WHOLE placeholder as a composite format -- the obvious fix -- breaks all of them:
+    ///
+    /// * nothing before the placeholder's own `:` is a spec, so braces are COUNTED there exactly
+    ///   as 0.11.103 counted them. Escapes in the name region cost `{$v}}` (which draws the value
+    ///   then a `}`), `{{$v}}`, `{{{$v}}}`, `{=t}}`, `{"x":{$x}}`, and `a {$v:%d}} b {$x}` whose
+    ///   first placeholder swallowed the second: every one of them literal text instead.
+    /// * `}}` is an escape only once a `{{` has appeared in the spec, since a `}}` is only ever
+    ///   NEEDED to pair with one. Ungated it cost `{$v:%.1f}}`, `{$v:}}` and the JSON-shaped
+    ///   `{"a":{"b":{$v:{0:F1}}}}`.
+    /// * a format item is skipped whole, so the `}}` of `{$v:{0}}}` stays "close the item, close
+    ///   the placeholder" as it always was.
+    ///
+    /// Measured over every string of `{ } $ : v 0` up to length 10 -- 16,294,740 of them holding
+    /// a placeholder: the closer moves from 0.11.103's for 37,599, and every one has a `{{` in
+    /// its spec (what this exists to support) or a format item with a nested `{` (not a composite
+    /// format at all). Nothing else in that space changes.
+    ///
+    /// A spec with no `}` left over is UNCLOSED, and `TextTemplate` reports it: `{$v:{{`, and
+    /// `{$v:{0:F1}` whose only `}` belongs to its format item. A lone literal `}` inside a spec
+    /// is unwritable, as it always was -- it goes after the placeholder, `{$v}}`.
     /// </remarks>
     private static int Closing(string body, int open)
     {
-        var depth = 0;
-        for (var i = open; i < body.Length; i++)
+        // `open + 1` is the `$` or `=` sigil, which is never a brace.
+        var depth = 1;
+        var spec = false;
+        var sawEscape = false;
+
+        for (var i = open + 2; i < body.Length; i++)
         {
-            if (body[i] == '{')
-                depth++;
-            else if (body[i] == '}' && --depth == 0)
+            var c = body[i];
+            if (!spec)
+            {
+                if (c == ':' && depth == 1)
+                    spec = true;
+                else if (c == '{')
+                    depth++;
+                else if (c == '}' && --depth == 0)
+                    return i;
+            }
+            else if (c == '{' && i + 1 < body.Length && body[i + 1] == '{')
+            {
+                sawEscape = true;
+                i++;
+            }
+            else if (c == '}' && sawEscape && i + 1 < body.Length && body[i + 1] == '}')
+            {
+                i++;
+            }
+            else if (c == '{')
+            {
+                // A format item carries no escapes, so it ends at its own `}`. `IndexOf(char,
+                // int)` is the overload that stays off CA1307, as the lines above already do.
+                i = body.IndexOf('}', i);
+                if (i < 0)
+                    return -1;
+            }
+            else if (c == '}')
+            {
                 return i;
+            }
         }
 
         return -1;
@@ -2804,6 +3170,32 @@ internal static class SceneParser
             : string.Join(", ", accepted, 0, accepted.Length - 1) + " or " + accepted[^1];
 
         scene.Problem($"{what}: {key} \"{word}\" is not {list}");
+    }
+
+    /// <summary>
+    /// Reports an `o` on something that does not composite its contents as a unit.
+    /// </summary>
+    /// <remarks>
+    /// `o` is in the single union of known keys because four ops read it -- `G`, `USE` (a group
+    /// too), `SC` and `IMG` -- so `Validate` let it through on every other op and nothing ever
+    /// looked at it again: `R x=0 y=0 w=10 h=10 f=#fff o=0.5` drew FULLY OPAQUE with nothing in
+    /// the stats tool to say why, while `fo` and `so` beside it are the keys that fade a
+    /// shape's fill and its stroke. The fallback is untouched and nothing draws differently --
+    /// but a scene carrying a stray `o` now shows the problem border, like the def and header
+    /// key checks and the enum words before it.
+    ///
+    /// Judged on what the author wrote HERE, never a merged map: `style = { o = 0.5 }` hands
+    /// `o` to every node below it, which is documented and is how the groups down there read
+    /// it, so a merged map would report once per shape underneath.
+    /// </remarks>
+    private static void CheckGroupOpacity(SS.UiProp[] own, VecScene scene, string what, string? id)
+    {
+        if (!HasKey(own, "o"))
+            return;
+
+        scene.Problem($"{what}{(string.IsNullOrEmpty(id) ? "" : " \"" + id + "\"")}"
+                      + ": o is group opacity, read on G, USE, SC and IMG only; "
+                      + "fo fades a fill and so a stroke, or put this inside a G");
     }
 
     /// <summary>Every enum word one op reads, checked against that op's own vocabulary.</summary>

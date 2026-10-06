@@ -56,6 +56,12 @@ internal static class FormatReportTests
         ("N2", true),
         ("%-", true),
 
+        // An escaped brace next to letters: it prints `x{y` and drops the number, so it reads
+        // as a mistyped conversion. Down BOTH routes -- 0.11.103's brace count read `{{` as two
+        // opens, so `{$v:x{{y}` never closed, stayed literal text and said nothing, while the
+        // same spec as a node `fmt` was reported.
+        ("x{{y", true),
+
         // Formats that print the number. Silent.
         ("%.1f", false),
         ("%x", false),
@@ -115,15 +121,18 @@ internal static class FormatReportTests
     }
 
     /// <summary>
-    /// Braces in a spec, and the one place the two routes genuinely differ.
+    /// Braces in a spec read the same in a placeholder as in a node `fmt`.
     /// </summary>
     /// <remarks>
     /// `{{0}}` is a label deliberately printing `{0}`: it holds no letter and no `%`, so it is
     /// literal text and is silent either way. `x{{y` prints `x{y` and drops the number, and its
-    /// letters say a conversion was meant, so as a `fmt` it is reported -- but a PLACEHOLDER
-    /// cannot hold it at all: the braces do not balance, so no `}` closes the placeholder and the
-    /// whole text stays literal, exactly as an unclosed `{$v` does. There is no spec there to
-    /// check, and nothing drawn is wrong, so nothing is said.
+    /// letters say a conversion was meant, so it is reported either way.
+    ///
+    /// 0.11.103 counted braces to find a placeholder's closer, which read `{{` as two OPENS: a
+    /// placeholder could not hold an escaped brace at all -- `{$v:x{{y}` never terminated, the
+    /// whole text stayed literal and nothing was said, while the same spec as a node `fmt` drew
+    /// `x{y` and was reported. The SPEC is now read as the composite format it is, so the two
+    /// routes answer alike.
     /// </remarks>
     internal static void BraceEscapesInASpec(TestRun run)
     {
@@ -132,10 +141,100 @@ internal static class FormatReportTests
 
         var scene = Scene("text=\"<{$v:x{{y}>\"");
         var drawn = Tessellator.BindTemplate(scene.Root[0], Context(), scene, 0);
-        run.Check("fmt: {$v:x{{y} never parses, so the text stays literal",
-            drawn == "<{$v:x{{y}>", drawn);
-        run.Check("fmt: and an unparsed placeholder is not reported", scene.Problems.Count == 0,
+        run.Check("fmt: {$v:x{{y} draws <x{y>, as the same spec on a fmt does",
+            drawn == "<x{y>", drawn);
+        run.Check("fmt: and is reported, as the same spec on a fmt is", scene.Problems.Count > 0,
             Said(scene));
+
+        // An escape that is the WHOLE spec: balanced, so it closes, and it holds no letter and
+        // no `%`, so it is literal text and stays silent -- `{{0}}` either way.
+        var escape = Scene("text=\"<{$v:{{}>\"");
+        var one = Tessellator.BindTemplate(escape.Root[0], Context(), escape, 0);
+        run.Check("fmt: {$v:{{} draws <{>", one == "<{>", one);
+        run.Check("fmt: and an escape with no letter is silent", escape.Problems.Count == 0,
+            Said(escape));
+    }
+
+    /// <summary>
+    /// The braces the composite reading is NARROWED for: every one of these drew a value on
+    /// 0.11.103 and still does.
+    /// </summary>
+    /// <remarks>
+    /// Reading the whole placeholder as a composite format -- the obvious fix, and the one that
+    /// had to be narrowed three times -- turned each of these into literal text with a problem
+    /// border beside it. A `}` immediately after a closer is the common shape: it is a brace the
+    /// LABEL wanted, not an escape inside the spec. See `SceneParser.Closing`.
+    /// </remarks>
+    internal static void ABraceAfterTheCloserIsTheLabelsOwn(TestRun run)
+    {
+        var rows = new (string Text, string Drawn)[]
+        {
+            // No spec at all, so there is nothing to escape in.
+            ("{$v}}", "1.25}"),
+            ("{{$v}}", "{1.25}"),
+            ("{{{$v}}}", "{{1.25}}"),
+            ("{=1+2}}", "3}"),
+            ("{x:{$v}}", "{x:1.25}"),
+
+            // A spec holding no `{{` has no literal `{` to pair a `}}` with, so the first `}`
+            // after it closes the placeholder and the next `}` is the label's own.
+            ("{$v:%.1f}}", "1.2}"),
+            ("a {$v:%.0f}} b {$v}", "a 1} b 1.25"),
+            ("{a:{b:{$v:{0:F1}}}}", "{a:{b:1.2}}"),
+
+            // A format item is skipped whole, so its `}` is not half of an escape either.
+            ("{$v:{0}}}", "1.25}"),
+
+            // A brace in the NAME is nobody's escape: the name region is counted, as it always
+            // was, so this reads the name `v{x}` -- unresolved, `missing` text, no stray `}`.
+            ("{$v{x}}", "--"),
+        };
+
+        foreach (var row in rows)
+        {
+            var scene = Scene("text=\"" + row.Text + "\"");
+            var drawn = Tessellator.BindTemplate(scene.Root[0], Context(), scene, 0);
+            run.Check($"template: {row.Text} draws {row.Drawn}", drawn == row.Drawn, drawn);
+            run.Check($"template: {row.Text} is silent", scene.Problems.Count == 0, Said(scene));
+        }
+    }
+
+    /// <summary>
+    /// A placeholder that is never closed is a mistake, and is reported.
+    /// </summary>
+    /// <remarks>
+    /// `text = "a {$press"` drew `a {$press` in silence: the author asked for a value and got
+    /// their own text back, which is the fault `{$v:%q}` carries and reports. What it DRAWS is
+    /// unchanged -- an unparsed placeholder is still ordinary text -- so no working scene moves
+    /// a pixel; only the silence goes.
+    ///
+    /// A spec whose own braces eat the closer is the same fault: `{$v:{0:F1}` has one `}` and
+    /// the format item takes it, so there is nothing left to close the placeholder.
+    /// </remarks>
+    internal static void AnUnclosedPlaceholderIsReported(TestRun run)
+    {
+        var scene = Scene("text=\"a {$press\"");
+        run.Check("template: an unclosed placeholder is reported", scene.Problems.Count > 0,
+            Said(scene));
+
+        var drawn = Tessellator.BindTemplate(scene.Root[0], Context(), scene, 0);
+        run.Check("template: and still draws its own text", drawn == "a {$press", drawn);
+
+        var eaten = Scene("text=\"a {$v:{0:F1}\"");
+        run.Check("template: a spec whose format item takes the only closer is reported",
+            eaten.Problems.Count > 0, Said(eaten));
+
+        var escape = Scene("text=\"a {$v:{{\"");
+        run.Check("template: a spec whose escape leaves no closer is reported",
+            escape.Problems.Count > 0, Said(escape));
+
+        var computed = Scene("text=\"a {=1+2\"");
+        run.Check("template: an unclosed {= is reported too", computed.Problems.Count > 0,
+            Said(computed));
+
+        var closed = Scene("text=\"a {$v:%.1f}\"");
+        run.Check("template: a closed placeholder is silent", closed.Problems.Count == 0,
+            Said(closed));
     }
 
     /// <summary>

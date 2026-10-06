@@ -334,6 +334,65 @@ internal static class NodeSpanTests
         run.Check("recursion: 2^3^2 is still right-associative (512)",
             Mathf.Approximately(Expression.Parse("=2^3^2", 0f).Evaluate(new EvalContext()), 512f),
             $"{Expression.Parse("=2^3^2", 0f).Evaluate(new EvalContext())}");
+
+        // LAZINESS ON BOTH SIDES OF THE DEEP/SHALLOW BOUNDARY. REFERENCE promises `if` is lazy
+        // -- "only the branch taken is evaluated, so the other may safely divide by zero or read
+        // a name that is missing on this frame" -- and the recursive path is. The iterative one
+        // listed every node and evaluated all of them, so past `DeepTree` the untaken branch ran:
+        // the VALUE was still right (every operator here is total), but a data name read only
+        // there was recorded as unresolved, and `vector_stats` then reported a problem a correct
+        // scene does not have.
+        //
+        // Every entry in the arity table whose shallow path reads fewer arguments than it has is
+        // covered here: `if` (condition, then ONE branch), `and` (stops on a false left operand),
+        // `or` (stops on a true one), `mod` (guards on its DIVISOR and returns before reading the
+        // dividend, so the argument it always reads is the SECOND one) and `mix` (no case in
+        // `Invoke` at all, so in a numeric attribute it answers 0 without reading its ends).
+        // `step` is the one remaining order difference -- it reads argument 1 before argument 0
+        // -- and is deliberately not covered: it always reads both, so the set of names it
+        // reports is the same on either path.
+        //
+        // A tree is 1 (the call) + one per prefix `-` + 1 (the leaf), so 254 signs is depth 256
+        // and 255 is 257 -- one case each side, because a case on the deep side alone cannot
+        // tell laziness from the shallow path having been taken.
+        static string Trace(string text)
+        {
+            var context = new EvalContext();
+            context.Scalars["on"] = 1f;
+            var value = Expression.Parse(text, -999f).Evaluate(context);
+            return $"{value:0.###} [{string.Join(",", context.Missing)}]";
+        }
+
+        foreach (var (where, signs) in new[] { ("256, recursed", 254), ("257, walked", 255) })
+        {
+            var tail = new string('-', signs);
+            var taken = signs % 2 == 0 ? "1" : "-1";
+
+            run.Check($"lazy: if at depth {where} leaves the untaken branch alone",
+                Trace($"=if($on,{tail}1,{tail}$gone)") == $"{taken} []",
+                Trace($"=if($on,{tail}1,{tail}$gone)"));
+            run.Check($"lazy: and at depth {where} stops on a false left operand",
+                Trace($"=and(0,{tail}$gone)") == "0 []",
+                Trace($"=and(0,{tail}$gone)"));
+            run.Check($"lazy: or at depth {where} stops on a true left operand",
+                Trace($"=or($on,{tail}$gone)") == "1 []",
+                Trace($"=or($on,{tail}$gone)"));
+            run.Check($"lazy: mod at depth {where} does not read a dividend it discards",
+                Trace($"=mod({tail}$gone,0)") == "0 []",
+                Trace($"=mod({tail}$gone,0)"));
+            run.Check($"lazy: a numeric mix at depth {where} reads none of its arguments",
+                Trace($"=mix({tail}$gone,1,0.5)") == "0 []",
+                Trace($"=mix({tail}$gone,1,0.5)"));
+        }
+
+        // The other half: an argument that IS read still reports its missing name, so none of
+        // the checks above can pass by the walk skipping work it owes. An even number of signs,
+        // because negating 0 an odd number of times gives -0 and `mod` keeps the dividend's sign.
+        var deepTail = new string('-', 256);
+        run.Check("lazy: a deep branch that IS taken still reports its missing name",
+            Trace($"=and($on,{deepTail}$gone)") == "0 [gone]", Trace($"=and($on,{deepTail}$gone)"));
+        run.Check("lazy: a dividend mod really divides still reports its missing name",
+            Trace($"=mod({deepTail}$gone,2)") == "0 [gone]", Trace($"=mod({deepTail}$gone,2)"));
     }
 
     /// <summary>

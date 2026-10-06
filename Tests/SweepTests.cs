@@ -76,6 +76,11 @@ internal static class SweepTests
         PercentPairs(run);
         PlaceholderFormatStartsAtTheFirstColon(run);
         RepeatCountIsNotTruncated(run);
+        AblationSwitchesDoNotLeak(run);
+        ClickNeedsAnId(run);
+        SampledPaintBindsToItsSample(run);
+        LiteralSlotsReportAnExpression(run);
+        BooleanWordsAreRead(run);
     }
 
     /// <summary>C21: a number in a slot that holds free text or an identifier.</summary>
@@ -282,6 +287,39 @@ internal static class SweepTests
             Tessellator.BindTemplate(one, new EvalContext { Time = 125f }, new VecScene(), 0));
     }
 
+    /// <summary>S12: `click` with no `id` registered nothing, and said nothing either.</summary>
+    /// <remarks>
+    /// Watched failing on 0.11.104: `R click=1` with no id emitted one
+    /// shape, ZERO hit regions and zero problems at all three `t` values, so the node drew and
+    /// answered nothing with no word said. No colour literal here -- the hex parser is a native
+    /// ECall -- so these assert the problem list rather than the pixels.
+    /// </remarks>
+    internal static void ClickNeedsAnId(TestRun run)
+    {
+        // The id is the whole payload: `OnPointerClick` sends it as the event's value and
+        // `press = 1` sends `down:id`, so a region without one has nothing to answer with.
+        var mute = Parse("SCENE w=100 h=100\nR click=1 x=0 y=0 w=10 h=10");
+        run.Check("S12: click with no id is reported", Says(mute, "needs an id"), Said(mute));
+
+        // `press`, `xy`, `hoverev`, `drag` and `drop` each imply click, and are as dead.
+        var pressed = Parse("SCENE w=100 h=100\nT x=0 y=0 w=30 h=8 text=tap press=1");
+        run.Check("S12: press with no id is reported too", Says(pressed, "needs an id"),
+            Said(pressed));
+
+        // An identified clickable node is untouched.
+        var named = Parse("SCENE w=100 h=100\nR id=btn click=1 x=0 y=0 w=10 h=10");
+        run.Check("S12: an identified clickable node stays quiet", named.Problems.Count == 0,
+            Said(named));
+
+        // A `USE` names its symbol parameters freely -- `click` among them -- which is why
+        // `Validate` exempts it from the unknown-key check, and why this exempts it too.
+        var symbol = Parse("SCENE w=100 h=100\n"
+                           + "DEFS { SYM id=dot click=6 { R x=0 y=0 w=%click h=10 } }\n"
+                           + "USE ref=dot click=20 x=10 y=10");
+        run.Check("S12: a USE parameter called click is not a fault", symbol.Problems.Count == 0,
+            Said(symbol));
+    }
+
     /// <summary>C23: `n` is the count the author wrote, and the work budget is the limit.</summary>
     internal static void RepeatCountIsNotTruncated(TestRun run)
     {
@@ -322,5 +360,200 @@ internal static class SweepTests
             true, quiet);
         run.Check("C23: a nest inside the budget is untouched", quiet.Starved == null,
             quiet.Starved ?? "nothing reported");
+    }
+
+    /// <summary>S5: an `=` expression or a `$` binding in a slot read as a literal number.</summary>
+    /// <remarks>
+    /// Watched failing on 0.11.104: every scene below parsed with an
+    /// EMPTY problem list while the value was dropped -- `RP n="=$k"` drew nothing,
+    /// `click="=$k"` was not clickable, `p=$pts` had no points, and `m=["=$k",0,0,1,0,0]` is six
+    /// entries long so the existing length check could not see it.
+    /// </remarks>
+    internal static void LiteralSlotsReportAnExpression(TestRun run)
+    {
+        var count = Parse("SCENE w=100 h=100\nRP n=\"=$k\" { R x=0 y=0 w=1 h=1 }");
+        run.Check("S5: an expression in RP n is reported", Says(count, "n \"=$k\""), Said(count));
+
+        var click = Parse("SCENE w=100 h=100\nR x=0 y=0 w=10 h=10 click=\"=$k\"");
+        run.Check("S5: an expression in click is reported", Says(click, "click \"=$k\""), Said(click));
+
+        // A data binding is dropped the same way and was equally silent.
+        var points = Parse("SCENE w=100 h=100\nY p=$pts");
+        run.Check("S5: a binding in p is reported", Says(points, "p \"$pts\""), Said(points));
+
+        // One computed entry inside a list of the right length, which no existing check sees.
+        var matrix = Parse("SCENE w=100 h=100\nG m=[\"=$k\",0,0,1,0,0] { R x=0 y=0 w=1 h=1 }");
+        run.Check("S5: a computed entry inside m is reported", Says(matrix, "m \"=$k\""), Said(matrix));
+
+        // The header's own literal-only keys, where `w` takes an expression on a NODE.
+        var header = Parse("SCENE w=\"=$k\" h=100\nR x=0 y=0 w=10 h=10");
+        run.Check("S5: an expression in the header's w is reported", Says(header, "w \"=$k\""),
+            Said(header));
+
+        // And the four that must NOT be reported: a key that really does evaluate, a symbol
+        // parameter (any name, and spliced into a slot that evaluates), a gradient's live
+        // geometry, and a `%param` substituted before the node is parsed.
+        var evaluated = Parse("SCENE w=100 h=100\nR x=\"=$k\" y=0 w=10 h=10");
+        run.Check("S5: an expression in x is left alone", evaluated.Problems.Count == 0,
+            Said(evaluated));
+
+        var parameter = Parse("SCENE w=100 h=100\n"
+                              + "DEFS { SYM id=d { R x=%v y=1 w=2 h=2 } }\nUSE ref=d v=\"=t*2\"");
+        run.Check("S5: a USE parameter is left alone", parameter.Problems.Count == 0,
+            Said(parameter));
+
+        var gradient = Parse("SCENE w=100 h=100\n"
+                             + "DEFS { GL id=g x1=\"=t\" y1=0 x2=1 y2=0 "
+                             + "stops=[[0,transparent],[1,transparent]] }\n"
+                             + "R x=0 y=0 w=10 h=10 f=@g");
+        run.Check("S5: a gradient's live x1 is left alone", gradient.Problems.Count == 0,
+            Said(gradient));
+
+        var spliced = Parse("SCENE w=100 h=100\n"
+                            + "DEFS { SYM id=d { RP n=\"%count\" { R x=\"=i\" y=1 w=1 h=1 } } }\n"
+                            + "USE ref=d count=5");
+        run.Check("S5: n=%count under a USE still draws its count",
+            spliced.Problems.Count == 0 && spliced.Root[0].Children[0].RepeatCount == 5,
+            $"n={spliced.Root[0].Children[0].RepeatCount}, {Said(spliced)}");
+    }
+
+    /// <summary>S14: `true` and `false` as WORDS, which is all scene text has.</summary>
+    /// <remarks>
+    /// 0.11.102 made a LUA boolean read as 1 and 0 everywhere a number is read and left the
+    /// expression grammar behind: there `false` is an identifier. Watched failing on
+    /// 0.11.104 -- `v=false` reported `expression "false": unknown variable 'false'` and
+    /// left the node VISIBLE, which is the attribute's default.
+    ///
+    /// The batch's version of this method also carried three SCENE-TEXT switch cases
+    /// (`nofill=true`, `click=true`, `kern=false`). Those test S9's SceneModel patch, and
+    /// S9 is held out of this release, so they are held out with it.
+    /// </remarks>
+    internal static void BooleanWordsAreRead(TestRun run)
+    {
+        var hidden = Parse("SCENE w=100 h=100\nR x=0 y=0 w=10 h=10 v=false");
+        var visible = hidden.Root[0].Visible;
+        run.Check("S14: v=false in scene text hides the node",
+            visible != null && Mathf.Abs(visible.Evaluate(new EvalContext())) < 0.0001f
+            && hidden.Problems.Count == 0,
+            visible == null
+                ? "v was not read at all"
+                : $"{visible.Evaluate(new EvalContext())}, {Said(hidden)}");
+    }
+
+    /// <summary>S8: the ablation switches do not outlive the rebuild that set them.</summary>
+    internal static void AblationSwitchesDoNotLeak(TestRun run)
+    {
+        // `noeval` replaces every rectangle's box with 40, 40, 2, 2 while the tessellator runs.
+        // The flag is [ThreadStatic] and the PARSER shares that thread: a capture rebuilds
+        // inline on the main thread, and `SceneParser` cuts a static clip there through
+        // `Tessellator.Outline`, which reaches `RectOutline` and reads it. Left set after Emit,
+        // one capture of a `noeval = 1` scene turned every clip rectangle parsed afterwards --
+        // any scene, any surface, for the rest of the session -- into that 2x2 box, with
+        // nothing reported. Reverted, this check fails AND leaves the flag set for the checks
+        // after it; that spread IS the bug, not noise.
+        var ablated = Parse("SCENE w=100 h=100 fit=stretch noeval=1\nR x=0 y=0 w=10 h=10");
+        Tessellator.Emit(new MeshBuilder(), ablated, new EvalContext(),
+            new Rect(0f, 0f, 100f, 100f), 1f, true, new TessellationStats());
+
+        var clipped = Parse("SCENE w=100 h=100 fit=stretch\n"
+                            + "DEFS {\n CP id=box { R x=0 y=0 w=80 h=60 }\n}\n"
+                            + "G clip=box { R x=0 y=0 w=100 h=100 }");
+
+        var kept = false;
+        var detail = "no clip outline";
+
+        if (clipped.Clips.TryGetValue("box", out var outline) && outline.Count >= 3)
+        {
+            var min = outline[0];
+            var max = outline[0];
+            foreach (var point in outline)
+            {
+                min = Vector2.Min(min, point);
+                max = Vector2.Max(max, point);
+            }
+
+            kept = Mathf.Abs(max.x - min.x - 80f) < 0.01f && Mathf.Abs(max.y - min.y - 60f) < 0.01f;
+            detail = $"{max.x - min.x}x{max.y - min.y} at {min.x},{min.y}";
+        }
+
+        run.Check("S8: a static clip parsed after a noeval rebuild keeps its own box", kept, detail);
+    }
+    /// <summary>C3: in an `LS`, `i` is the sample in every attribute of the node, and the
+    /// pointer still knows which instance of a repeat it is on.</summary>
+    internal static void SampledPaintBindsToItsSample(TestRun run)
+    {
+        // Three horizontal lines, one per repeat instance, 60 apart. An open stroked shape's
+        // hit area is its stroke band, so a region's height IS what `sw` evaluated to --
+        // which is how this reads `i` back without a colour literal the headless parser
+        // cannot take. `s = "$c"` binds the stroke to data and never reaches the parser.
+        (float H, float Y, bool Found) Band(string y, string sw, string[]? hover, int hovered, int instance)
+        {
+            var scene = Parse("SCENE w=240 h=240 fit=stretch\n"
+                              + "RP n=3 {\n LS id=ln n=4 click=1 s=\"$c\""
+                              + " x==20+i*40 y=" + y + " sw=" + sw + "\n}");
+            var context = new EvalContext { HoverScope = hover, HoverIndex = hovered };
+            context.Colours["c"] = Color.white;
+            var stats = new TessellationStats();
+            Tessellator.Emit(new MeshBuilder(), scene, context, new Rect(0f, 0f, 240f, 240f),
+                1f, true, stats);
+
+            var region = stats.Hits.Find(h => h.Id == "ln:" + instance);
+            return (region.Rect.height, region.Rect.yMin, region.Id != null);
+        }
+
+        const string Rows = "=30+i1*60";
+
+        // `i` in `sw` used to be the ENCLOSING repeat while `i` in `x`/`y` was the sample, so
+        // one node read the same name two ways and nothing warned. Paint binds to sample 0.
+        var bySample = new[] { Band(Rows, "=4+4*i", null, -1, 0).H, Band(Rows, "=4+4*i", null, -1, 1).H,
+                               Band(Rows, "=4+4*i", null, -1, 2).H };
+        run.Check("C3: `i` in an LS's sw is the sample, so it is 0 in every instance",
+            Mathf.Abs(bySample[0] - 4f) < 0.01f && Mathf.Abs(bySample[1] - 4f) < 0.01f
+            && Mathf.Abs(bySample[2] - 4f) < 0.01f,
+            $"{bySample[0]:0.##} / {bySample[1]:0.##} / {bySample[2]:0.##}, wanted 4 / 4 / 4");
+
+        // And the enclosing index is reachable as `i1`, exactly as on a `YS`.
+        var byOuter = new[] { Band(Rows, "=4+4*i1", null, -1, 0).H, Band(Rows, "=4+4*i1", null, -1, 1).H,
+                              Band(Rows, "=4+4*i1", null, -1, 2).H };
+        run.Check("C3: `i1` in an LS's sw is the enclosing repeat",
+            Mathf.Abs(byOuter[0] - 4f) < 0.01f && Mathf.Abs(byOuter[1] - 8f) < 0.01f
+            && Mathf.Abs(byOuter[2] - 12f) < 0.01f,
+            $"{byOuter[0]:0.##} / {byOuter[1]:0.##} / {byOuter[2]:0.##}, wanted 4 / 8 / 12");
+
+        // The sample frame must not reach the hit region's identity: all three instances would
+        // register as "ln:0" and collide.
+        run.Check("C3: each instance still registers its own id",
+            Band(Rows, "=6", null, -1, 0).Found && Band(Rows, "=6", null, -1, 1).Found
+            && Band(Rows, "=6", null, -1, 2).Found,
+            "ln:0, ln:1, ln:2");
+
+        // `hover` in a key the sample frame covers: the comparison used to be against the
+        // SAMPLE number, so pointing at instance 1 lifted sample 1 of every instance instead.
+        const string Lift = "=30+i1*60+hover*20";
+        var over = new[] { Band(Lift, "=6", new[] { "ln" }, 1, 0), Band(Lift, "=6", new[] { "ln" }, 1, 1),
+                           Band(Lift, "=6", new[] { "ln" }, 1, 2) };
+        var idle = new[] { Band(Lift, "=6", null, -1, 0), Band(Lift, "=6", null, -1, 1),
+                           Band(Lift, "=6", null, -1, 2) };
+
+        run.Check("C3: hover in an LS's geometry moves only the instance under the pointer",
+            Mathf.Abs(over[1].Y - (idle[1].Y - 20f)) < 0.01f
+            && Mathf.Abs(over[0].Y - idle[0].Y) < 0.01f && Mathf.Abs(over[2].Y - idle[2].Y) < 0.01f,
+            $"yMin {idle[0].Y:0.##}->{over[0].Y:0.##}, {idle[1].Y:0.##}->{over[1].Y:0.##}, "
+            + $"{idle[2].Y:0.##}->{over[2].Y:0.##}");
+
+        run.Check("C3: and does not deform the others' lines",
+            Mathf.Abs(over[0].H - 6f) < 0.01f && Mathf.Abs(over[1].H - 6f) < 0.01f
+            && Mathf.Abs(over[2].H - 6f) < 0.01f,
+            $"h {over[0].H:0.##} / {over[1].H:0.##} / {over[2].H:0.##}, wanted 6 / 6 / 6");
+
+        // The half that already worked, and must go on working: `hover` in a PAINT key of a
+        // clickable `LS` inside a repeat. This is why C3 was held from 0.11.98.
+        run.Check("C3: hover in an LS's sw still answers per instance",
+            Mathf.Abs(Band(Rows, "=6+10*hover", new[] { "ln" }, 1, 0).H - 6f) < 0.01f
+            && Mathf.Abs(Band(Rows, "=6+10*hover", new[] { "ln" }, 1, 1).H - 16f) < 0.01f
+            && Mathf.Abs(Band(Rows, "=6+10*hover", new[] { "ln" }, 1, 2).H - 6f) < 0.01f,
+            $"{Band(Rows, "=6+10*hover", new[] { "ln" }, 1, 0).H:0.##} / "
+            + $"{Band(Rows, "=6+10*hover", new[] { "ln" }, 1, 1).H:0.##} / "
+            + $"{Band(Rows, "=6+10*hover", new[] { "ln" }, 1, 2).H:0.##}, wanted 6 / 16 / 6");
     }
 }
