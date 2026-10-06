@@ -22,3 +22,5 @@ CLAUDE.md
 HISTORY.md
 SWEEP-TODO.md
 .claude/
+# the local code index: generated, and its nodes carry absolute local paths
+graphify-out/
