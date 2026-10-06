@@ -592,9 +592,69 @@ internal static class NodeSpanTests
         // mod's own number is read off the running build.
         var ver = Expression.Parse("ver", -1f).Evaluate(ctx);
         var assembly = typeof(Expression).Assembly.GetName().Version!;
-        var expected = assembly.Major * 10000f + assembly.Minor * 100f + assembly.Build;
-        run.Check("ver: encodes major*10000 + minor*100 + patch of its own assembly",
+        var expected = assembly.Major * 1000000f + assembly.Minor * 1000f + assembly.Build;
+        run.Check("ver: encodes major*1000000 + minor*1000 + patch of its own assembly",
             Mathf.Approximately(ver, expected), $"{ver}, expected {expected}");
+        run.Check("ver: the expression and the encoder agree",
+            Mathf.Approximately(ver, Expression.EncodeVersion(assembly)),
+            $"{ver} vs {Expression.EncodeVersion(assembly)}");
+
+        // The fault that forced the re-encoding in 0.11.103, on the real triples. Under the old
+        // `major*10000 + minor*100 + patch` the patch field had two digits and had already run
+        // out of them: 0.11.100 and 0.12.0 both read 1200, and ordering INVERTED, so a scene
+        // doing lt(ver, FLOOR) showed its "old mod" banner on a NEWER mod. These are the pairs
+        // that collided; each must now be distinct and in order.
+        var releases = new[]
+        {
+            new System.Version(0, 11, 99),
+            new System.Version(0, 11, 100),
+            new System.Version(0, 11, 101),
+            new System.Version(0, 11, 102),
+            new System.Version(0, 11, 103),
+            new System.Version(0, 11, 999),
+            new System.Version(0, 12, 0),
+            new System.Version(0, 12, 1),
+            new System.Version(0, 12, 2),
+            new System.Version(0, 13, 0),
+            new System.Version(1, 0, 0),
+        };
+
+        var ordered = true;
+        var worst = "";
+        for (var a = 0; a < releases.Length - 1; a++)
+        {
+            var lower = Expression.EncodeVersion(releases[a]);
+            var higher = Expression.EncodeVersion(releases[a + 1]);
+            if (lower < higher)
+                continue;
+
+            ordered = false;
+            worst = $"{releases[a]} -> {lower}, {releases[a + 1]} -> {higher}";
+            break;
+        }
+
+        run.Check("ver: every release encodes strictly above the one before it",
+            ordered, ordered ? "ordered" : worst);
+
+        // Named on their own, because this exact pair is what a consumer reported.
+        var patch100 = Expression.EncodeVersion(new System.Version(0, 11, 100));
+        var minor12 = Expression.EncodeVersion(new System.Version(0, 12, 0));
+        run.Check("ver: 0.11.100 and 0.12.0 do not collide",
+            !Mathf.Approximately(patch100, minor12), $"0.11.100 -> {patch100}, 0.12.0 -> {minor12}");
+
+        var patch101 = Expression.EncodeVersion(new System.Version(0, 11, 101));
+        run.Check("ver: 0.12.0 reads ABOVE 0.11.101",
+            minor12 > patch101, $"0.12.0 -> {minor12}, 0.11.101 -> {patch101}");
+
+        // The published number for this release, so a changed formula has to be deliberate.
+        var shipping = Expression.EncodeVersion(new System.Version(0, 11, 103));
+        run.Check("ver: 0.11.103 reads 11103", Mathf.Approximately(shipping, 11103f), $"{shipping}");
+
+        // Where the new widths run out. Documented in Expression.cs rather than guarded, and
+        // asserted here so the limit is a measured fact and not a comment that drifts.
+        var patch1000 = Expression.EncodeVersion(new System.Version(0, 11, 1000));
+        run.Check("ver: a patch of 1000 lands on the next minor -- the known ceiling",
+            Mathf.Approximately(patch1000, minor12), $"0.11.1000 -> {patch1000}, 0.12.0 -> {minor12}");
 
         // The comparison an exported scene actually writes.
         var current = Expression.Parse($"lt(ver,{(int)ver})", 1f).Evaluate(ctx);

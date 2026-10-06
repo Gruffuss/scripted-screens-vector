@@ -1165,6 +1165,15 @@ internal sealed class Expression
         }
     }
 
+    /// <summary>
+    /// The `ver` encoding: `major*1000000 + minor*1000 + patch`, so 0.11.103 is 11103. Separate
+    /// from the assembly read so the collisions that forced it can be tested on version numbers
+    /// this assembly does not carry. See Parser.VersionNumber for what it is for and what the
+    /// widths cost.
+    /// </summary>
+    internal static float EncodeVersion(System.Version version) =>
+        version.Major * 1000000f + version.Minor * 1000f + version.Build;
+
     private sealed class Parser
     {
         private readonly string _text;
@@ -1551,28 +1560,40 @@ internal sealed class Expression
         }
 
         /// <summary>
-        /// The running mod's version as `major*10000 + minor*100 + patch` -- 0.11.62 is 1162.
+        /// The running mod's version as `major*1000000 + minor*1000 + patch` -- 0.11.103 is 11103.
         /// </summary>
         /// <remarks>
         /// It is a plain number so a scene can compare it, and it exists so an exported console
         /// can tell a player their mod is too old to draw it. The degradation is the point: on a
         /// mod without `ver` the name is an unknown variable, the expression fails to parse, and
-        /// the attribute falls back to its default. With `v="=lt(ver,NNNN)"` that default is
+        /// the attribute falls back to its default. With `v="=lt(ver,NNNNN)"` that default is
         /// `visible`, so an "update the mod" banner appears on exactly the versions that lack the
         /// feature and hides itself on the ones that do not. The parse failure is also reported as
         /// a problem, which is a diagnostic rather than a fault.
         ///
         /// Computed once: the version cannot change while the game runs, and this is reached from
         /// the tessellation worker.
+        ///
+        /// The encoding CHANGED in 0.11.103. It was `major*10000 + minor*100 + patch`, which gave
+        /// the patch field two digits and had already run out of them: 0.11.100 and 0.12.0 both
+        /// read 1200, and order inverted, so 0.12.0 (1200) compared BELOW 0.11.101 (1201) and an
+        /// `lt(ver, FLOOR)` banner appeared on the newer mod. A scene comparing `ver` to a literal
+        /// written before 0.11.103 compares against the old scale and must be updated.
+        ///
+        /// The new widths are not infinite either, and the flaw is the same class further out: a
+        /// patch of 1000 lands on the next minor (0.11.1000 and 0.12.0 both read 12000) and a
+        /// minor of 1000 lands on the next major (0.1000.0 and 1.0.0 both read 1000000). It is
+        /// also a float, so above 16777216 the integers are no longer exact and from major 17 up
+        /// two adjacent patch numbers can read equal (17.0.0 and 17.0.1 both read 17000000).
+        /// Three digits is what fits: the whole expression language is float, which carries seven
+        /// exact decimal digits in total, so widening one field narrows another.
         /// </remarks>
         private static readonly float VersionNumber = ReadVersion();
 
         private static float ReadVersion()
         {
             var version = typeof(Expression).Assembly.GetName().Version;
-            return version == null
-                ? 0f
-                : version.Major * 10000f + version.Minor * 100f + version.Build;
+            return version == null ? 0f : EncodeVersion(version);
         }
 
         private static Expression Variable(string name)
