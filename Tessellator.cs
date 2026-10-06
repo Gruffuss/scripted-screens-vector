@@ -2142,8 +2142,11 @@ internal static class Tessellator
     {
         outline.Clear();
 
-        // NoEval: fixed geometry, so the cost of evaluating attributes is removed while the
-        // same number of shapes and vertices is still produced.
+        // NoEval: fixed geometry, so the cost of evaluating a rectangle's box is removed while
+        // the same number of SHAPES is still produced. Not the same number of VERTICES -- a 2x2
+        // box is tessellated for its size, so a rounded R measured 36 vertices against 20 here,
+        // a radial-gradient one 4,608 against 81 and a shadowed one 957 against 397. Only
+        // square-cornered, flat-filled rectangles compare directly.
         var x = NoEval ? 40f : node.X.Evaluate(context);
         var y = NoEval ? 40f : node.Y.Evaluate(context);
         var w = NoEval ? 2f : node.W.Evaluate(context);
