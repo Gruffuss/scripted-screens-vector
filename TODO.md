@@ -44,10 +44,23 @@ Constraints that are not negotiable when this is built:
   author's name against the array the callback delivers, and reporting a mismatch, is the answer to
   that, and is why that report is on the list above rather than optional.
 
-Still unanswered, and deliberately not asked yet: an empty array does not say WHY nothing loaded
-(the reason is only in the log). The fonts mod offered to add a reason if this needs to tell a
-failed download from a disabled file — worth asking when this is actually built, not before, since
-it is their work for a feature that is not scheduled.
+- **There is a second entry point that gives the REASON, and it is the one to use:**
+  `RequestFontWithReason(link, Action<string[], string> done)`. Same contract; the second callback
+  argument is a short stable token, empty on success, otherwise one of `download-failed` (the
+  link or the network — the author's problem), `disabled` (the player switched that font off —
+  theirs to undo), `face-limit` (this session has built its maximum page faces — station-wide),
+  `load-failed` (the file arrived and is not a font this engine reads) or `loader-unavailable`.
+  Those five map straight onto what a report should tell whoever can act, which is the whole
+  reason for asking: a player at a console cannot read the log.
+  **The tokens are the INTENDED contract, not a measured one** — the fonts mod has not provoked
+  the failure paths on a console yet and carries that as unverified on its side. Do not quote them
+  as measured behaviour until it says otherwise.
+- **Do NOT build request dedup here.** `RequestFont` already deduplicates by absolute URI: fifteen
+  consoles declaring one link produce ONE download, every joined caller's callback still fires, and
+  a caller arriving after the link finished gets the stored result immediately. Two edges: the key
+  is the EXACT absolute URI, so two spellings of one font (`wght@400;700` against `wght@700;400`)
+  are two rounds even though the file cache saves the download; and a request that produced nothing
+  is deliberately forgotten, so a later request is a real retry rather than a replayed failure.
 
 Unanswered here: whether a request belongs per element or per scene, and what a page should do
 about a face that arrives after a capture has already been taken.
