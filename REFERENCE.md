@@ -875,10 +875,13 @@ automatically. An `L` is open — it strokes as an open run and is clickable alo
 but **an `f` on an `L` still fills it**, closing the gap from its last point to its first the
 way SVG's fill rule does.
 
-**Too few points draws nothing, and says nothing.** An `L` needs two, a `Y` needs three. Below
-that the node is simply absent from the picture with no problem reported — as is an `L` whose `p`
-holds an ODD number of values, since the last one has no pair. Check the count in the script
-rather than looking for a message.
+**Too few points, and what each paint needs, differ — and nothing is reported either way.**
+A STROKE needs two points; a FILL and a shadow need three. So a two-point `Y` draws its outline
+and nothing inside it, which looks like a line rather than a missing shape, and a one-point `L`
+draws nothing at all. An ODD number of values is not an error: the last one has no pair, so it is
+DROPPED and the rest are used — `p = {10,10,60,10,60}` is the two-point line `{10,10,60,10}`,
+while `p = {10,10,60}` is left with one point and so draws nothing. Count the values in the script;
+no message is coming.
 
 **Consecutive duplicate points are dropped** before the stroke is built, so a repeated point costs
 nothing and changes nothing. A last point equal to the FIRST is not the same thing: on an `L` it
@@ -1214,8 +1217,10 @@ unit, and formatting it in Lua costs a `string.format` per label per tick:
 
 The chip then sends the number it already had. `fmt` takes the printf spec you would have
 passed to `string.format`: `f`, `e`, `g`, `d`, `i`, `x`, `X`, with precision. Width and flags
-are ignored — lay text out with `align` and a box instead. A spec that cannot be read renders
-`missing`.
+are ignored — lay text out with `align` and a box instead. A spec holding no conversion at all
+**prints itself** where the number should be, and one a number cannot take draws the `missing`
+text; both are reported from 0.11.100. A .NET composite format works too, so `"{0,8:0.0} kPa"`
+is a legitimate `fmt`.
 
 A name may hold a string or a number. The string wins, so a payload that deliberately sends
 `"OFFLINE"` for a numeric readout shows that word rather than a formatted zero.
@@ -1239,8 +1244,10 @@ Catmull-Rom, so the curve passes **through** its points rather than being pulled
 **`close = 1`** is to `SP` what `Y` is to `L`: the curve runs through one further span, from the
 last point back to the first, and every tangent is taken around the ring, so the seam is as
 smooth as any other point on the curve. A closed spline takes a fill, a shadow and a `blur` like
-any other closed shape. Needs at least three points — two cannot enclose anything, and stay an
-open curve. Since 0.11.74; before it, a rounded blob had to be written as a `P`.
+any other closed shape. **Three points is the useful minimum, but two are not refused**: a
+two-point `SP` is filled, shadowed and stroked exactly as `close = 1` asks, and simply encloses
+the sliver between one curve and its return. Since 0.11.74; before it, a rounded blob had to be
+written as a `P`.
 
 ---
 

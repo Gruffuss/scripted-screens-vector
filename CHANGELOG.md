@@ -2,6 +2,39 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.101
+
+### Fixed
+
+- **A hex `fmt` that is not one conversion printed the missing text in a placeholder**, while the
+  same `fmt` on a whole binding printed correctly — one value, one label, two answers. With
+  `v = 7.6`: `"%x {0:D2}"` gave `8 08` bound and `<-->` in a placeholder; `"%x {0:F1}"` gave
+  `8 8.0` and `<-->`; `"%X {0:X}"` gave `8 8` and `<-->`.
+
+  Two causes, both fixed. `TextPart.Hex` was taken from the spec the SPLIT left behind even when
+  the split had failed, so a format whose first conversion is hex but which is not one conversion
+  set it anyway. And the slow path then handed a float to a format carrying an integer conversion,
+  which `string.Format` refuses — it retries as a long now, which is what the whole-binding path
+  already did and the only reading that can satisfy `{0:X}` and `{0:F1}` from one argument.
+  All three now print identically either way.
+
+### Docs
+
+- **My own point-count paragraph from the previous commit was wrong twice**, and the console
+  builder session caught both. An ODD value count is not an error: the last value is dropped and
+  the rest are used, so `{10,10,60,10,60}` is a two-point line, while `{10,10,60}` is left with one
+  point and draws nothing. And the minimum is per PAINT, not per op: a stroke needs two points, a
+  fill and a shadow need three, so a two-point `Y` draws its outline and nothing inside it. My
+  first measurement used stroke-only for `L` and fill-only for `Y` and generalised from each.
+- **A two-point `SP close = 1` is filled, shadowed and stroked**, not left as an open curve.
+- **A third copy of "a spec that cannot be read renders `missing`"** — the claim corrected in the
+  `fmt` table two commits ago appears again in the `T` prose, and was still wrong there.
+
+### Measured
+
+Both `fmt` tables re-run whole: the fourteen specs of 0.11.100 still land correctly, and the hex
+formats now agree between binding and placeholder. Fingerprint byte-identical, unit suite 359.
+
 ## 0.11.100
 
 ### Fixed

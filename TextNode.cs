@@ -358,7 +358,13 @@ internal readonly struct TextPart
         Prefix = Suffix = string.Empty;
         Spec = "0.##";
         Split = Net == null || Printf.TrySplit(Net, out Prefix, out Spec, out Suffix);
-        Hex = Spec is { Length: > 0 } && (Spec[0] == 'X' || Spec[0] == 'x');
+
+        // Only meaningful when the split SUCCEEDED. `Spec` is left holding whatever the failed
+        // attempt put there, so a format whose first conversion is hex but which is not one
+        // conversion -- `%x {0:D2}`, `%X {0:X}` -- set this anyway, and the value was then cast
+        // to a long on a path that cannot use it: the placeholder drew the missing text where
+        // the same format on a whole binding printed correctly.
+        Hex = Split && Spec is { Length: > 0 } && (Spec[0] == 'X' || Spec[0] == 'x');
     }
 
     internal static TextPart Text(string literal) => new(literal, null, null, null);

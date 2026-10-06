@@ -2686,9 +2686,21 @@ internal static class SceneParser
         }
         catch (FormatException)
         {
-            scene.Problem($"T: fmt \"{format}\" is not a format a number can take, "
-                          + "so the label draws its `missing` text");
-            return;
+            // The draw path retries an integer conversion as a long -- `{0:X}` and `{0:D2}` are
+            // refused by a float but taken by one -- so this has to try the same thing or it
+            // reports a format that works. Reporting a working format is how 0.11.97's check
+            // failed, and checking only the FIRST attempt would repeat it one layer down.
+            try
+            {
+                printed = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    net, (long)Mathf.Round(Sample));
+            }
+            catch (FormatException)
+            {
+                scene.Problem($"T: fmt \"{format}\" is not a format a number can take, "
+                              + "so the label draws its `missing` text");
+                return;
+            }
         }
 
         if (string.Equals(printed, net, StringComparison.Ordinal))

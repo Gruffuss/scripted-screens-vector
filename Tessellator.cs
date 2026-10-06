@@ -3296,11 +3296,27 @@ internal static class Tessellator
             printed = part.Net == null
                 ? value.ToString("0.##", CultureInfo.InvariantCulture)
                 : string.Format(CultureInfo.InvariantCulture, part.Net,
-                    part.Hex ? (long)value : value);
+                    part.Hex ? (long)Mathf.Round(value) : value);
         }
         catch (FormatException)
         {
-            printed = node.TextMissing;
+            // An INTEGER conversion anywhere in the format -- `%x {0:D2}` becomes
+            // `{0:X} {0:D2}` -- makes `string.Format` refuse a float, and only the
+            // single-conversion case was rounded ahead of time. The same format on a whole
+            // binding printed correctly while a PLACEHOLDER drew the missing text, for one
+            // value, in the same label. Retrying as a long is what the whole-binding path
+            // already does, and it is the only reading that can satisfy `{0:X}` and `{0:F1}`
+            // from one argument.
+            try
+            {
+                printed = part.Net == null
+                    ? value.ToString("0.##", CultureInfo.InvariantCulture)
+                    : string.Format(CultureInfo.InvariantCulture, part.Net, (long)Mathf.Round(value));
+            }
+            catch (FormatException)
+            {
+                printed = node.TextMissing;
+            }
         }
 
         Append(printed, ref at);
