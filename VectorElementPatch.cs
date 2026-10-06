@@ -555,15 +555,35 @@ internal static class VectorElementPatch
         return Find(props, key) != null;
     }
 
+    /// <summary>
+    /// `scene` and `src`, both of which are free text -- so a number is text too.
+    /// </summary>
+    /// <remarks>
+    /// `scene = 1` is an ordinary thing for a script to write and arrived as a NUMBER, which
+    /// this answered null for: the element took the host's own id instead, and the data element
+    /// naming the same scene the same way never found it. Printed invariantly, as the scene
+    /// parser prints a number used as text.
+    /// </remarks>
     private static string? ReadString(SS.UiProp[] props, string key)
     {
         var value = Find(props, key);
-        return value?.Type == SS.UiValueType.String ? value.Value.String : null;
+        return value?.Type switch
+        {
+            SS.UiValueType.String => value.Value.String,
+            SS.UiValueType.Number => value.Value.Number.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture),
+            _ => null,
+        };
     }
 
+    /// <summary>A number, where a Lua boolean is 1 or 0 as it is everywhere else.</summary>
     private static float ReadNumber(SS.UiProp[] props, string key, float fallback)
     {
         var value = Find(props, key);
-        return value?.Type == SS.UiValueType.Number ? value.Value.Number : fallback;
+        return value?.Type switch
+        {
+            SS.UiValueType.Number => value.Value.Number,
+            SS.UiValueType.Bool => value.Value.Bool ? 1f : 0f,
+            _ => fallback,
+        };
     }
 }

@@ -606,7 +606,7 @@ internal static class SceneParser
 
         var scene = new VecScene
         {
-            Id = PropString(props, "scene") ?? string.Empty,
+            Id = PropText(props, "scene") ?? string.Empty,
             ViewWidth = Mathf.Max(1f, PropNumber(props, "w", 100f)),
             ViewHeight = Mathf.Max(1f, PropNumber(props, "h", 100f)),
             Fit = ParseFit(PropString(props, "fit")),
@@ -794,7 +794,11 @@ internal static class SceneParser
             switch (entry.Value.Type)
             {
                 case SS.UiValueType.Number:
-                    into.Scalars[entry.Key] = entry.Value.Number;
+                case SS.UiValueType.Bool:
+                    // A boolean was in NONE of these dictionaries, so under `keep` the name did
+                    // not exist to be evicted: `data = { alarm = false }` left `alarm = 1`
+                    // standing and the alarm stayed on.
+                    into.Scalars[entry.Key] = Scalar(entry.Value);
                     break;
 
                 case SS.UiValueType.String when entry.Value.String != null:
@@ -844,7 +848,7 @@ internal static class SceneParser
 
                     var values = new float[source.Length];
                     for (var i = 0; i < source.Length; i++)
-                        values[i] = source[i].Type == SS.UiValueType.Number ? source[i].Number : 0f;
+                        values[i] = Scalar(source[i]);
 
                     into.Arrays[entry.Key] = values;
                     break;
@@ -1308,9 +1312,9 @@ internal static class SceneParser
                 node.Tx = Attr(map, "x", 0f);
                 node.Ty = Attr(map, "y", 0f);
                 node.Opacity = Attr(map, "o", 1f);
-                node.ClipRef = PropString(map, "clip");
+                node.ClipRef = PropText(map, "clip");
 
-                var reference = PropString(map, "ref");
+                var reference = PropText(map, "ref");
 
                 // A symbol that reaches itself -- directly, or round a cycle of symbols --
                 // expanded for ever here. That is not a hang: it is a STACK OVERFLOW, which
@@ -1361,7 +1365,7 @@ internal static class SceneParser
                 node.Rotate = Attr(map, "r", 0f);
                 node.Opacity = Attr(map, "o", 1f);
                 node.Visible = HasKey(map, "v") ? Attr(map, "v", 1f) : null;
-                node.ClipRef = PropString(map, "clip");
+                node.ClipRef = PropText(map, "clip");
 
                 // CSS matrix(a,b,c,d,e,f), composed after t r s the way a transform list is.
                 if (HasKey(map, "m"))
@@ -1420,8 +1424,7 @@ internal static class SceneParser
                 // visibly dims it, because apparent density drops with the count. Temporal
                 // LOD in VectorGraphic gets the same saving with no visual artefact, so
                 // count reduction is reserved for scenes that explicitly ask for it.
-                var lod = PropValue(map, "lod");
-                node.AllowLod = lod?.Type == SS.UiValueType.Number && lod.Value.Number > 0.5f;
+                node.AllowLod = PropNumber(map, "lod", 0f) > 0.5f;
 
                 break;
             }
@@ -1533,7 +1536,7 @@ internal static class SceneParser
                 }
 
                 // `text` is either a literal or a $name binding, resolved per rebuild.
-                var body = PropString(map, "text");
+                var body = PropText(map, "text");
                 if (!string.IsNullOrEmpty(body) && body![0] == '$')
                 {
                     var bound = SplitBinding(body[1..]);
@@ -1547,7 +1550,7 @@ internal static class SceneParser
 
                 // `fmt` turns the node into a NUMBER formatter: the chip sends the value it
                 // already has in the payload and does no string work at all.
-                node.TextFormat = PropString(map, "fmt");
+                node.TextFormat = PropText(map, "fmt");
 
                 // Does this spec actually format a number? That is the only question worth
                 // asking, and 0.11.97 asked a different one -- "can the fast path split it?" --
@@ -1558,7 +1561,7 @@ internal static class SceneParser
                 // So: format a sample. It is bad when the attempt THROWS, or when the output
                 // comes back as the spec itself, meaning no placeholder was consumed and the
                 // author's text was printed where the number should have been.
-                node.TextUnit = PropString(map, "unit");
+                node.TextUnit = PropText(map, "unit");
                 if (node.TextLiteral != null)
                     node.TextParts = TextTemplate(node.TextLiteral, node.TextFormat);
 
@@ -1582,14 +1585,14 @@ internal static class SceneParser
                     CheckFormat(node.TextFormat, scene);
                 }
 
-                var missing = PropString(map, "missing");
+                var missing = PropText(map, "missing");
                 if (missing != null)
                 {
                     node.TextMissing = missing;
                     node.TextMissingDeclared = true;
                 }
 
-                node.FontFamily = PropString(map, "font");
+                node.FontFamily = PropText(map, "font");
                 node.Align = TextAlign.Horizontal(PropString(map, "align"));
                 node.VAlign = TextAlign.Vertical(PropString(map, "valign"));
                 node.Fit = TextFit.Parse(PropString(map, "fit"));
@@ -1747,7 +1750,7 @@ internal static class SceneParser
                 return null;
         }
 
-        Validate(map, scene, op, PropString(map, "id"));
+        Validate(map, scene, op, PropText(map, "id"));
 
         ParseFill(map, node, scene, op);
         ParseStroke(map, node, scene);
@@ -1774,7 +1777,7 @@ internal static class SceneParser
         // this leaves that alone.
         node.Visible ??= HasKey(map, "v") ? Attr(map, "v", 1f) : null;
 
-        node.Id = PropString(map, "id");
+        node.Id = PropText(map, "id");
         node.Pressable = PropNumber(map, "press", 0f) > 0.5f;
         node.ReportsPosition = PropNumber(map, "xy", 0f) > 0.5f;
         node.HoverEvents = PropNumber(map, "hoverev", 0f) > 0.5f;
@@ -1992,7 +1995,7 @@ internal static class SceneParser
 
             var map = entry.Map;
             var op = PropString(map, "op")?.ToUpperInvariant();
-            var id = PropString(map, "id");
+            var id = PropText(map, "id");
 
             // A def's keys are checked like a node's. They were not, so a stray key on a
             // gradient or a clip was ignored in silence -- the exact fault this check exists to
@@ -2371,13 +2374,13 @@ internal static class SceneParser
 
             if (extra > 0)
             {
-                scene.Problem($"CP \"{PropString(map, "id")}\": a clip uses one shape; "
+                scene.Problem($"CP \"{PropText(map, "id")}\": a clip uses one shape; "
                               + $"{extra} further shape{(extra == 1 ? " was" : "s were")} ignored");
             }
 
             if (defs > 0)
             {
-                scene.Problem($"CP \"{PropString(map, "id")}\": a def belongs in DEFS, not inside a "
+                scene.Problem($"CP \"{PropText(map, "id")}\": a def belongs in DEFS, not inside a "
                               + $"clip; {defs} {(defs == 1 ? "was" : "were")} ignored");
             }
 
@@ -2502,7 +2505,7 @@ internal static class SceneParser
         var source = value.Value.Array;
         var numbers = new float[source.Length];
         for (var i = 0; i < source.Length; i++)
-            numbers[i] = source[i].Type == SS.UiValueType.Number ? source[i].Number : 0f;
+            numbers[i] = Scalar(source[i]);
 
         return numbers;
     }
@@ -2645,6 +2648,7 @@ internal static class SceneParser
         return value.Value.Type switch
         {
             SS.UiValueType.Number => Expression.Constant(value.Value.Number),
+            SS.UiValueType.Bool => Expression.Constant(value.Value.Bool ? 1f : 0f),
             SS.UiValueType.String when !string.IsNullOrEmpty(value.Value.String) =>
                 Expression.Parse(value.Value.String, fallback),
             _ => Expression.Constant(fallback),
@@ -2825,6 +2829,7 @@ internal static class SceneParser
         return array[index].Type switch
         {
             SS.UiValueType.Number => Expression.Constant(array[index].Number),
+            SS.UiValueType.Bool => Expression.Constant(array[index].Bool ? 1f : 0f),
             SS.UiValueType.String when !string.IsNullOrEmpty(array[index].String) =>
                 Expression.Parse(array[index].String!, fallback),
             _ => Expression.Constant(fallback),
@@ -2856,9 +2861,64 @@ internal static class SceneParser
         return value?.Type == SS.UiValueType.String ? value.Value.String : null;
     }
 
+    /// <summary>
+    /// A key whose value is free text or an identifier, where a number is text too.
+    /// </summary>
+    /// <remarks>
+    /// `text = 700` and `id = 1` are the obvious things to write, and both arrive as NUMBERS:
+    /// the text format types any token `float.TryParse` accepts as one (quotes do not change
+    /// that), and Lua hands a number over as a number. `PropString` answered null for them, so
+    /// the label drew nothing and the node had no identity -- no patch could reach it, no event
+    /// carried it -- with nothing reported either time.
+    ///
+    /// Deliberately NOT inside `PropString`: `ParseFill` and `ParseStroke` run on every node
+    /// including `USE` and `G`, whose attributes are parameters of any name, so coercing there
+    /// turned `USE ref=dot s=6` -- a symbol parameter called `s` -- into the reported fault
+    /// `"6" is not a colour`. The strict reader stays strict for colours, enums and `op`.
+    ///
+    /// The number is printed exactly as a spliced `%param` is, so `id = 1` and `%id` agree.
+    /// </remarks>
+    private static string? PropText(SS.UiProp[] props, string key)
+    {
+        var value = PropValue(props, key);
+        return value?.Type switch
+        {
+            SS.UiValueType.String => value.Value.String,
+            SS.UiValueType.Number => Textual(value.Value),
+            _ => null,
+        };
+    }
+
     private static float PropNumber(SS.UiProp[] props, string key, float fallback)
     {
         var value = PropValue(props, key);
-        return value?.Type == SS.UiValueType.Number ? value.Value.Number : fallback;
+        return value?.Type switch
+        {
+            SS.UiValueType.Number => value.Value.Number,
+            SS.UiValueType.Bool => value.Value.Bool ? 1f : 0f,
+            _ => fallback,
+        };
+    }
+
+    /// <summary>One value as a plain number, where a Lua boolean is 1 or 0.</summary>
+    /// <remarks>
+    /// ScriptedScreens delivers a Lua boolean as `UiValueType.Bool` and leaves `Number` at 0
+    /// (`UiValue.FromBool`), so every numeric reader here fell through to its FALLBACK rather
+    /// than to zero. On a key whose default is 1 that inverted the author's meaning: `v = false`
+    /// left the node visible, `kern = false` kept kerning on. On a key whose default is 0 it
+    /// dropped the instruction: `press = true` was not pressable, `keep = true` kept nothing --
+    /// it wiped the very values it was asked to hold, since `keep` read as 0.
+    ///
+    /// `true` is 1 and `false` is 0, which is what the scene said and what every other
+    /// spelling of the same thing already did.
+    /// </remarks>
+    private static float Scalar(SS.UiValue value)
+    {
+        return value.Type switch
+        {
+            SS.UiValueType.Number => value.Number,
+            SS.UiValueType.Bool => value.Bool ? 1f : 0f,
+            _ => 0f,
+        };
     }
 }

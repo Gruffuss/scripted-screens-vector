@@ -68,6 +68,8 @@ internal static class SweepTests
     internal static void Run(TestRun run)
     {
         Console.WriteLine();
+        FreeTextTakesANumber(run);
+        LuaBooleansAreRead(run);
         PercentPairs(run);
         PlaceholderFormatStartsAtTheFirstColon(run);
     }

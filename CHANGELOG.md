@@ -30,6 +30,35 @@ failing on 0.11.101 first; the regression tests are `Tests/SweepTests.cs`.
   runs to the end, exactly as `{$name:spec}` has always read it. After: `2:00` and `125 s: ok`,
   no problems. One colon and none are unchanged.
 
+- **A number where free text belongs was read as nothing.** `text = 700`, `missing = 0`,
+  `unit = 5`, `id = 1`, `font`, `fmt`, `ref`, `clip` and the scene's own `scene` id all arrive
+  as NUMBERS -- the text format types every token `float.TryParse` accepts as one, quotes
+  included, and Lua hands a number over as a number -- and the reader behind those keys answered
+  null for one. Measured before: `T text=700` drew no label and reported nothing; `missing=0`
+  kept the default `--`; `unit=5` was dropped; `id=1` left the node unidentified, so
+  `nodes = { ["1"] = ... }` answered `patch for unknown node id "1"` and no event could carry
+  it. A symbol parameter went the same way: `USE label=700` into a body reading `text=%label`
+  drew nothing. After: all of them read, printed as a spliced `%param` is.
+
+  The strict reader stays strict for colours, enums and `op`, deliberately: those run on every
+  node including `USE` and `G`, whose attributes are parameters of ANY name, and coercing there
+  turned `USE ref=dot s=6` into the reported fault `"6" is not a colour`. So `R f=5` still draws
+  no fill and `op = 1` is still dropped -- both silently, both unchanged.
+
+- **A Lua boolean in a numeric slot did nothing at all.** ScriptedScreens delivers `true` and
+  `false` as its own Bool type with the number left at 0, so every numeric reader fell through
+  to its FALLBACK rather than to zero. On a key whose default is 1 that inverted the scene's
+  meaning, on one whose default is 0 it dropped the instruction, and neither said a word.
+  Measured before, each against its `1`/`0` control: `R v=false` stayed VISIBLE, `G v=false`
+  stayed visible, `T v=false` still drew its label, `press=true` was not pressable,
+  `wrap=true` did not wrap, `close=true` did not close, `lod=true` did not allow LOD,
+  `snap=true` snapped nothing, `data = { flags = {true,false,5} }` read `[0,0,5]`, and the worst
+  of them: `keep = true` kept NOTHING -- it wiped the values it was asked to hold -- while
+  `data = { alarm = false }` under `keep` left `alarm = 1` standing, so an alarm could not be
+  turned off by the obvious payload. After: `true` is 1 and `false` is 0 everywhere a number is
+  read, which is what the scene said. No shipped example writes a boolean on any of these keys,
+  so none of them changes.
+
 ## 0.11.101
 
 ### Fixed
