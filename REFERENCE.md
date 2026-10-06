@@ -1080,8 +1080,8 @@ container, where it will be clipped away and look like nothing happened.
 |-----|---------|
 | `x`, `y`, `w`, `h` | the box the text is laid out in |
 | `text` | a literal, `"$name"`, `"$rows[i]"` for one slot of a data array, or a literal holding several `{$name}` placeholders |
-| `fmt` | printf spec for a bound **number**, e.g. `"%.1f"`. A spec this cannot read **prints itself** rather than the number — `fmt = "%q"` draws `%q` — and is reported from 0.11.97. A .NET composite format such as `"{0:F1}"` works and is not reported. A spec that is well formed but wrong for a number, `"{0:Z}"` or `"{0:D3}"`, draws the `missing` text |
-| `unit` | literal suffix appended after the text |
+| `fmt` | printf spec for a bound **number**, e.g. `"%.1f"`. A spec this cannot read **prints itself** rather than the number — `fmt = "%q"` draws `%q` — and is reported from 0.11.100. A .NET composite format such as `"{0:F1}"` works and is not reported. A spec that is well formed but wrong for a number, `"{0:Z}"` or `"{0:D3}"`, draws the `missing` text |
+| `unit` | a literal suffix, added once after everything else the label prints. **Only a label that reads data takes it**: `text = "$name"`, `"$rows[i]"`, or a literal holding `{$…}` or `{=…}` placeholders. A plain literal ignores it, unreported |
 | `missing` | what to draw when the name has no value; default `"--"`. An empty string is a value and draws nothing |
 | `size` | font size in scene units, default `12`; scales with the transform |
 | `f` | colour; **a label with no `f` draws white**, where a shape with no `f` draws no fill |
@@ -1133,9 +1133,17 @@ format; one without a format takes the node's `fmt`:
 
 Each placeholder resolves as `text = "$name"` would: a string as it is, a number through its
 format, and `missing` in its place when the name has no value, while the rest of the text still
-shows. `unit` still goes after the whole text. A `{` not followed by `$` or `=` is ordinary text,
-and a label whose printed characters did not change makes no new string, so a line of readouts
-costs the same as one.
+shows. A `{` not followed by `$` or `=` is ordinary text, and a label whose printed characters
+did not change makes no new string, so a line of readouts costs the same as one.
+
+**`unit` only follows text that came from data.** It is added after a bound string, after a bound
+number and its `fmt` — `fmt = "%.1f kPa"` with `unit = " U"` draws `12.3 kPa U` — and after the
+last character of a literal that holds placeholders, once, however many of them there are.
+**On a plain literal it does nothing, and nothing is reported:** `text = "hello", unit = " kPa"`
+draws `hello`, so write the unit into the text. Two bound cases drop it as well — a name with no
+value draws `missing` on its own, `--` rather than `-- kPa`, and so does a `fmt` that cannot
+format the number — while inside a literal with placeholders it always follows, so
+`text = "p {$nope} k", unit = " U"` draws `p -- k U` while the name is unresolved.
 
 **A placeholder may be an expression:** `{=expr}` or `{=expr:%.1f}`, over `t`, data, `since()`
 or anything else an expression reads. A clock or a counter then needs no payload at all:
