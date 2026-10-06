@@ -30,6 +30,41 @@ ScriptedScreens Vector, newest first.
 - **A third copy of "a spec that cannot be read renders `missing`"** — the claim corrected in the
   `fmt` table two commits ago appears again in the `T` prose, and was still wrong there.
 
+A second sweep, every item measured against the parser and the emitted mesh before it was
+written, each in the reference's own section rather than appended beside the wrong sentence:
+
+- **An open `L`, `LS` or `SP` that carries an `f` is filled**, as though the shape were closed,
+  while its stroke stays open — and **nothing else about it is closed**: no shadow, outset or
+  inset, no `blur` on that fill, and the hit area unchanged. The `f` may be inherited from a `G`
+  or the scene root, so a stroke-only line in a group that sets `f` comes out filled. The `LS`
+  entry said "stroked rather than filled"; the `SP` `close` row read as if only a closed ring
+  could be filled; Shadows and `blur` never said an open shape's `sh` and `blur` do nothing.
+- **An `R` has no elliptical corner.** `rx = 8, ry = 3` draws the corners of `rx = 8`, triangle
+  for triangle. `ry`'s only effect is as a switch: with a scalar `rx`, an `ry` below `0.01`
+  squares the whole rectangle — hit area and shadow with it — and with a per-corner list `ry` is
+  not read at all. `SC` and `IMG` inherited the wrong wording by cross-reference.
+- **Which attributes take an expression, enumerated.** "Any numeric attribute may be a string
+  beginning with `=`" was false for 43 of them, and the reference contradicted it in only three
+  places. Both lists are now written out, with what each literal-only key does with an expression
+  (a flag or a count falls back to its default, a number inside a list reads as `0`) and the two
+  routes that do reach one: a symbol parameter, and a group's `v`.
+- **A stroke has no single width under an uneven matrix.** Not `sqrt(|ad − bc|)`: it is
+  `sw · |ad − bc| / |M·d|` for a line running in direction `d`, which is what the mesh measures
+  in all 52 cases. The same cause makes the automatic feather not 1.3 screen pixels there.
+- **`unit` only follows text that came from data** — a bound string, a bound number after its
+  `fmt`, or a literal holding placeholders. On a plain literal it does nothing, unreported, and
+  an unresolved name draws `missing` without it.
+- **What the three debug switches remove.** `nofill` leaves radial-gradient and `blur`red fills
+  drawn and drops every `T` label; `nofeather` touches only the feather ring and a `YS`'s edge;
+  `noeval` is not expression evaluation in general but the `x`/`y`/`w`/`h` of every rectangle,
+  replaced with fixed numbers, and it does not hold the vertex count still.
+- **An index outside an array and a name that is not an array are different faults**, and only
+  the second is reported. The index is rounded before the bounds check. The code is the right
+  side here: a repeat of `n = 6` over three values is the legitimate pattern and stays silent.
+- **Two stale comments**, in `Tests/PrintfTests.cs` and above `Expression.Element`: an
+  unrecognised `fmt` is not rejected by `string.Format`, it prints itself; and an out-of-range
+  string slot in a LABEL is reported, unlike the accessor it sits next to.
+
 ### Measured
 
 Both `fmt` tables re-run whole: the fourteen specs of 0.11.100 still land correctly, and the hex
