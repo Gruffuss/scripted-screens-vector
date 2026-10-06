@@ -87,6 +87,44 @@ failing on 0.11.101 first; the regression tests are `Tests/SweepTests.cs`.
   of wondering why the offset has no effect. A Lua boolean in one of those four now reads 1 or 0
   with the rest of them.
 
+- **`%name` was a plain text replacement, so one parameter rewrote another.** With `i = 3` and
+  `idx = 7` declared in that order, `"i=%i idx=%idx"` drew `i=3 idx=3dx`; an expression went the
+  same way, `x = "=%i*10+%idx"` becoming `"=3*10+3dx"`, which then reported a bad expression and
+  fell back to 0. Nothing said a word about the collision itself.
+
+  "Keep parameter names so that none begins another" was not advice an author could follow.
+  Which of two colliding names landed first was the order the parameters arrive in, and that
+  order MOVES -- a parameter the instance overrides goes to the back of the list, so the same
+  symbol drew correctly from one `USE` and corrupt from another (measured: `idx = 7` declared
+  after `i`, overridden by the instance, turned `idx=9` into `idx=3dx`). And the names in play
+  are not all declared: a `USE` always carries `op`, `ref`, `x`, `y`, `o` and `clip`, and a
+  text-form `SYM` with no `params` map contributes its own `id` and `c`, so measured,
+  `xs=%xs opacity=%opacity refx=%refx` drew `xs=20s opacity=USEacity refx=sx`.
+
+  A `%name` now ends where a name ends, taking the longest parameter that matches, so all of
+  those read what they say. One deliberate narrowing comes with it: `%name` written against
+  more name characters, where `name` is declared and the longer word is not, used to splice
+  (`%wpx` gave `10px`) and now stays literal `%wpx` -- which the expression and number paths
+  then report by its real text instead of by the mangled one. `examples/11-symbols.lua` is the
+  only scene here that splices, and it draws identically.
+
+- **A colour literal in an attribute that takes a number was silent.** A colour evaluates to 0
+  on the numeric path, so `x = "=#5FD9A8"` put the shape at 0, `w = "=#fff"` collapsed it, and
+  `mix(#A,#B,t)` in a numeric slot was `mix(0,0,t)` -- while the opposite mistake, a number
+  where a colour belongs, has been reported since 0.11.21. Measured before: eight such
+  attributes (`x`, `w`, `fo`, `size`, a `G`'s `t` pair, and `#5FD9A8+1`) drew at 0 with no
+  problems. The check sits in the expression parser, so it covers every numeric attribute,
+  placeholder, index and gradient stop position at once; `f` and `s`, the two that WANT a
+  colour, say so. The value is unchanged, so nothing moves -- **a scene already carrying one now
+  shows the problem border.**
+
+- **A `nodes` patch reported no expression fault at all.** The parser's report channel is only
+  set while the scene is being built, so a patch carrying a malformed expression reached the
+  BepInEx log alone: `nodes = { box = { y = "=sin(" } }` left `vector_stats` saying the scene had
+  no problems. Measured before: no problems; after: `expression "=sin(": unexpected end`. This
+  widens the border to any scene whose patches carry a malformed expression, which before was
+  visible only in the log.
+
 ## 0.11.101
 
 ### Fixed

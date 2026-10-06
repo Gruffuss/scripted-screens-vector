@@ -673,12 +673,20 @@ internal static class SceneParser
     internal static bool PatchNodes(SS.UiProp[] props, VecScene scene)
     {
         Expression.SawPointer = false;
+
+        // A patch re-parses the node, so every expression on it goes through the parser again --
+        // but `Report` is only set while the SCENE is being built, so a patch that carried a
+        // malformed expression, or a colour in a numeric slot, reached the log alone and the
+        // stats tool said the scene had no problems.
+        var reporting = Expression.Report;
+        Expression.Report = message => scene.Problem(message);
         try
         {
             return PatchNodesCore(props, scene);
         }
         finally
         {
+            Expression.Report = reporting;
             scene.UsesPointer |= Expression.SawPointer;
         }
     }
@@ -1130,10 +1138,7 @@ internal static class SceneParser
                 if (text.IndexOf('%', StringComparison.Ordinal) < 0)
                     return value;
 
-                foreach (var arg in args)
-                    text = text.Replace("%" + arg.Key, Textual(arg.Value), StringComparison.OrdinalIgnoreCase);
-
-                return new SS.UiValue { Type = SS.UiValueType.String, String = text };
+                return new SS.UiValue { Type = SS.UiValueType.String, String = Splice(text, args) };
             }
 
             case SS.UiValueType.Array when value.Array != null:
@@ -1152,6 +1157,88 @@ internal static class SceneParser
                 return value;
         }
     }
+
+    /// <summary>
+    /// Splices `%name` parameters into a string, one left-to-right pass, longest name first.
+    /// </summary>
+    /// <remarks>
+    /// This was a plain `string.Replace` per parameter, so a name that BEGINS another rewrote
+    /// it: with `i = 3` and `idx = 7` declared in that order, `"i=%i idx=%idx"` drew
+    /// `"i=3 idx=3dx"`. Nothing was reported -- what reached the problem list, if anything, was
+    /// whatever the mangled text then failed as.
+    ///
+    /// "Pick names that do not collide" was not something an author could do. Which of two
+    /// colliding names landed first was the order the parameters arrived in, and that order
+    /// moves: a parameter the instance OVERRIDES goes to the back of the list, so the same
+    /// symbol drew correctly from one `USE` and corrupt from another. The names in play are not
+    /// all declared either -- a `USE` always carries `op`, `ref`, `x`, `y`, `o` and `clip`, and
+    /// a text-form `SYM` without a `params` map contributes its own `id` and `c` -- so `%idx`
+    /// collided with `x` and `%col` with `c` whatever the author called things.
+    ///
+    /// So the match is a whole identifier: the longest parameter name that matches at the `%`
+    /// and does not run into another name character, which is how `Expression.ReadName` reads a
+    /// name. A `%name` nobody declared is left exactly as written, where it used to splice the
+    /// shorter name -- `%wide` with only `w` declared drew `10ide` and now draws `%wide`, which
+    /// the expression and number paths then report by its real text.
+    /// </remarks>
+    private static string Splice(string text, SS.UiProp[] args)
+    {
+        var built = new System.Text.StringBuilder(text.Length);
+        var at = 0;
+
+        while (at < text.Length)
+        {
+            var sigil = text.IndexOf('%', at);
+            if (sigil < 0)
+            {
+                built.Append(text, at, text.Length - at);
+                break;
+            }
+
+            built.Append(text, at, sigil - at);
+
+            // The LONGEST name that matches here, so `%idx` is not read as `%i` followed by
+            // "dx" when both are declared.
+            SS.UiProp? best = null;
+            foreach (var arg in args)
+            {
+                var key = arg.Key;
+                if (string.IsNullOrEmpty(key) || (best != null && key.Length <= best.Value.Key.Length))
+                    continue;
+
+                var start = sigil + 1;
+                if (start + key.Length > text.Length
+                    || string.Compare(text, start, key, 0, key.Length, StringComparison.OrdinalIgnoreCase) != 0)
+                {
+                    continue;
+                }
+
+                // A name ends where name characters end. A key that does not itself end in one
+                // (`a-b`) cannot run into the next word, so it needs no boundary.
+                var after = start + key.Length;
+                if (IsNameChar(key[^1]) && after < text.Length && IsNameChar(text[after]))
+                    continue;
+
+                best = arg;
+            }
+
+            if (best == null)
+            {
+                // Not a parameter: `%` is ordinary text, and a `fmt` spec inside a symbol body
+                // (`{$v:%.1f}`) depends on it staying that way.
+                built.Append('%');
+                at = sigil + 1;
+                continue;
+            }
+
+            built.Append(Textual(best.Value.Value));
+            at = sigil + 1 + best.Value.Key.Length;
+        }
+
+        return built.ToString();
+    }
+
+    private static bool IsNameChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     private static string Textual(SS.UiValue value)
     {
@@ -1921,7 +2008,7 @@ internal static class SceneParser
         // This is the shape everyone reaches for first, so it is read before anything else.
         if (fill![0] == '=')
         {
-            var expression = Expression.Parse(fill, 0f);
+            var expression = Expression.Parse(fill, 0f, colour: true);
             if (expression.IsColour)
             {
                 node.HasFill = true;
@@ -2434,7 +2521,7 @@ internal static class SceneParser
         // A colour expression, as for `f`.
         if (stroke![0] == '=')
         {
-            var expression = Expression.Parse(stroke, 0f);
+            var expression = Expression.Parse(stroke, 0f, colour: true);
             if (expression.IsColour)
             {
                 node.HasStroke = true;

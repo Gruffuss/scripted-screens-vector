@@ -625,7 +625,7 @@ internal sealed class Expression
     /// <summary>Set by the parser when an expression reads `hover` or `down`; the scene parser resets and reads it.</summary>
     [ThreadStatic] internal static bool SawPointer;
 
-    internal static Expression Parse(string source, float fallback)
+    internal static Expression Parse(string source, float fallback, bool colour = false)
     {
         try
         {
@@ -633,6 +633,19 @@ internal sealed class Expression
             var expression = parser.ParseExpression();
             parser.ExpectEnd();
             expression._treeDepth = MeasureDepth(expression);
+
+            // A colour literal is 0 on the numeric path, so `x = "=#5FD9A8"` put the shape at
+            // 0, `w = "=#fff"` collapsed it, and `mix(#A,#B,t)` in a numeric slot was
+            // `mix(0,0,t)` -- all of it silent, while the opposite mistake (a number where a
+            // colour belongs) has always been reported. Checked here rather than at each call
+            // site because this is the one place a numeric attribute's text becomes a tree;
+            // the two attributes that WANT a colour pass `colour: true`.
+            if (!colour && expression.ContainsColour)
+            {
+                Report?.Invoke($"expression \"{source}\" holds a colour, "
+                               + "but this attribute takes a number");
+            }
+
             return expression;
         }
         catch (FormatException ex)
@@ -831,6 +844,37 @@ internal sealed class Expression
             }
 
             return true;
+        }
+    }
+
+    /// <summary>True when a colour literal is anywhere in this expression.</summary>
+    /// <remarks>
+    /// Not the same question as <see cref="IsColour"/>, which asks whether every branch that can
+    /// be RETURNED is a colour. This asks whether one is in there at all, which is what makes a
+    /// numeric attribute's value wrong: `#5FD9A8+1` is not a colour by `IsColour` and is not a
+    /// number either. Iterative for the same reason as every other walk here.
+    /// </remarks>
+    internal bool ContainsColour
+    {
+        get
+        {
+            var stack = new Stack<Expression>();
+            stack.Push(this);
+
+            while (stack.Count > 0)
+            {
+                var node = stack.Pop();
+                if (node._kind == Kind.Colour)
+                    return true;
+
+                foreach (var argument in node._args)
+                {
+                    if (argument != null)
+                        stack.Push(argument);
+                }
+            }
+
+            return false;
         }
     }
 

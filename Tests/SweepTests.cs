@@ -71,6 +71,7 @@ internal static class SweepTests
         FreeTextTakesANumber(run);
         LuaBooleansAreRead(run);
         ShadowStringsAreReported(run);
+        SubstitutionStopsAtTheName(run);
         EnumTyposAreReported(run);
         PercentPairs(run);
         PlaceholderFormatStartsAtTheFirstColon(run);
