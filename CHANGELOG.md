@@ -5,7 +5,9 @@ ScriptedScreens Vector, newest first.
 ## 0.11.102
 
 A sweep of the values the parser read as nothing and said nothing about. Every one was watched
-failing on 0.11.101 first; the regression tests are `Tests/SweepTests.cs`.
+failing on 0.11.101 first; the regression tests are `Tests/SweepTests.cs`, and
+`InGameTest-0.11.102.lua` carries every fix beside the control that already worked. The
+17-scene fingerprint is byte-identical at all three `t` values.
 
 ### Fixed
 
