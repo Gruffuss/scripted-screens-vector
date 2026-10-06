@@ -625,6 +625,11 @@ internal static class SceneParser
         // EXISTING SCENE LOOKS LIKE: a header carrying a stray key now shows the magenta border.
         Validate(props, scene, "SCENE", scene.Id);
 
+        // On the header `fit` means how the viewBox meets the surface, which is a third
+        // vocabulary again -- and `fit=stretch`, its own default spelled out, is in 68 of the
+        // scenes here.
+        CheckWord(props, "fit", scene, "SCENE", "stretch", "contain", "cover");
+
         ParseDefs(PropValue(props, "defs"), scene);
 
         // Defaults on the scene root, inherited by everything in it exactly as a `G`'s are.
@@ -1751,6 +1756,7 @@ internal static class SceneParser
         }
 
         Validate(map, scene, op, PropText(map, "id"));
+        CheckWords(own, scene, op!);
 
         ParseFill(map, node, scene, op);
         ParseStroke(map, node, scene);
@@ -2002,6 +2008,12 @@ internal static class SceneParser
             // catch. CHANGES WHAT AN EXISTING SCENE LOOKS LIKE: one that carries a typo on a
             // def now reports it and shows the magenta border, where before it drew clean.
             Validate(map, scene, op, id);
+
+            if (op is "GL" or "GR" or "GC")
+            {
+                CheckWord(map, "units", scene, op, "bbox");
+                CheckWord(map, "spread", scene, op, "pad", "repeat", "reflect", "none");
+            }
 
             if (op == "SYM" && !string.IsNullOrEmpty(id))
             {
@@ -2596,6 +2608,101 @@ internal static class SceneParser
         return parts.ToArray();
     }
 
+    /// <summary>
+    /// Reports a word that is not one of the ones this key accepts, and changes nothing else.
+    /// </summary>
+    /// <remarks>
+    /// Every one of these keys ends in a `_ =>` arm that quietly means the default, so a typo
+    /// drew the default and said nothing: `fit=elipsis` was `none`, `cap=rund` was `butt`,
+    /// `align=centre` worked but `align=centerr` was `left`. `rep`, `srep`, `op` and the `fl`
+    /// weight already reported; these did not.
+    ///
+    /// Two things this must get right, both measured:
+    ///
+    /// * the ACCEPTED list has to include the word that spells the default. 62 of the 85 scenes
+    ///   in this repo write at least one (`fit=stretch` alone appears 68 times), none of them a
+    ///   typo, and a list taken from the reference's "accepted" column alone would have put the
+    ///   problem border on all of them.
+    /// * it reads what the author wrote on THIS node, never the merged map. A group hands `fit`
+    ///   down to every child, so under `G fit=cover` a `T` sees a word from the `IMG`
+    ///   vocabulary and an `IMG` under `G fit=ellipsis` sees one from the `T` vocabulary; a
+    ///   group's own word is judged against the union instead, since it cannot know which op
+    ///   will read it.
+    ///
+    /// The fallback value is untouched, so nothing draws differently -- but a scene that was
+    /// quietly drawing the default now shows the problem border, which is the point.
+    /// </remarks>
+    private static void CheckWord(SS.UiProp[] own, string key, VecScene scene, string what,
+                                  params string[] accepted)
+    {
+        var word = PropString(own, key);
+        if (string.IsNullOrEmpty(word))
+            return;
+
+        foreach (var candidate in accepted)
+        {
+            if (string.Equals(word, candidate, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+
+        // `weight` takes a number as well as a word, and a number written from Lua as a string
+        // reaches here: `weight = "700"` is as valid as `weight = 700`.
+        if (string.Equals(key, "weight", StringComparison.Ordinal)
+            && float.TryParse(word, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out _))
+        {
+            return;
+        }
+
+        var list = accepted.Length == 1
+            ? accepted[0]
+            : string.Join(", ", accepted, 0, accepted.Length - 1) + " or " + accepted[^1];
+
+        scene.Problem($"{what}: {key} \"{word}\" is not {list}");
+    }
+
+    /// <summary>Every enum word one op reads, checked against that op's own vocabulary.</summary>
+    private static void CheckWords(SS.UiProp[] own, VecScene scene, string op)
+    {
+        var upper = op.ToUpperInvariant();
+
+        // A `USE`'s attributes are its symbol's parameters and may be named anything, so none
+        // of them is an enum word here. The same exemption `Validate` carries.
+        if (string.Equals(upper, "USE", StringComparison.Ordinal))
+            return;
+
+        switch (upper)
+        {
+            case "T":
+                CheckWord(own, "fit", scene, "T", "none", "ellipsis", "shrink");
+                CheckWord(own, "align", scene, "T", "left", "center", "centre", "right", "justified", "justify");
+                CheckWord(own, "valign", scene, "T", "top", "middle", "center", "centre", "bottom");
+                CheckWord(own, "weight", scene, "T", "bold", "normal");
+                break;
+
+            case "IMG":
+                CheckWord(own, "fit", scene, "IMG", "fill", "contain", "cover", "none", "scale-down");
+                CheckWord(own, "tile", scene, "IMG", "contain", "cover");
+                CheckWord(own, "smp", scene, "IMG", "point", "smooth");
+                break;
+
+            case "G":
+                // A group's word belongs to whichever child reads it, so it is judged against
+                // the union of the vocabularies rather than against one op's.
+                CheckWord(own, "fit", scene, "G", "stretch", "contain", "cover",
+                    "none", "ellipsis", "shrink", "fill", "scale-down");
+                CheckWord(own, "align", scene, "G", "left", "center", "centre", "right", "justified", "justify");
+                CheckWord(own, "valign", scene, "G", "top", "middle", "center", "centre", "bottom");
+                CheckWord(own, "weight", scene, "G", "bold", "normal");
+                break;
+        }
+
+        // Stroke and fill keys, which any shape may carry and a group may hand down.
+        CheckWord(own, "cap", scene, upper, "butt", "round", "square");
+        CheckWord(own, "join", scene, upper, "miter", "round", "bevel");
+        CheckWord(own, "fr", scene, upper, "nonzero", "evenodd");
+    }
+
     private static int RepeatMode(string? word, VecScene scene)
     {
         switch (word?.ToUpperInvariant())
@@ -2764,6 +2871,8 @@ internal static class SceneParser
         return list.Count > 0 ? list.ToArray() : null;
     }
 
+    private static readonly string[] ShadowFields = { "dx", "dy", "blur", "spread" };
+
     private static VecShadow? ParseShadow(SS.UiValue[] parts, VecScene? scene)
     {
         // The drop stays -- a shadow with no colour cannot be built -- but this was the one
@@ -2774,8 +2883,6 @@ internal static class SceneParser
             scene?.Problem($"sh: a shadow takes dx, dy, blur, spread and a colour, {parts.Length} given");
             return null;
         }
-
-        static float Num(SS.UiValue v) => v.Type == SS.UiValueType.Number ? v.Number : 0f;
 
         var text = parts[4].Type == SS.UiValueType.String ? parts[4].String : null;
         if (string.IsNullOrEmpty(text))
@@ -2790,7 +2897,14 @@ internal static class SceneParser
             return null;
         }
 
-        // Sixth field: `inset` (or 1), as CSS writes it.
+        // Sixth field: `inset` (or 1), as CSS writes it. A word that is not `inset` drew an
+        // ordinary drop shadow and said nothing.
+        if (parts.Length > 5 && parts[5].Type == SS.UiValueType.String
+            && !string.Equals(parts[5].String, "inset", StringComparison.OrdinalIgnoreCase))
+        {
+            scene?.Problem($"sh: the sixth field of a shadow is \"inset\", not \"{parts[5].String}\"");
+        }
+
         var inset = parts.Length > 5
                     && ((parts[5].Type == SS.UiValueType.String && string.Equals(parts[5].String, "inset", StringComparison.OrdinalIgnoreCase))
                         || (parts[5].Type == SS.UiValueType.Number && parts[5].Number > 0.5f)
@@ -2799,7 +2913,23 @@ internal static class SceneParser
                         // Lua was silently ignored for as long as this has existed.
                         || (parts[5].Type == SS.UiValueType.Bool && parts[5].Bool));
 
-        return new VecShadow(Num(parts[0]), Num(parts[1]), Num(parts[2]), Num(parts[3]), colour, inset);
+        // The four numbers are read as written and baked here: a shadow does not animate, by
+        // design, and `VecShadow` holds four plain floats. So an expression in one of them is
+        // not merely ignored -- the offset, blur or spread is LOST, and this was the one part
+        // of a shadow nothing was said about, while a field short, a missing colour and a
+        // colour that is not one were all reported. `{0,"=2*t",8,0,col}` -- the shape the docs'
+        // own animation section leads an author to try -- read dy as 0 in silence.
+        for (var i = 0; i < 4; i++)
+        {
+            if (parts[i].Type is SS.UiValueType.Number or SS.UiValueType.Bool)
+                continue;
+
+            scene?.Problem($"sh: {ShadowFields[i]} is read as a plain number and is not "
+                           + "evaluated, so a shadow does not animate; write a number");
+        }
+
+        return new VecShadow(Scalar(parts[0]), Scalar(parts[1]), Scalar(parts[2]), Scalar(parts[3]),
+            colour, inset);
     }
 
     /// <summary>`rx = [tl, tr, br, bl]` in CSS order, or null when `rx` is a single value.</summary>

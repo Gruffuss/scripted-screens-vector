@@ -59,6 +59,34 @@ failing on 0.11.101 first; the regression tests are `Tests/SweepTests.cs`.
   read, which is what the scene said. No shipped example writes a boolean on any of these keys,
   so none of them changes.
 
+### Changed
+
+- **A word that is not one of the ones a key accepts is reported.** `fit` (on the header, a `T`
+  and an `IMG`, three different vocabularies), `align`, `valign`, `weight`, `cap`, `join`, `fr`,
+  `tile`, `smp`, `units`, `spread` and a shadow's sixth field all ended in an arm that quietly
+  meant the default, so a typo drew the default and said nothing: measured, `fit=elipsis` was
+  `none`, `cap=rund` was `butt`, `align=centerr` was `left`, `spread=reflct` was `pad`,
+  `units=bbx` was scene coordinates. `rep`, `srep`, `op` and the `weight` inside `fl` already
+  reported; these did not. The fallback value is unchanged, so nothing draws differently --
+  **but a scene already carrying such a typo now shows the problem border**, like the def and
+  header key checks of 0.11.96.
+
+  The accepted lists include the word that spells the default, because authors write it: 62 of
+  the 85 scenes here do (`fit=stretch` alone 68 times), and a check taken from the reference's
+  "accepted" column alone would have flagged every one. And only what the author wrote ON the
+  node is judged: a group hands `fit` down to every child, so under `G fit=cover` a `T` sees an
+  `IMG` word, and a group's own word is checked against the union instead.
+
+### Fixed
+
+- **A shadow's `dx`, `dy`, `blur` or `spread` written as anything but a number was lost in
+  silence.** `sh = { 0, "=2*t", 8, 0, col }` read `dy` as 0, which is the one part of a shadow
+  nothing was said about -- a field short, a missing colour and a colour that is not one were
+  all reported. The literal read stays: a shadow's geometry is baked at parse time and does not
+  animate, by design. What is new is that the loss is reported, so the author finds out instead
+  of wondering why the offset has no effect. A Lua boolean in one of those four now reads 1 or 0
+  with the rest of them.
+
 ## 0.11.101
 
 ### Fixed

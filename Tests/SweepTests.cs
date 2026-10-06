@@ -70,6 +70,8 @@ internal static class SweepTests
         Console.WriteLine();
         FreeTextTakesANumber(run);
         LuaBooleansAreRead(run);
+        ShadowStringsAreReported(run);
+        EnumTyposAreReported(run);
         PercentPairs(run);
         PlaceholderFormatStartsAtTheFirstColon(run);
     }
