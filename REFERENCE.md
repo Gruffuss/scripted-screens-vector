@@ -1258,11 +1258,19 @@ data:set_props({ data = {
 ```
 
 The index is a full expression, not just `i` — `$rows[n-1-i]` reverses a list and
-`$cols[mod(i,4)]` cycles a palette. **An index past the end does not fail, and what it draws
+`$cols[mod(i,4)]` cycles a palette. It rounds to the nearest slot, so `-0.4` is slot `0` and
+`2.6` is slot `3`. **An index past the end, or below zero, does not fail, and what it draws
 depends on what was bound**: a string slot draws `missing`, a number slot draws `0` through
 `fmt`, and a colour draws **magenta** — the same signal as an unresolved colour. The array is
 there and only the slot is missing, so **the name is not listed among the unresolved names** —
-except for a string slot, which is listed unless the node declares `missing`.
+except for a string slot, which is listed unless the node declares `missing`. That exception is
+what lets a repeat run longer than its data: `RP n = 6` over a list of three strings reports
+nothing once the label says `missing = ""`, and the last three rows draw no text.
+
+**A name that is not an array at all is a different fault and is reported**: one never sent,
+misspelled, or sent as a single value. The label draws `missing` rather than `0`, a colour draws
+magenta, and the name is listed — except in a label that declares `missing`, which has said that
+absence is expected.
 
 **Formatting a number, so the chip does no string work.** Most console text is a number with a
 unit, and formatting it in Lua costs a `string.format` per label per tick:
@@ -2139,7 +2147,7 @@ expression, is reported as one, and leaves `o` at its default.
 | `i1`, `i2`, … | enclosing repeat indices, outward; `0` where no repeat reaches that far out. `i0` is `i` |
 | `n` | count of the **innermost** repeat, `0` outside one. There is no `n1`: an outer repeat's count cannot be read from an inner one |
 | `$name` | scalar from the data payload |
-| `$name[expr]` | array element, **0-based**; out of range yields `0`, and is not reported |
+| `$name[expr]` | array element, **0-based**. The index is rounded to the nearest slot, and one outside the array — past the end or negative — yields `0` and is **not** reported. A name that is not an array at all is reported as unresolved, and also yields `0` |
 | `sy` | scroll offset of the enclosing scroll view or `SC`, in scene units; `0` when there is none |
 | `vh` | viewport height of that scroll view or `SC`, in scene units; `0` when there is none |
 | `hover` | `1` while the pointer is over a clickable node inside the nearest node with an `id` around this expression (the node itself, or a group), else `0` |
@@ -2171,8 +2179,14 @@ for k = 1, #cells do
 end
 ```
 
-Out-of-range reads yield `0` rather than failing, so an off-by-one shows up as a shape stuck
-at zero — not as an error.
+**An index outside the array and a name that is not an array are different faults, and only the
+second is reported.** An index past the end or below zero, `$a[5]` over three elements or
+`$a[-1]`, does not fail and is not listed: the array is there and only the slot is missing, which
+is exactly what a repeat of `n = 6` over three values does on purpose, and listing it would flag
+a scene that works. So an off-by-one shows up as a shape stuck at zero, not as an error. A name
+that is not an array — misspelled, not sent yet, or sent as a single number — is listed as
+unresolved and reads the same `0`, so the typo is the one you are told about. The index rounds
+before it is checked: `-0.4` is slot `0` and `2.6` is slot `3`.
 
 **`sy` and `vh` pin artwork to a scroll viewport.** A vector element inside a scroll view
 moves with the content, so anything drawn at a fixed `y` scrolls away with it. Adding `sy`
