@@ -1549,27 +1549,38 @@ internal static class SceneParser
                 // already has in the payload and does no string work at all.
                 node.TextFormat = PropString(map, "fmt");
 
-                // A spec this cannot read reaches `string.Format` unchanged and so PRINTS ITSELF:
-                // `fmt="%q"` drew "%q", `fmt="nonsense"` drew "nonsense", `fmt=""` drew no label
-                // at all -- every one in silence, while REFERENCE promised the `missing` text.
-                // Printing the author's own spec is the honest half, since `missing` would hide
-                // the typo; the silence is the fault.
+                // Does this spec actually format a number? That is the only question worth
+                // asking, and 0.11.97 asked a different one -- "can the fast path split it?" --
+                // which reported four .NET formats that work: `{0} kPa`, `{0,6:0.0}`, `{{{0}}}`
+                // and `{0:}` all drew correctly AND carried the problem border. It also missed
+                // `{0:Z}`, which splits cleanly and then fails because a float has no `Z`.
                 //
-                // `ToNet` handing back its own input is how it says it could not read the spec,
-                // but that alone is NOT the test: a .NET composite format (`{0:F1}`) comes back
-                // unchanged too and formats the number correctly. The second half asks whether
-                // any conversion reached the formatter at all.
-                var net = node.TextFormat == null ? null : Printf.ToNet(node.TextFormat);
-                if (net != null && string.Equals(net, node.TextFormat, StringComparison.Ordinal)
-                    && !Printf.TrySplit(net, out _, out _, out _))
-                {
-                    scene.Problem($"T: fmt \"{node.TextFormat}\" is not a printf conversion, "
-                                  + "so it prints instead of the number");
-                }
-
+                // So: format a sample. It is bad when the attempt THROWS, or when the output
+                // comes back as the spec itself, meaning no placeholder was consumed and the
+                // author's text was printed where the number should have been.
                 node.TextUnit = PropString(map, "unit");
                 if (node.TextLiteral != null)
                     node.TextParts = TextTemplate(node.TextLiteral, node.TextFormat);
+
+                // Only a `fmt` a NUMBER actually goes through is worth reporting. A label of
+                // literal text with a leftover `fmt` formats nothing, so flagging it put the
+                // problem border on a console that draws exactly as written.
+                //
+                // Where there are template parts, each numeric one carries the spec it will use
+                // -- its own, or the node's inherited into it -- so checking the parts covers the
+                // node `fmt` and closes the hole where `{$v:%q}` printed itself in silence.
+                if (node.TextParts != null)
+                {
+                    foreach (var part in node.TextParts)
+                    {
+                        if (part.Literal == null)
+                            CheckFormat(part.Net, scene);
+                    }
+                }
+                else if (node.TextData != null)
+                {
+                    CheckFormat(node.TextFormat, scene);
+                }
 
                 var missing = PropString(map, "missing");
                 if (missing != null)
@@ -2642,6 +2653,51 @@ internal static class SceneParser
     /// `sh = { { dx, dy, blur, spread, "#rrggbbaa" }, ... }` -- CSS box-shadow order, and a
     /// list so several compose. A single shadow may be given unwrapped.
     /// </summary>
+    /// <summary>
+    /// Reports a `fmt` that cannot format a number, by formatting one and looking at the result.
+    /// </summary>
+    /// <remarks>
+    /// Checked by RUNNING it, not by inspecting it: a spec is usable when it turns a number into
+    /// something other than itself, and every way of guessing that from the text has been wrong
+    /// once. The sample is a value with a fraction and more than one digit, so a spec that only
+    /// works for an integer, or only for a short one, still shows itself.
+    ///
+    /// Two failures, and the message says which: a spec `string.Format` REFUSES (`{0:Z}`, `{0:D3}`
+    /// and `{0:B}` are well-formed composite formats that a float has no conversion for, and
+    /// before 0.11.99 one of those through a placeholder killed the whole scene), and a spec that
+    /// consumed no placeholder at all, which prints the author's own text where the number should
+    /// be (`%q`, `nonsense`). An empty `fmt` is the second kind and draws no label at all.
+    /// </remarks>
+    private static void CheckFormat(string? format, VecScene scene)
+    {
+        if (format == null)
+            return;
+
+        // `format` is the author's text on the whole-binding path and an already-translated spec
+        // on the parts path; `ToNet` is idempotent for a spec it cannot read and for one already
+        // in .NET form, so translating here is safe either way.
+        var net = Printf.ToNet(format);
+        const float Sample = 1234.5f;
+
+        string printed;
+        try
+        {
+            printed = string.Format(System.Globalization.CultureInfo.InvariantCulture, net, Sample);
+        }
+        catch (FormatException)
+        {
+            scene.Problem($"T: fmt \"{format}\" is not a format a number can take, "
+                          + "so the label draws its `missing` text");
+            return;
+        }
+
+        if (string.Equals(printed, net, StringComparison.Ordinal))
+        {
+            scene.Problem($"T: fmt \"{format}\" holds no conversion, "
+                          + "so it prints itself instead of the number");
+        }
+    }
+
     private static VecShadow[]? ParseShadows(SS.UiProp[] map, VecScene? scene)
     {
         var value = PropValue(map, "sh");

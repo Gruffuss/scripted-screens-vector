@@ -2,6 +2,41 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.100
+
+### Fixed
+
+- **0.11.97's unreadable-`fmt` report was a false positive on .NET formats that work**, and it
+  brought the magenta border with it. `fmt = "{0} kPa"` drew `1.25 kPa`, `"{0,6:0.0}"` drew
+  `   1.3`, `"{{{0}}}"` drew `{1.25}` and `"{0:}"` drew `1.25` — every one correct, every one
+  reported. It also fired where no number went through `fmt` at all, and it MISSED `{0:Z}`, which
+  is well formed and then fails because a float has no `Z` conversion.
+
+  The check asked the wrong question. It asked whether the fast path could split the spec, which
+  is not the same as whether the spec works. It now **formats a sample number and looks at the
+  result**: a spec is bad when the attempt throws, or when the output comes back as the spec
+  itself, meaning no placeholder was consumed and the author's text printed where the number
+  should have been. The two failures carry different messages, since one draws the `missing` text
+  and the other prints the spec.
+
+  **It is also scoped now.** Only a `fmt` a number actually goes through is checked, so a label of
+  literal text with a leftover `fmt` formats nothing and is left alone.
+
+- **A placeholder's own bad format was silent.** `text = "<{$v:%q}>"` printed `<%q>` and said
+  nothing. Checking the template parts rather than the node's `fmt` string closes it, because each
+  numeric part carries the spec it will actually use — its own, or the node's inherited into it.
+
+### Measured
+
+Fourteen specs, each checked against what it draws: the six that format correctly report nothing,
+the two where `fmt` is unreachable report nothing, and the five unusable ones plus the previously
+silent `{$v:%q}` all report. Fingerprint byte-identical to 0.11.99, unit suite 359.
+
+**This is my own regression from 0.11.97, found by the console builder session within hours of
+pinning it.** The 0.11.97 check was written with a guard against exactly this failure — a `{0:F1}`
+test — and the guard was too narrow: `{0:F1}` is the one composite format the fast path happens to
+split.
+
 ## 0.11.99
 
 ### Fixed
