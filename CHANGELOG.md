@@ -334,6 +334,32 @@ written, each in the reference's own section rather than appended beside the wro
   unrecognised `fmt` is not rejected by `string.Format`, it prints itself; and an out-of-range
   string slot in a LABEL is reported, unlike the accessor it sits next to.
 
+A third sweep, three claims a consumer raised against the parser. Each was measured on the
+emitted mesh beside an always-visible anchor shape, so "this node drew nothing" could not be
+read as "the scene failed":
+
+- **`v` is a threshold at `0.5`, not a test against `0`.** The `G` attribute table said "`0`
+  removes the subtree", which understates it: `0`, `0.4`, `0.5` and any negative all hide,
+  `0.5001` and above all show, and absent shows. Measured on a group and on a shape, geometry
+  and hit region together — at `0.5` only the anchor's 1 shape and 1 hit region survive, at
+  `0.5001` there are 2 of each. Nothing is reported at any value. The prose two paragraphs below
+  the table has had this right since 0.11.102; the table row never got the correction.
+- **A `C`'s `ry` defaults to its `rx`**, which the `C` section did not say, so `cx cy rx ry` read
+  as four required keys. `rx = 20` alone emits the same 104 vertices and 152 triangles over the
+  same square bounds as `rx = 20, ry = 20`. The section now also gives the edges: either radius
+  at or below `0` draws nothing and reports nothing, so `ry = 20` on its own is invisible —
+  `rx` is still `0` — while `ry = 0.0001` draws a sliver, there being no minimum radius here
+  as there is on a radial gradient.
+- **A scene's `w` and `h` default to `100` and are clamped up to `1`, with no upper bound.** The
+  structure table gave neither. Measured: absent is `100 x 100`; `0`, `-50` and `0.2` are all
+  `1 x 1`; `1.5` stays `1.5`; `100000` and `1000000000` are accepted as written; and the two are
+  independent, so `w = 0.2` alone is `1 x 100`. Every clamp is silent.
+
+The code is the right side of all three, and the reference was wrong each time, so nothing in the
+renderer changed. Two silent fallbacks are **documented rather than fixed** and want a decision:
+a `C` whose radius is `0` or negative draws nothing with no problem reported, and a scene `w` or
+`h` of `0` or a negative becomes a 1-unit viewbox just as quietly.
+
 ### Measured
 
 Both `fmt` tables re-run whole: the fourteen specs of 0.11.100 still land correctly, and the hex

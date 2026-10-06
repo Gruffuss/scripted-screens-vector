@@ -29,7 +29,7 @@ from the **element**, always, so a `scene=` on a `SCENE` line does not pair anyt
 | Prop | Type | Meaning |
 |------|------|---------|
 | `scene` | string | scene id; pairs the two elements |
-| `w`, `h` | number | viewbox size — the units all artwork is written in |
+| `w`, `h` | number | viewbox size — the units all artwork is written in. Each **defaults to `100`** and is **clamped up to `1`**, independently and silently: `0`, a negative and `0.2` all give `1`, so `w = 0.2` alone is a `1 x 100` viewbox. Above `1` nothing is changed and there is **no upper bound** — `1.5` stays `1.5`, `100000` is accepted as written |
 | `fit` | string | `stretch` (default), `contain`, `cover` |
 | `defs` | array | gradient and clip-path declarations |
 | `root` | array | the node list |
@@ -692,7 +692,7 @@ ignored, so annotations are harmless.
 | `s` | `{sx, sy}` | scale |
 | `a` | `{x, y}` | anchor the transform pivots about, default `{0, 0}` |
 | `o` | number/expr | group opacity `0..1`, multiplied into all descendants |
-| `v` | number/expr | `0` removes the subtree entirely, clicks included (CSS `visibility`). **On any node, not only a `G`** — on a shape or a label it was accepted and ignored before 0.11.75 |
+| `v` | number/expr | visibility, and it is a **threshold, not a test against `0`**: at or below `0.5` the subtree is not there at all, clicks included (CSS `visibility`); above `0.5` it is drawn, as absent is. **On any node, not only a `G`** — on a shape or a label it was accepted and ignored before 0.11.75. See **the test is a threshold** below |
 | `clip` | string | id of a `CP` in `defs` |
 | `m` | `{a, b, c, d, e, f}` | six **literal** numbers: CSS `matrix()`, applied after `t r s` (innermost) |
 | `bri` `con` `sat` `hue` `gray` `sep` `inv` | number/expr | colour filters, CSS `filter()` semantics |
@@ -879,7 +879,14 @@ radii all by the same factor wherever the two along one side add up to more than
 
 ### `C` — ellipse
 
-`cx`, `cy`, `rx`, `ry`.
+`cx`, `cy`, `rx`, `ry`. Each defaults to `0`, except that **`ry` defaults to `rx`**: `rx = 20`
+on its own is the circle `rx = ry = 20`, so `ry` is written only for an ellipse. Unlike an `R`'s
+corner `ry`, this one is a true second radius — `rx = 20, ry = 8` is the flattened ellipse.
+
+**Either radius at or below `0` draws nothing, and nothing is reported.** `ry = 20` on its own is
+therefore invisible, since `rx` is still `0`; so are `rx = 20, ry = 0` and any negative on either.
+There is no minimum, unlike a radial gradient's `r`, which becomes `0.0001`: an `rx = 20,
+ry = 0.0001` ellipse draws, as a horizontal sliver.
 
 Segments follow **on-screen radius** (6 at the floor, 48 at the cap, quantised so camera drift
 does not retessellate), the same way rounded-rect corners do. A mote two pixels across costs
