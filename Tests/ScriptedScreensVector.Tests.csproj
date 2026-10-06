@@ -13,7 +13,12 @@
         <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     </PropertyGroup>
 
-    <Import Project="..\Stationeers.VS.User.props" />
+    <!-- The real props file is gitignored (it holds machine paths), so a fresh CLONE or WORKTREE
+         does not have one and an unconditional import fails with a raw MSBuild error that says
+         nothing useful. Fall back to the tracked example: its paths are probably wrong for this
+         machine, but then the Error below fires instead, which says exactly what to fix. -->
+    <Import Project="..\Stationeers.VS.User.props" Condition="Exists('..\Stationeers.VS.User.props')" />
+    <Import Project="..\Stationeers.VS.User.props.example" Condition="!Exists('..\Stationeers.VS.User.props')" />
 
     <PropertyGroup>
         <UnityManagedDirectory>$(SteamLibraryDirectory)\Stationeers\rocketstation_Data\Managed</UnityManagedDirectory>
