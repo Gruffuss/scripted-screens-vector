@@ -52,13 +52,21 @@ Constraints that are not negotiable when this is built:
   `load-failed` (the file arrived and is not a font this engine reads) or `loader-unavailable`.
   Those five map straight onto what a report should tell whoever can act, which is the whole
   reason for asking: a player at a console cannot read the log.
-  **The tokens are the INTENDED contract, not a measured one**, and they will never all be equally
-  verified. The fonts mod's own ranking: `download-failed`, `disabled` and `load-failed` are
-  provokable for real (a 404 on an allowed host, a switched-off file, a non-font file) and will be
-  genuine evidence; `face-limit` needs 48 page faces in one session and `loader-unavailable` needs
-  the loader unready for a full 60 seconds, which does not happen — both are reachable only through
-  a temporary build, which checks the arithmetic and the delivery path, NOT that the situation
-  occurs. Keep those two in the weaker column permanently, even after they are reported done.
+  **A PAGE LINK CAN ONLY PRODUCE THREE OUTCOMES — build for three, not five** (measured on a
+  console, 2026-10-06): refused (`false` synchronously, no callback at all), `download-failed`, or
+  `disabled`. `load-failed` is effectively unreachable by URL, because the downloader validates the
+  file before it ever becomes a path, so a non-font answers `download-failed`; it would take an
+  already-cached file going corrupt. `face-limit` needs 48 page faces in one session. Three
+  reachable outcomes is a simpler report than five, and the report should be built on those.
+
+  Verified on a console: `download-failed` (twice — a 404 on an allowed host, and an allowed host
+  serving a non-font), `disabled` (a cached font switched off in the config, which also showed the
+  font never registering that session), and a disallowed host returning `false` with NO callback.
+  **The two still intended-only are `face-limit` and `loader-unavailable`**, and neither can occur
+  naturally. `loader-unavailable` needs the loader unready for a full 60 seconds, which does not
+  happen, and `face-limit` needs the cap lowered in a temporary build — such a run checks the
+  arithmetic and the delivery path, NOT that the situation occurs. Keep both in the weaker column
+  permanently, even after they are reported done.
   `loader-unavailable`'s whole history is that shape: an unbounded wait nobody ever saw hang, now a
   bounded one nobody will see fire — the value is that a caller cannot be left waiting for ever,
   not that the path is common.
