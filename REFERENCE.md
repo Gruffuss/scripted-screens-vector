@@ -645,14 +645,22 @@ drawn after it, and wants that regardless of declaration order.
 
 ### Debug switches
 
-Set on the **structure** element's props, alongside `root`. Each disables one stage, so
-subtracting the reported cost isolates it.
+Set on the **structure** element's props, alongside `root` — on the `SCENE` line in the text
+form. Each is a number: `1` turns one on, and so does a bare or quoted `1` in the text form.
+`0.5` or less is off, and so is `true`, `"yes"` or any other value that is not a number, **with
+no report**. They exist for measuring: each removes one stage so its cost can be subtracted, and
+none of them leaves the picture as drawn.
 
-| Prop | Effect |
-|------|--------|
-| `nofill` | skip fills |
-| `nofeather` | skip feathering |
-| `noeval` | skip expression evaluation |
+| Prop | What it removes |
+|------|-----------------|
+| `nofill` | the interior fill of `R`, `C`, `P`, `Y`, `SP` and `YS`, flat, linear or conic, **and every `T` label**, dropped whole so the label count reads `0`. Still drawn: strokes, the feathered edge ring of a shape (an `R` at the default feather keeps its 8 vertices), shadows, `blur`red fills, pictures, and **radial-gradient fills**, which it does not skip |
+| `nofeather` | the soft edge ring of closed fills and the sampled edge of a `YS`. A stroke's feather is unchanged, and so is any shape written with `fea = 0` |
+| `noeval` | **not expression evaluation in general.** It replaces `x`, `y`, `w` and `h` of every rectangle with the fixed values `40, 40, 2, 2`, constants as much as expressions. Every rectangle means an `R`, the box of an `IMG` (which then draws nothing you can see), the box of an `SC`, and the `R` of a clip whose box is an expression; a clip written with plain numbers is cut when the scene is parsed and keeps its shape. Everything else is evaluated as usual: `rx`, `ry`, `fo`, `sw`, and everything on `C`, `G`, `YS` and `T` |
+
+A `noeval` scene is also not the same scene drawn smaller, so any vertex count that follows size
+moves with it: a rounded `R` goes from 36 vertices to 20, a radial-gradient one from 4,608 to 81,
+a conic one from 760 to 112, a shadowed one from 957 to 397. Compare a `noeval` run only against
+square-cornered, flat-filled rectangles.
 
 ---
 
@@ -686,7 +694,7 @@ ignored, so annotations are harmless.
 | `o` | number/expr | group opacity `0..1`, multiplied into all descendants |
 | `v` | number/expr | `0` removes the subtree entirely, clicks included (CSS `visibility`). **On any node, not only a `G`** — on a shape or a label it was accepted and ignored before 0.11.75 |
 | `clip` | string | id of a `CP` in `defs` |
-| `m` | `{a, b, c, d, e, f}` | CSS `matrix()`, applied after `t r s` (innermost) |
+| `m` | `{a, b, c, d, e, f}` | six **literal** numbers: CSS `matrix()`, applied after `t r s` (innermost) |
 | `bri` `con` `sat` `hue` `gray` `sep` `inv` | number/expr | colour filters, CSS `filter()` semantics |
 | `mask` | `"@gradient"` | multiplies every colour under the group by the gradient's alpha. **The `@` is required** — `mask = "fade"` is reported (0.11.96; before that it was ignored without a word), where `clip` takes the bare id. An EMPTY `mask` means "no mask" and stays silent, which is how a `nodes` patch turns one off |
 | `blur` | number/expr | CSS `filter: blur()`: the Gaussian's standard deviation, in the group's units. Flat closed fills under it draw blurred; see below |
@@ -702,7 +710,9 @@ an `IMG`.
 **`blur` blurs flat fills, on every closed shape.** Each flat fill under the group is drawn as
 its own blurred silhouette, the same geometry a shadow uses, which is
 exactly a Gaussian blur of that one shape. Strokes, gradient fills, pictures and text are drawn
-sharp. A `P` blurs its outer contour, so a blurred path with holes blurs as though it had none —
+sharp, and so is the fill of an open `L`, `LS` or `SP`: an `f` closes such a shape for its fill
+and not for this. A `P` blurs its outer contour, so a blurred path with holes blurs as though it
+had none —
 the same approximation its shadow already makes. Until 0.11.74 only `R` and `C` blurred and
 every other shape came out sharp. Two overlapping shapes are each blurred on their own and then composited, which a browser
 does the other way round; for soft glows, blobs and out-of-focus backdrops the difference does
@@ -749,10 +759,23 @@ than when the payload lands; send that name with `snap = 1` to switch in one fra
 
 **`m` is a CSS matrix**, `x' = a·x + c·y + e`, `y' = b·x + d·y + f`, and it is the innermost
 factor, as in `transform: translate() rotate() scale() matrix()`: points go through the
-matrix first, then the scale, rotation and translation. Stroke widths scale by
-`sqrt(|ad − bc|)`. A matrix of any other length is a problem, not a silent identity. **`a` is the
-origin of the whole transform list, `m` included**, as CSS `transform-origin` is: `m = {2, 0, 0,
+matrix first, then the scale, rotation and translation. A matrix of any other length is a
+problem, not a silent identity. **`a` is the origin of the whole transform list, `m` included**,
+as CSS `transform-origin` is: `m = {2, 0, 0,
 2, 0, 0}` with `a = {50, 50}` scales about the point 50,50. `t` is applied outside it.
+
+**A stroke goes through the matrix with its shape, so it has no single width.** `m`, like `s`,
+`r` and `t`, applies to the finished outline: the stroke is built in the shape's own units and
+then transformed along with it. Under a uniform scale `k` every stroke is `k × sw` wide and a
+rotation changes nothing, but under an uneven scale or a skew the width depends on which way the
+line runs. A line running in direction `d`, in the shape's own units, comes out
+`sw · |ad − bc| / |M·d|` wide, where `M·d = (a·dx + c·dy, b·dx + d·dy)` is that direction sent
+through the matrix. So under `m = {3, 0, 0, 1, 0, 0}` a horizontal line keeps its `sw`, a vertical
+one is three times it, and a circle's outline is thin at the top and bottom and thick at the
+sides, exactly as CSS draws it. A dash stretches the same way, its lengths being in the shape's
+own units too. `s = {sx, sy}` follows the same rule, and nested groups use the product of every
+matrix above the shape. `sqrt(|ad − bc|)` is not what sets a stroke width: it is the one number a
+group carries for the things that are sized once, a label's `size` among them.
 
 **Text follows a skew or an uneven scale** from `m` or `s = {sx, sy}`: the letters lean and
 stretch with the group, as CSS transforms them. The sizes that travel with the text — `size`,
@@ -797,7 +820,7 @@ across it rather than being split. An undeclared gradient is a problem.
 | Key | Type | Meaning |
 |-----|------|---------|
 | `n` | **literal number** | instance count — not an expression |
-| `lod` | number | `1` allows count reduction at distance when Count LOD is switched on (off by default); omitted means never |
+| `lod` | **literal number** | `1` allows count reduction at distance when Count LOD is switched on (off by default); omitted means never |
 | `c` | array | children, instantiated `n` times |
 
 Inside, `i` is the instance index `0..n-1` and `n` the count. Nested repeats shadow `i`; the
@@ -832,14 +855,23 @@ and `mod(i, cols)`.
 
 ### `R` — rectangle
 
-`x`, `y`, `w`, `h`, plus optional `rx` / `ry` corner radii. `rx` alone gives circular
-corners. Given as a list, **write all four**: a missing corner is `0`, not copied from another as
-CSS shorthand copies it, so `{ 10, 10, 10 }` leaves the bottom-left sharp. Corners given that way
-are circular — `ry` is not read when `rx` is a list. Radii too large for the box shrink as CSS shrinks them: one `rx` to half the
-shorter side, and per-corner radii all by the same factor wherever the two along one side add
-up to more than that side. Corners are true arcs.
+`x`, `y`, `w`, `h`, plus an optional corner radius `rx`. **Corners are true circular arcs and
+`rx` is their radius.** There is no elliptical corner: `ry` is not a second radius, and
+`rx = 8, ry = 3` draws exactly the corners `rx = 8` draws.
+
+**`ry` is a switch, and that is all it is.** With a single `rx`, an `ry` below `0.01` — `0`, a
+negative number, or an expression that happens to give one — draws the whole rectangle with
+square corners whatever `rx` says, as does `rx = 0`, which is why `ry = 8` on its own is square.
+Any larger `ry` changes nothing. Neither case is reported, so leave `ry` out unless you mean the
+switch. The square-or-round decision is carried by the outline every other stage reads, so a
+clickable `R`'s hit area and its shadow go square along with it.
 
 **Per-corner radii:** `rx = { tl, tr, br, bl }`, CSS order. A zero corner is a sharp point.
+**Write all four**: a missing corner is `0`, not copied from another as CSS shorthand copies it,
+so `{ 10, 10, 10 }` leaves the bottom-left sharp, and `{ 8 }` rounds the top-left corner alone.
+With a list `ry` is not read at all — absent, `0` or `100` all draw the same shape. Radii too
+large for the box shrink as CSS shrinks them: one `rx` to half the shorter side, and per-corner
+radii all by the same factor wherever the two along one side add up to more than that side.
 
 ```lua
 { op = "R", x = 0, y = 0, w = 60, h = 24, rx = { 12, 12, 0, 0 }, f = "#12202F" }
@@ -901,9 +933,22 @@ subpath anywhere casts no shadow, is left sharp by a `blur` and answers no click
 ### `L`, `Y` — polyline, polygon
 
 `p` is a flat array of alternating coordinates: `{x, y, x, y, ...}`. `Y` closes
-automatically. An `L` is open — it strokes as an open run and is clickable along that stroke —
-but **an `f` on an `L` still fills it**, closing the gap from its last point to its first the
-way SVG's fill rule does.
+automatically. An `L` is open: its stroke is an open run with a cap at each end, and nothing is
+drawn from its last point back to its first.
+
+**An open `L`, `LS` or `SP` that has an `f` is filled anyway.** The fill is taken as though the
+shape were closed, joining the last point back to the first the way SVG's fill rule does, while
+the stroke stays open — so three sides of a box with an `f` draw a filled square with one side
+missing from its outline. The `f` may be the shape's own or one passed down by a `G` or the scene
+root: a stroke-only line inside a group that sets `f` comes out filled unless it says
+`f = "none"`.
+
+**Nothing else about an open shape is closed.** It casts no shadow, outset or inset, even with an
+`f`, and nothing is reported; a `blur` leaves its fill sharp; its stroke takes caps instead of a
+closing segment; and its stroke is what answers a click, while with no stroke the closed-up area
+answers — see Clicks. Write `Y`, or `SP` with `close = 1`, where the shape has to be closed for
+all of those. A `P` has its own rule, given under `P`: a lone open subpath is filled, but an open
+subpath beside others is not.
 
 **Too few points, and what each paint needs, differ — and nothing is reported either way.**
 A STROKE needs two points; a FILL and a shadow need three. So a two-point `Y` draws its outline
@@ -960,8 +1005,11 @@ the *same* curve. Nothing is dropped, unlike count LOD on a repeat.
 
 ### `LS` — sampled polyline
 
-Same sampling rule as `YS` (`n`, `x`, `y`), stroked rather than filled. The line-chart and
-waveform primitive.
+Same sampling rule as `YS` (`n`, `x`, `y`), drawn as a stroke. The line-chart and waveform
+primitive. It is open, and follows the open-shape rules under `L` above: an `f` on it, or one
+inherited from a group, fills the area between the line and the straight chord from its last
+sample back to its first, and it casts no shadow. That fill needs three samples, as a polygon
+needs three points; with two, only the line draws.
 
 ### `SC` — scroll container
 
@@ -970,7 +1018,7 @@ waveform primitive.
 | `id` | string | **required** — the scroll position is stored under it |
 | `x`, `y`, `w`, `h` | number/expr | the viewport box, in the enclosing coordinates |
 | `ch` | number/expr | total content height; at or below `h` nothing scrolls |
-| `rx` / `ry` | number/expr | corner radii, same rules and per-corner form as `R` |
+| `rx` / `ry` | number/expr | the corner radius, exactly as on `R`: `rx` is the radius or a four-corner list, and `ry` only switches the rounding off |
 | `o` | number/expr | container opacity, multiplied into all descendants |
 | `so` | number/expr | a scroll offset to jump to — applied only when `sov` changes |
 | `sov` | number/expr | version for `so`; required with it |
@@ -1070,8 +1118,8 @@ container, where it will be clipped away and look like nothing happened.
 |-----|---------|
 | `x`, `y`, `w`, `h` | the box the text is laid out in |
 | `text` | a literal, `"$name"`, `"$rows[i]"` for one slot of a data array, or a literal holding several `{$name}` placeholders |
-| `fmt` | printf spec for a bound **number**, e.g. `"%.1f"`. A spec this cannot read **prints itself** rather than the number — `fmt = "%q"` draws `%q` — and is reported from 0.11.97. A .NET composite format such as `"{0:F1}"` works and is not reported. A spec that is well formed but wrong for a number, `"{0:Z}"` or `"{0:D3}"`, draws the `missing` text |
-| `unit` | literal suffix appended after the text |
+| `fmt` | printf spec for a bound **number**, e.g. `"%.1f"`. A spec this cannot read **prints itself** rather than the number — `fmt = "%q"` draws `%q` — and is reported from 0.11.100. A .NET composite format such as `"{0:F1}"` works and is not reported. A spec that is well formed but wrong for a number, `"{0:Z}"` or `"{0:D3}"`, draws the `missing` text |
+| `unit` | a literal suffix, added once after everything else the label prints. **Only a label that reads data takes it**: `text = "$name"`, `"$rows[i]"`, or a literal holding `{$…}` or `{=…}` placeholders. A plain literal ignores it, unreported |
 | `missing` | what to draw when the name has no value; default `"--"`. An empty string is a value and draws nothing |
 | `size` | font size in scene units, default `12`; scales with the transform |
 | `f` | colour; **a label with no `f` draws white**, where a shape with no `f` draws no fill |
@@ -1122,9 +1170,17 @@ format; one without a format takes the node's `fmt`:
 
 Each placeholder resolves as `text = "$name"` would: a string as it is, a number through its
 format, and `missing` in its place when the name has no value, while the rest of the text still
-shows. `unit` still goes after the whole text. A `{` not followed by `$` or `=` is ordinary text,
-and a label whose printed characters did not change makes no new string, so a line of readouts
-costs the same as one.
+shows. A `{` not followed by `$` or `=` is ordinary text, and a label whose printed characters
+did not change makes no new string, so a line of readouts costs the same as one.
+
+**`unit` only follows text that came from data.** It is added after a bound string, after a bound
+number and its `fmt` — `fmt = "%.1f kPa"` with `unit = " U"` draws `12.3 kPa U` — and after the
+last character of a literal that holds placeholders, once, however many of them there are.
+**On a plain literal it does nothing, and nothing is reported:** `text = "hello", unit = " kPa"`
+draws `hello`, so write the unit into the text. Two bound cases drop it as well — a name with no
+value draws `missing` on its own, `--` rather than `-- kPa`, and so does a `fmt` that cannot
+format the number — while inside a literal with placeholders it always follows, so
+`text = "p {$nope} k", unit = " U"` draws `p -- k U` while the name is unresolved.
 
 **A placeholder may be an expression:** `{=expr}` or `{=expr:%.1f}`, over `t`, data, `since()`
 or anything else an expression reads. A clock or a counter then needs no payload at all:
@@ -1238,11 +1294,19 @@ data:set_props({ data = {
 ```
 
 The index is a full expression, not just `i` — `$rows[n-1-i]` reverses a list and
-`$cols[mod(i,4)]` cycles a palette. **An index past the end does not fail, and what it draws
+`$cols[mod(i,4)]` cycles a palette. It rounds to the nearest slot, so `-0.4` is slot `0` and
+`2.6` is slot `3`. **An index past the end, or below zero, does not fail, and what it draws
 depends on what was bound**: a string slot draws `missing`, a number slot draws `0` through
 `fmt`, and a colour draws **magenta** — the same signal as an unresolved colour. The array is
 there and only the slot is missing, so **the name is not listed among the unresolved names** —
-except for a string slot, which is listed unless the node declares `missing`.
+except for a string slot, which is listed unless the node declares `missing`. That exception is
+what lets a repeat run longer than its data: `RP n = 6` over a list of three strings reports
+nothing once the label says `missing = ""`, and the last three rows draw no text.
+
+**A name that is not an array at all is a different fault and is reported**: one never sent,
+misspelled, or sent as a single value. The label draws `missing` rather than `0`, a colour draws
+magenta, and the name is listed — except in a label that declares `missing`, which has said that
+absence is expected.
 
 **Formatting a number, so the chip does no string work.** Most console text is a number with a
 unit, and formatting it in Lua costs a `string.format` per label per tick:
@@ -1273,17 +1337,20 @@ reach for `T` is what a label cannot do at all, not the budget.
 |-----|---------|
 | `p` | flat point array `{x, y, x, y, ...}` |
 | `seg` | segments per span, rounded to a whole number and held to `1..32`; default `8`. `seg = 64` draws 32, unreported |
-| `close` | `1` wraps the curve into a closed ring, which can then be filled |
+| `close` | a literal `1` wraps the curve into a closed ring, which can then be shadowed and blurred. Without it the curve is open: an `f` still fills it, between the curve and the chord from its last point back to its first, but an open `SP` casts no shadow and takes no `blur` |
 
 Catmull-Rom, so the curve passes **through** its points rather than being pulled toward them.
 
 **`close = 1`** is to `SP` what `Y` is to `L`: the curve runs through one further span, from the
 last point back to the first, and every tangent is taken around the ring, so the seam is as
 smooth as any other point on the curve. A closed spline takes a fill, a shadow and a `blur` like
-any other closed shape. **Three points is the useful minimum, but two are not refused**: a
-two-point `SP` is filled, shadowed and stroked exactly as `close = 1` asks, and simply encloses
-the sliver between one curve and its return. Since 0.11.74; before it, a rounded blob had to be
-written as a `P`.
+any other closed shape; an open one takes only the fill.
+**Three points is the real minimum.** Two are not refused, but `close = 1` has no effect on
+them: the ring is reopened before sampling, because two points enclose no area and the wrapped
+tangents collapse onto the same line. A two-point `SP` therefore draws exactly what the same
+curve drawn open does — measured, both emit 7 triangles of zero area, against 1,951 units of
+filled area for three points and 3,397 for four. With feathering on, the 156 units that appear
+are the feather skirt along the line, not a fill. Write three points, or an `L`.
 
 ---
 
@@ -1294,7 +1361,7 @@ written as a `P`.
 | `x`, `y`, `w`, `h` | the box |
 | `src` | URL (`https://`, `file://`, `data:`); PNG, JPEG, BMP, or the first frame of a GIF |
 | `fit` | `fill` (default, stretch), `contain`, `cover`, `none` (one scene unit per texel), `scale-down` (`contain` if the picture is larger than the box, else `none`) — CSS `object-fit` |
-| `rx` / `ry` | corner radii, as `R` |
+| `rx` / `ry` | the corner radius, exactly as on `R`, under a plain picture, a nine-slice or a `tile` alike: `rx` is the radius or a four-corner list, and `ry` only switches the rounding off |
 | `o` | opacity `0..1`, multiplied by the enclosing group's |
 | `uv` | `{u0, v0, u1, v1}`: the part of the picture shown, fractions of the texture, **v from the top**; default `{0, 0, 1, 1}` |
 | `at` | `{ax, ay}`: where the picture sits in the room `fit` leaves it, fractions of the free space; default `{0.5, 0.5}` (centred), CSS `object-position` |
@@ -1425,7 +1492,7 @@ non-overlapping contours, approximate where contours partially overlap.
 | Key | Meaning |
 |-----|---------|
 | `s` | stroke paint, same forms as `f` |
-| `sw` | width in scene units, **centred on the path**; scales with the transform |
+| `sw` | width in scene units, **centred on the path**; it goes through the transform with the outline, so an uneven scale or a skew makes the width depend on which way the line runs — see `G` |
 | `so` | stroke opacity |
 | `cap` | `butt` (default), `round`, `square` |
 | `join` | `miter` (default), `round`, `bevel` |
@@ -1503,7 +1570,10 @@ Outside a repeat it is the bare id, unchanged.
 **An OPEN shape is clickable along its stroke, not across the area it would enclose** (0.11.78):
 an `L` drawing three sides of a box answers clicks on those three lines, not in the middle.
 A **closed** shape answers inside its outline whether or not it is filled, which is how a scene
-makes an invisible hit area; so does an open shape with no stroke at all.
+makes an invisible hit area; so does an open shape with no stroke at all. That holds for a FILLED
+open shape too — an `f` closes it for the fill and not for the hit area — so a filled `L` with a
+stroke answers on the stroke and not across its fill, and one without a stroke answers over the
+whole closed-up area.
 
 **Every drawn shape except `YS` can be clicked: `R`, `C`, `L`, `Y`, `SP`, `LS` and `P`.** A `P` is
 clickable over its outer contour, holes included. **A `YS` records no hit area at all** — put a
@@ -1625,7 +1695,8 @@ kept a full-strength halo. The shadow colour's own alpha is separate and unaffec
 ```
 
 Available on **`R`, `C`, a closed `Y`, a closed `P`, an `SP close = 1`, and `T`**: any shape the
-renderer knows the closed outline of. Everything but
+renderer knows the closed outline of. An open `L`, `LS` or `SP` is not on that list: its `sh`
+draws nothing, whatever its `f`, and nothing is reported. Everything but
 text is drawn as geometry — no offscreen pass, no shader — by stacking contours from `-3σ` to
 `+3σ` carrying the closed-form coverage of a blurred edge, `0.5·erfc(d / (σ√2))`. Ring count
 follows the blur's on-screen size.
@@ -1784,6 +1855,12 @@ units, so it moves with the camera and with every enclosing group's scale — a 
 feather at roughly 3.9 screen pixels across its shorter side, half at 2.6, none at 1.3 or below.
 The lever is a smaller `fea`; the hard cutoff this replaced popped on and off as the camera moved,
 which was worse.
+
+**An uneven `m` or `s` breaks the pixel figure outright.** The automatic width is one number of
+local units, taken from the group's single scale (`sx`, or `sqrt(|ad − bc|)` for an `m`), and is
+then stretched with the shape like any other geometry, so it is 1.3 pixels only where the two axes
+agree. Under `m = {3, 0, 0, 1, 0, 0}` a line's ramp reaches 0.75 screen pixels past each side of a
+horizontal run and 2.25 past each side of a vertical one.
 
 **The ring around a filled contour is the only thing this touches.** A stroke's feather and a
 `YS`'s `fea_edge` take the width asked for whatever the shape's size, so a thin soft-edged band is
@@ -2055,7 +2132,50 @@ vertices: a few more than usual, only for that shape.
 
 ## Expressions
 
-Any numeric attribute may be a string beginning with `=`.
+**Most numeric attributes take an expression, written as a string beginning with `=`: a number
+that is placed, drawn or blended does. A switch, a count, or a list of numbers does not.**
+
+These take one, each number of a pair or list separately:
+
+- **Placement and size:** `x` `y` `w` `h`, `cx` `cy` `rx` `ry` — each corner of a four-corner
+  `rx` as well — `ch` and `y2`.
+- **`G`:** each number of `t`, `s` and `a`, and `r` `o` `blur` and the filters `bri` `con` `sat`
+  `hue` `gray` `sep` `inv`. `v` takes one on every node; `USE` on `x` `y` `o`; `SC` and `IMG`
+  on `o`.
+- **`SC`:** `so` and `sov`.
+- **Opacity and softness:** `fo` `fo2` `fea` `fea_edge`.
+- **Sampling a gradient:** `fat`, `sat`, and the `at` of `f = { grad, at }` or `s = { grad, at }`.
+- **Stroke:** `sw` `so` `dofs`.
+- **Text:** `size` `min_size` `ow`.
+- **`IMG`:** each number of `at` `off` `tile`.
+- **Gradients:** `x1 y1 x2 y2`, `cx cy r fx fy`, `a`, and a stop's position.
+- **A `CP`'s shape**, where it is an `R` or a `C`.
+
+These take a **literal number only**, and an expression in one of them is not evaluated:
+
+- the scene's `w` `h` `nofill` `nofeather` `noeval` `ztext`, and a data element's `keep` `snap`
+  and `ease`;
+- every count and switch: `n` (on `RP`, `YS` and `LS`), `lod`, `seg`, `close`, `mid`, `kern`,
+  `wrap`, and `click` `press` `xy` `hoverev` `drag` `drop`;
+- every list of numbers: `p` (on `L`, `Y`, `SP` and a clip's polygon), `m`, `dash`, `slice`,
+  `bw`, `uv`, and the four numbers of an `sh` entry;
+- and, by exception, the text settings `cspace` `lh` `weight`, the miter limit `ml`, and the
+  `size` inside `fl`.
+
+**Nothing is reported for most of them.** A flag, a count or a single number falls back to its
+own default: `ztext` to `1`, `kern` to on, `seg` to `8`, `ml` to `4`, a scene `w` to `100`. A
+number inside a list reads as `0` instead of its default, so `m = { "=$k", 0, 0, 1, 0, 0 }` is
+the matrix `{ 0, 0, 0, 1, 0, 0 }`. Where the **whole** list is one string, `m`, `slice`, `bw`,
+`uv`, `sh` and `oc` are reported, `p` and `dash` are not, and a `p` that is a string draws
+nothing. An `fl` whose `size` is a string is reported as not a number. Sent from a Lua table, a
+value that only looks like a number — the string `"3"` — is read as `3` by the keys above and
+not at all by these.
+
+Two ways to reach a literal-only key with a number you worked out. A **symbol parameter** is
+substituted while the scene is parsed and keeps its type, so `RP n = "%count"` under
+`USE count = 5` draws five — an expression passed the same way still reads `0`. Data cannot
+reach them at all: to make a `click` follow data, put the node inside a group whose `v` is the
+expression.
 
 **Write the `=`, even where it looks optional.** In the table form the parser drops a leading `=`
 if it finds one, so both spellings reach it; in the `src` text form the `=` is what makes the
@@ -2077,7 +2197,7 @@ expression, is reported as one, and leaves `o` at its default.
 | `i1`, `i2`, … | enclosing repeat indices, outward; `0` where no repeat reaches that far out. `i0` is `i` |
 | `n` | count of the **innermost** repeat, `0` outside one. There is no `n1`: an outer repeat's count cannot be read from an inner one |
 | `$name` | scalar from the data payload |
-| `$name[expr]` | array element, **0-based**; out of range yields `0`, and is not reported |
+| `$name[expr]` | array element, **0-based**. The index is rounded to the nearest slot, and one outside the array — past the end or negative — yields `0` and is **not** reported. A name that is not an array at all is reported as unresolved, and also yields `0` |
 | `sy` | scroll offset of the enclosing scroll view or `SC`, in scene units; `0` when there is none |
 | `vh` | viewport height of that scroll view or `SC`, in scene units; `0` when there is none |
 | `hover` | `1` while the pointer is over a clickable node inside the nearest node with an `id` around this expression (the node itself, or a group), else `0` |
@@ -2109,8 +2229,14 @@ for k = 1, #cells do
 end
 ```
 
-Out-of-range reads yield `0` rather than failing, so an off-by-one shows up as a shape stuck
-at zero — not as an error.
+**An index outside the array and a name that is not an array are different faults, and only the
+second is reported.** An index past the end or below zero, `$a[5]` over three elements or
+`$a[-1]`, does not fail and is not listed: the array is there and only the slot is missing, which
+is exactly what a repeat of `n = 6` over three values does on purpose, and listing it would flag
+a scene that works. So an off-by-one shows up as a shape stuck at zero, not as an error. A name
+that is not an array — misspelled, not sent yet, or sent as a single number — is listed as
+unresolved and reads the same `0`, so the typo is the one you are told about. The index rounds
+before it is checked: `-0.4` is slot `0` and `2.6` is slot `3`.
 
 **`sy` and `vh` pin artwork to a scroll viewport.** A vector element inside a scroll view
 moves with the content, so anything drawn at a fixed `y` scrolls away with it. Adding `sy`

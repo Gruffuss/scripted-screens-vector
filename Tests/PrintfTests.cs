@@ -7,8 +7,13 @@
 /// Worth pinning because the failure is quiet: a spec this reads wrongly does not throw, it
 /// formats the number differently, and "the readout shows 40.00 instead of 40.0" is the kind
 /// of thing nobody reports for a week. The unsupported cases matter as much as the supported
-/// ones -- an unrecognised spec must come back unchanged so it fails loudly downstream rather
-/// than being quietly turned into something else.
+/// ones -- an unrecognised spec must come back unchanged rather than be quietly turned into
+/// something else. Unchanged is not rejected, though: with no `{0:` in it the spec skips the
+/// fast path, `string.Format` returns a string holding no placeholder as it stands, and the
+/// label prints the spec itself where the number should be. The scene reports that
+/// (`SceneModel.CheckFormat`: "holds no conversion, so it prints itself instead of the
+/// number"), but only for a label a number actually goes through. The `missing` text is for a
+/// spec .NET itself refuses, `{0:Z}` or an unbalanced brace, and never for these.
 /// </remarks>
 internal static class PrintfTests
 {
@@ -85,8 +90,11 @@ internal static class PrintfTests
         Same(run, "100%% of %.0f", "100% of {0:F0}");
         Same(run, "%%%%", "%%");
 
-        // A conversion this does not support. Returned unchanged so string.Format rejects it
-        // and the node falls back to its placeholder, rather than being silently reinterpreted.
+        // A conversion this does not support. Returned unchanged, and unchanged is what the
+        // label then shows: string.Format accepts a string with no placeholder, so `%s` draws
+        // `%s` where the number should be (`%s kPa` with a unit). It is not rejected and never
+        // reaches the `missing` text; the problem list says "holds no conversion, so it prints
+        // itself instead of the number". What this pins is that it is not reinterpreted.
         Same(run, "%s", "%s");
 
         // Trailing percent with nothing after it must not run off the end of the string.

@@ -456,8 +456,11 @@ internal sealed class EvalContext
         {
             // Recorded like every other absent name. This was the one accessor that stayed
             // quiet, so `$arr[i]` in an EXPRESSION read 0 with nothing listed while the same
-            // reference in a label reported. An out-of-range index is still silent, as it is
-            // for a string or colour array: the array is there, the slot is not.
+            // reference in a label reported. An out-of-range index is still silent here, as it
+            // is for a colour array and for a string array read through StringElement: the
+            // array is there, the slot is not. A string slot in a LABEL is the one exception --
+            // Tessellator.BindText reports the name when the slot comes back null, unless the
+            // node declares `missing`.
             Missing.Add(name);
             return 0f;
         }
