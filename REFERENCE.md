@@ -666,7 +666,7 @@ ignored, so annotations are harmless.
 | `o` | number/expr | group opacity `0..1`, multiplied into all descendants |
 | `v` | number/expr | `0` removes the subtree entirely, clicks included (CSS `visibility`). **On any node, not only a `G`** — on a shape or a label it was accepted and ignored before 0.11.75 |
 | `clip` | string | id of a `CP` in `defs` |
-| `m` | `{a, b, c, d, e, f}` | CSS `matrix()`, applied after `t r s` (innermost) |
+| `m` | `{a, b, c, d, e, f}` | six **literal** numbers: CSS `matrix()`, applied after `t r s` (innermost) |
 | `bri` `con` `sat` `hue` `gray` `sep` `inv` | number/expr | colour filters, CSS `filter()` semantics |
 | `mask` | `"@gradient"` | multiplies every colour under the group by the gradient's alpha. **The `@` is required** — `mask = "fade"` is reported (0.11.96; before that it was ignored without a word), where `clip` takes the bare id. An EMPTY `mask` means "no mask" and stays silent, which is how a `nodes` patch turns one off |
 | `blur` | number/expr | CSS `filter: blur()`: the Gaussian's standard deviation, in the group's units. Flat closed fills under it draw blurred; see below |
@@ -780,7 +780,7 @@ across it rather than being split. An undeclared gradient is a problem.
 | Key | Type | Meaning |
 |-----|------|---------|
 | `n` | **literal number** | instance count — not an expression |
-| `lod` | number | `1` allows count reduction at distance when Count LOD is switched on (off by default); omitted means never |
+| `lod` | **literal number** | `1` allows count reduction at distance when Count LOD is switched on (off by default); omitted means never |
 | `c` | array | children, instantiated `n` times |
 
 Inside, `i` is the instance index `0..n-1` and `n` the count. Nested repeats shadow `i`; the
@@ -2039,7 +2039,50 @@ vertices: a few more than usual, only for that shape.
 
 ## Expressions
 
-Any numeric attribute may be a string beginning with `=`.
+**Most numeric attributes take an expression, written as a string beginning with `=`: a number
+that is placed, drawn or blended does. A switch, a count, or a list of numbers does not.**
+
+These take one, each number of a pair or list separately:
+
+- **Placement and size:** `x` `y` `w` `h`, `cx` `cy` `rx` `ry` — each corner of a four-corner
+  `rx` as well — `ch` and `y2`.
+- **`G`:** each number of `t`, `s` and `a`, and `r` `o` `blur` and the filters `bri` `con` `sat`
+  `hue` `gray` `sep` `inv`. `v` takes one on every node; `USE` on `x` `y` `o`; `SC` and `IMG`
+  on `o`.
+- **`SC`:** `so` and `sov`.
+- **Opacity and softness:** `fo` `fo2` `fea` `fea_edge`.
+- **Sampling a gradient:** `fat`, `sat`, and the `at` of `f = { grad, at }` or `s = { grad, at }`.
+- **Stroke:** `sw` `so` `dofs`.
+- **Text:** `size` `min_size` `ow`.
+- **`IMG`:** each number of `at` `off` `tile`.
+- **Gradients:** `x1 y1 x2 y2`, `cx cy r fx fy`, `a`, and a stop's position.
+- **A `CP`'s shape**, where it is an `R` or a `C`.
+
+These take a **literal number only**, and an expression in one of them is not evaluated:
+
+- the scene's `w` `h` `nofill` `nofeather` `noeval` `ztext`, and a data element's `keep` `snap`
+  and `ease`;
+- every count and switch: `n` (on `RP`, `YS` and `LS`), `lod`, `seg`, `close`, `mid`, `kern`,
+  `wrap`, and `click` `press` `xy` `hoverev` `drag` `drop`;
+- every list of numbers: `p` (on `L`, `Y`, `SP` and a clip's polygon), `m`, `dash`, `slice`,
+  `bw`, `uv`, and the four numbers of an `sh` entry;
+- and, by exception, the text settings `cspace` `lh` `weight`, the miter limit `ml`, and the
+  `size` inside `fl`.
+
+**Nothing is reported for most of them.** A flag, a count or a single number falls back to its
+own default: `ztext` to `1`, `kern` to on, `seg` to `8`, `ml` to `4`, a scene `w` to `100`. A
+number inside a list reads as `0` instead of its default, so `m = { "=$k", 0, 0, 1, 0, 0 }` is
+the matrix `{ 0, 0, 0, 1, 0, 0 }`. Where the **whole** list is one string, `m`, `slice`, `bw`,
+`uv`, `sh` and `oc` are reported, `p` and `dash` are not, and a `p` that is a string draws
+nothing. An `fl` whose `size` is a string is reported as not a number. Sent from a Lua table, a
+value that only looks like a number — the string `"3"` — is read as `3` by the keys above and
+not at all by these.
+
+Two ways to reach a literal-only key with a number you worked out. A **symbol parameter** is
+substituted while the scene is parsed and keeps its type, so `RP n = "%count"` under
+`USE count = 5` draws five — an expression passed the same way still reads `0`. Data cannot
+reach them at all: to make a `click` follow data, put the node inside a group whose `v` is the
+expression.
 
 **Write the `=`, even where it looks optional.** In the table form the parser drops a leading `=`
 if it finds one, so both spellings reach it; in the `src` text form the `=` is what makes the
