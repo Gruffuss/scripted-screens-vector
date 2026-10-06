@@ -625,14 +625,22 @@ drawn after it, and wants that regardless of declaration order.
 
 ### Debug switches
 
-Set on the **structure** element's props, alongside `root`. Each disables one stage, so
-subtracting the reported cost isolates it.
+Set on the **structure** element's props, alongside `root` — on the `SCENE` line in the text
+form. Each is a number: `1` turns one on, and so does a bare or quoted `1` in the text form.
+`0.5` or less is off, and so is `true`, `"yes"` or any other value that is not a number, **with
+no report**. They exist for measuring: each removes one stage so its cost can be subtracted, and
+none of them leaves the picture as drawn.
 
-| Prop | Effect |
-|------|--------|
-| `nofill` | skip fills |
-| `nofeather` | skip feathering |
-| `noeval` | skip expression evaluation |
+| Prop | What it removes |
+|------|-----------------|
+| `nofill` | the interior fill of `R`, `C`, `P`, `Y`, `SP` and `YS`, flat, linear or conic, **and every `T` label**, dropped whole so the label count reads `0`. Still drawn: strokes, the feathered edge ring of a shape (an `R` at the default feather keeps its 8 vertices), shadows, `blur`red fills, pictures, and **radial-gradient fills**, which it does not skip |
+| `nofeather` | the soft edge ring of closed fills and the sampled edge of a `YS`. A stroke's feather is unchanged, and so is any shape written with `fea = 0` |
+| `noeval` | **not expression evaluation in general.** It replaces `x`, `y`, `w` and `h` of every rectangle with the fixed values `40, 40, 2, 2`, constants as much as expressions. Every rectangle means an `R`, the box of an `IMG` (which then draws nothing you can see), the box of an `SC`, and the `R` of a clip whose box is an expression; a clip written with plain numbers is cut when the scene is parsed and keeps its shape. Everything else is evaluated as usual: `rx`, `ry`, `fo`, `sw`, and everything on `C`, `G`, `YS` and `T` |
+
+A `noeval` scene is also not the same scene drawn smaller, so any vertex count that follows size
+moves with it: a rounded `R` goes from 36 vertices to 20, a radial-gradient one from 4,608 to 81,
+a conic one from 760 to 112, a shadowed one from 957 to 397. Compare a `noeval` run only against
+square-cornered, flat-filled rectangles.
 
 ---
 
