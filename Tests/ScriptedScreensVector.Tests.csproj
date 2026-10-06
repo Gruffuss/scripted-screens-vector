@@ -60,6 +60,7 @@
         <Compile Include="SceneTextTests.cs" />
         <Compile Include="ScrollTests.cs" />
         <Compile Include="PrintfTests.cs" />
+        <Compile Include="SweepTests.cs" />
         <Compile Include="TextShadowTests.cs" />
         <Compile Include="RadialFillTests.cs" />
         <Compile Include="TextOrderTests.cs" />

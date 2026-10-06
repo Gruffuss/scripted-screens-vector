@@ -456,12 +456,21 @@ internal static class Printf
 
     private static string Translate(string spec)
     {
+        // `%%` is a literal percent sign and carries no conversion, so the conversion -- if
+        // there is one -- is at the first LONE '%'. Looking at the first '%' alone declined
+        // `"100%% of %.0f"` whole: the label printed its own spec AND was reported as holding
+        // no conversion, when it holds one.
         var percent = spec.IndexOf('%', System.StringComparison.Ordinal);
-        if (percent < 0 || percent + 1 >= spec.Length)
-            return spec;
+        while (percent >= 0 && percent + 1 < spec.Length && spec[percent + 1] == '%')
+            percent = spec.IndexOf("%", percent + 2, System.StringComparison.Ordinal);
 
-        // "%%" is a literal percent sign and carries no conversion.
-        if (spec[percent + 1] == '%')
+        // No conversion anywhere, so there is nothing to format -- but `%%` still means one
+        // percent sign, and `fmt = "%%"` used to draw two.
+        if (percent < 0)
+            return spec.Replace("%%", "%", StringComparison.Ordinal);
+
+        // A lone trailing '%', as in "100%": not a conversion, and left exactly as written.
+        if (percent + 1 >= spec.Length)
             return spec;
 
         var end = percent + 1;

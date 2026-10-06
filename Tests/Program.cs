@@ -192,6 +192,7 @@ internal static class Program
         RequirementTests.EventMotion(run);
         RequirementTests.PointerScope(run);
         RequirementTests.PositionAndHover(run);
+        SweepTests.Run(run);
         ImageDecodeTests.Run(run);
         EasingTests.Curves(run);
         EasingTests.Payload(run);

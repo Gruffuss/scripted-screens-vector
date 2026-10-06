@@ -1,4 +1,4 @@
-namespace ScriptedScreensVector.Tests;
+﻿namespace ScriptedScreensVector.Tests;
 
 /// <summary>
 /// The printf-to-.NET translation behind a `T` node's <c>fmt</c>.
@@ -75,8 +75,15 @@ internal static class PrintfTests
         // No conversion at all: a constant label.
         Same(run, "no format here", "no format here");
 
-        // A literal percent sign, which printf spells "%%" and which is not a conversion.
-        Same(run, "%%", "%%");
+        // A literal percent sign, which printf spells "%%": not a conversion, and it collapses
+        // to the one sign the author asked for. It used to come back as the pair, so a `fmt`
+        // of "%%" drew "%%" on the console -- and the guard that declined it fired on the
+        // FIRST '%', so a pair in front of a real conversion declined the whole spec too.
+        Same(run, "%%", "%");
+        Same(run, "100%%", "100%");
+        Same(run, "%%%.0f", "%{0:F0}");
+        Same(run, "100%% of %.0f", "100% of {0:F0}");
+        Same(run, "%%%%", "%%");
 
         // A conversion this does not support. Returned unchanged so string.Format rejects it
         // and the node falls back to its placeholder, rather than being silently reinterpreted.

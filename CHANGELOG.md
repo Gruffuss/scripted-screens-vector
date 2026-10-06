@@ -2,6 +2,34 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.102
+
+A sweep of the values the parser read as nothing and said nothing about. Every one was watched
+failing on 0.11.101 first; the regression tests are `Tests/SweepTests.cs`.
+
+### Fixed
+
+- **A `fmt` of `%%` drew two percent signs, and a `%%` in front of a real conversion threw the
+  whole spec away.** `%%` is printf's spelling of one literal percent sign. 0.11.94 collapsed it
+  either side of a conversion, but the guard that declines a spec with no conversion fired on the
+  FIRST `%`, so a spec that is nothing but `%%` came back untouched and one that opened with `%%`
+  was never looked at past it: `fmt = "100%% of %.0f"` drew `100%% of %.0f` on the console, with
+  a reported "holds no conversion" that was false. Measured before: `%%` -> `%%`, `100%%` ->
+  `100%%`, `%%%.0f` -> `%%%.0f`; after: `%`, `100%`, `%{0:F0}`, and `{=7:%%%.0f}` draws `%7` with
+  nothing reported. `%.0f%%` -> `8%` and a lone trailing `100%` are unchanged.
+
+  The same change needed `CheckFormat` to stop translating a spec that is already translated: it
+  is handed `part.Net` on the placeholder path, and `ToNet` is not idempotent once `%%` has
+  collapsed to a lone `%` in front of a brace, so without it `{=7:%%%.0f}` formatted correctly
+  and was reported as a format a number cannot take.
+
+- **`{=expr:spec}` split at the LAST colon, so a spec holding one lost the expression.**
+  `{=floor(t/60):%d:00}` parsed `floor(t/60):%d` as the expression, which cannot parse, fell back
+  to 0 and drew `00` with two problems; `{=t:%.0f s: ok}` drew ` ok`. The expression language has
+  no `:` -- no operator and no name may hold one -- so the format starts at the first colon and
+  runs to the end, exactly as `{$name:spec}` has always read it. After: `2:00` and `125 s: ok`,
+  no problems. One colon and none are unchanged.
+
 ## 0.11.101
 
 ### Fixed

@@ -1574,7 +1574,7 @@ internal static class SceneParser
                     foreach (var part in node.TextParts)
                     {
                         if (part.Literal == null)
-                            CheckFormat(part.Net, scene);
+                            CheckFormat(part.Net, scene, translated: true);
                     }
                 }
                 else if (node.TextData != null)
@@ -2552,9 +2552,12 @@ internal static class SceneParser
             var inner = body[(open + 2)..close];
             if (body[open + 1] == '=')
             {
-                // `{=expr}` or `{=expr:%.1f}`: the expression language has no ':', so the last one
-                // is the format.
-                var split = inner.LastIndexOf(':');
+                // `{=expr}` or `{=expr:%.1f}`: the expression language has no ':' -- no operator
+                // and no name may hold one -- so the format starts at the FIRST colon and runs
+                // to the end, exactly as `{$name:spec}` reads it. Splitting at the last one
+                // instead left a colon inside the expression, so `{=floor(t/60):%d:00}` failed
+                // to parse, fell back to 0 and printed "00".
+                var split = inner.IndexOf(':', 0);
                 var expression = Expression.Parse("=" + (split < 0 ? inner : inner[..split]), 0f);
                 parts.Add(TextPart.Computed(expression, split < 0 ? fallbackFormat : inner[(split + 1)..]));
             }
@@ -2668,15 +2671,16 @@ internal static class SceneParser
     /// consumed no placeholder at all, which prints the author's own text where the number should
     /// be (`%q`, `nonsense`). An empty `fmt` is the second kind and draws no label at all.
     /// </remarks>
-    private static void CheckFormat(string? format, VecScene scene)
+    private static void CheckFormat(string? format, VecScene scene, bool translated = false)
     {
         if (format == null)
             return;
 
-        // `format` is the author's text on the whole-binding path and an already-translated spec
-        // on the parts path; `ToNet` is idempotent for a spec it cannot read and for one already
-        // in .NET form, so translating here is safe either way.
-        var net = Printf.ToNet(format);
+        // `format` is the author's text on the whole-binding path and an already-translated
+        // spec on the parts path, which says so: `ToNet` is NOT idempotent once `%%` has
+        // collapsed to a lone '%' in front of a brace, and translating twice reported
+        // `{=7:%%%.0f}` -- which formats correctly -- as a spec a number cannot take.
+        var net = translated ? format : Printf.ToNet(format);
         const float Sample = 1234.5f;
 
         string printed;
