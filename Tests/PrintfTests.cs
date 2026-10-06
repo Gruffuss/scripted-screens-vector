@@ -12,8 +12,11 @@
 /// fast path, `string.Format` returns a string holding no placeholder as it stands, and the
 /// label prints the spec itself where the number should be. The scene reports that
 /// (`SceneModel.CheckFormat`: "holds no conversion, so it prints itself instead of the
-/// number"), but only for a label a number actually goes through. The `missing` text is for a
-/// spec .NET itself refuses, `{0:Z}` or an unbalanced brace, and never for these.
+/// number") for a label a number actually goes through AND a spec that could have been a
+/// mistyped conversion -- one holding a letter, or a `%` with something after it. A spec of
+/// pure punctuation (`%%`, `50%`, `]`) prints itself too and is deliberate literal text, so
+/// it is silent; see `FormatReportTests`. The `missing` text is for a spec .NET itself
+/// refuses, `{0:Z}`, and never for these.
 /// </remarks>
 internal static class PrintfTests
 {
@@ -94,7 +97,8 @@ internal static class PrintfTests
         // label then shows: string.Format accepts a string with no placeholder, so `%s` draws
         // `%s` where the number should be (`%s kPa` with a unit). It is not rejected and never
         // reaches the `missing` text; the problem list says "holds no conversion, so it prints
-        // itself instead of the number". What this pins is that it is not reinterpreted.
+        // itself instead of the number", because `s` is a letter where a conversion was meant.
+        // What this pins is that it is not reinterpreted.
         Same(run, "%s", "%s");
 
         // Trailing percent with nothing after it must not run off the end of the string.

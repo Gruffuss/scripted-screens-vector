@@ -1640,7 +1640,13 @@ internal static class SceneParser
 
                 // `fmt` turns the node into a NUMBER formatter: the chip sends the value it
                 // already has in the payload and does no string work at all.
-                node.TextFormat = PropText(map, "fmt");
+                //
+                // An EMPTY `fmt` is the default format, not "print nothing". `fmt = ""` ran the
+                // value through an empty composite format, which consumed the number and printed
+                // no characters at all, so the label VANISHED from the console -- and the only
+                // thing said about it was that the spec held no conversion.
+                var fmt = PropText(map, "fmt");
+                node.TextFormat = string.IsNullOrEmpty(fmt) ? null : fmt;
 
                 // Does this spec actually format a number? That is the only question worth
                 // asking, and 0.11.97 asked a different one -- "can the fast path split it?" --
@@ -1648,9 +1654,12 @@ internal static class SceneParser
                 // and `{0:}` all drew correctly AND carried the problem border. It also missed
                 // `{0:Z}`, which splits cleanly and then fails because a float has no `Z`.
                 //
-                // So: format a sample. It is bad when the attempt THROWS, or when the output
-                // comes back as the spec itself, meaning no placeholder was consumed and the
-                // author's text was printed where the number should have been.
+                // So: format two samples. It is bad when the attempt THROWS, or when both
+                // samples print the same characters -- the number never reached the output -- AND
+                // the spec holds a letter or a `%` with something after it, which is the only
+                // shape a mistyped conversion can have. See `CheckFormat` for why the rest is
+                // literal text and silent; 0.11.100 compared the output with the spec text
+                // instead and reported `%%`, `50%` and `]`, which draw what they always drew.
                 node.TextUnit = PropText(map, "unit");
                 if (node.TextLiteral != null)
                     node.TextParts = TextTemplate(node.TextLiteral, node.TextFormat);
@@ -2668,7 +2677,7 @@ internal static class SceneParser
 
         while (open >= 0)
         {
-            var close = body.IndexOf('}', open);
+            var close = Closing(body, open);
             if (close < 0)
                 break;
 
@@ -2717,6 +2726,31 @@ internal static class SceneParser
             parts.Add(TextPart.Text(body[at..]));
 
         return parts.ToArray();
+    }
+
+    /// <summary>The `}` that closes the placeholder opened at <c>open</c>, counting braces.</summary>
+    /// <remarks>
+    /// Taking the FIRST `}` cut a .NET composite format in half, since every one of them carries
+    /// a brace: `{$v:{0:F1}}` handed the formatter `{0:F1`, which no number can take, so the
+    /// label drew its `missing` text and carried a problem -- while the same `{0:F1}` as the
+    /// node's `fmt` printed correctly. `{0:D3}`, `{0} kPa` and `{0,6:0.0}` broke identically, and
+    /// `{{0}}` lost one of its closers and drew `{0}}`.
+    ///
+    /// A spec whose braces do not balance (`{$v:{{`) has no closer by this reading and the
+    /// placeholder stays literal text, which is what an unclosed placeholder already did.
+    /// </remarks>
+    private static int Closing(string body, int open)
+    {
+        var depth = 0;
+        for (var i = open; i < body.Length; i++)
+        {
+            if (body[i] == '{')
+                depth++;
+            else if (body[i] == '}' && --depth == 0)
+                return i;
+        }
+
+        return -1;
     }
 
     /// <summary>
@@ -2879,61 +2913,106 @@ internal static class SceneParser
     /// list so several compose. A single shadow may be given unwrapped.
     /// </summary>
     /// <summary>
-    /// Reports a `fmt` that cannot format a number, by formatting one and looking at the result.
+    /// Reports a `fmt` only when a NUMBER CANNOT GO THROUGH IT, by running it and looking at
+    /// the result.
     /// </summary>
     /// <remarks>
-    /// Checked by RUNNING it, not by inspecting it: a spec is usable when it turns a number into
-    /// something other than itself, and every way of guessing that from the text has been wrong
-    /// once. The sample is a value with a fraction and more than one digit, so a spec that only
-    /// works for an integer, or only for a short one, still shows itself.
+    /// Checked by RUNNING it, not by inspecting it: every way of guessing from the text has been
+    /// wrong once. TWO samples, far apart, because the question is whether the spec prints the
+    /// NUMBER: one that prints the same characters for both never printed it at all. Comparing
+    /// the output with the SPEC TEXT instead -- what 0.11.100 did -- cannot see past an escape
+    /// (`x{{y` prints `x{y`, which differs from the spec, so it passed) and cannot tell a
+    /// mistyped conversion from literal text.
     ///
-    /// Two failures, and the message says which: a spec `string.Format` REFUSES (`{0:Z}`, `{0:D3}`
-    /// and `{0:B}` are well-formed composite formats that a float has no conversion for, and
-    /// before 0.11.99 one of those through a placeholder killed the whole scene), and a spec that
-    /// consumed no placeholder at all, which prints the author's own text where the number should
-    /// be (`%q`, `nonsense`). An empty `fmt` is the second kind and draws no label at all.
+    /// Two failures, and the message says which:
+    ///
+    /// * a spec `string.Format` refuses for the float AND for the rounded long. `{0:Z}` is a
+    ///   well-formed composite format no number has a conversion for, and before 0.11.99 one of
+    ///   those through a placeholder killed the whole scene. The label draws its `missing` text.
+    /// * a spec that never prints the number AND holds a letter or a `%` with something after it.
+    ///   Those are the only two shapes a conversion can take -- printf's `%f`, `%d`, `%x`, .NET's
+    ///   `F2`, `D3`, `X` -- so one left unconsumed is a conversion the author mistyped: `%q`,
+    ///   `nonsense`, `N2`, `%-`. It prints itself where the number was meant.
+    ///
+    /// **A spec that never prints the number and holds NEITHER is silent.** It cannot be a
+    /// mistyped conversion, so it is literal text asked for on purpose, and it draws exactly what
+    /// it drew before 0.11.100: `%%` (one percent sign), `50%`, `]`, `{{0}}` (`{0}`). Reporting
+    /// those four put the magenta problem border on consoles that render correctly, which is the
+    /// regression this rule ends. An empty spec never arrives here at all -- it means the DEFAULT
+    /// format, so `TextFormat` and `TextPart.Net` are null for it.
+    ///
+    /// Where the rule gives up: it cannot separate a mistyped conversion from literal text that
+    /// happens to hold a letter. `x{{y` draws `x{y` and is reported; `{{0}}` draws `{0}` and is
+    /// not. Both drop the number, and only the letter tells them apart.
     /// </remarks>
     private static void CheckFormat(string? format, VecScene scene, bool translated = false)
     {
-        if (format == null)
+        if (string.IsNullOrEmpty(format))
             return;
 
         // `format` is the author's text on the whole-binding path and an already-translated
         // spec on the parts path, which says so: `ToNet` is NOT idempotent once `%%` has
         // collapsed to a lone '%' in front of a brace, and translating twice reported
         // `{=7:%%%.0f}` -- which formats correctly -- as a spec a number cannot take.
-        var net = translated ? format : Printf.ToNet(format);
-        const float Sample = 1234.5f;
+        var net = translated ? format! : Printf.ToNet(format!);
 
-        string printed;
+        if (!TryPrint(net, 1234.5f, out var high) || !TryPrint(net, 7.25f, out var low))
+        {
+            scene.Problem($"T: fmt \"{format}\" is not a format a number can take, "
+                          + "so the label draws its `missing` text");
+            return;
+        }
+
+        if (!string.Equals(high, low, StringComparison.Ordinal) || !HoldsAConversionAttempt(net))
+            return;
+
+        scene.Problem($"T: fmt \"{format}\" holds no conversion, "
+                      + "so it prints itself instead of the number");
+    }
+
+    /// <summary>Prints one sample through the spec the way the draw path would.</summary>
+    /// <remarks>
+    /// The draw path retries an integer conversion as a long -- `{0:X}` and `{0:D2}` are refused
+    /// by a float but taken by one -- so this has to try the same thing or it reports a format
+    /// that works. Reporting a working format is how 0.11.97's check failed, and checking only
+    /// the FIRST attempt would repeat it one layer down.
+    /// </remarks>
+    private static bool TryPrint(string net, float sample, out string printed)
+    {
         try
         {
-            printed = string.Format(System.Globalization.CultureInfo.InvariantCulture, net, Sample);
+            printed = string.Format(System.Globalization.CultureInfo.InvariantCulture, net, sample);
+            return true;
         }
         catch (FormatException)
         {
-            // The draw path retries an integer conversion as a long -- `{0:X}` and `{0:D2}` are
-            // refused by a float but taken by one -- so this has to try the same thing or it
-            // reports a format that works. Reporting a working format is how 0.11.97's check
-            // failed, and checking only the FIRST attempt would repeat it one layer down.
             try
             {
                 printed = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                    net, (long)Mathf.Round(Sample));
+                    net, (long)Mathf.Round(sample));
+                return true;
             }
             catch (FormatException)
             {
-                scene.Problem($"T: fmt \"{format}\" is not a format a number can take, "
-                              + "so the label draws its `missing` text");
-                return;
+                printed = string.Empty;
+                return false;
             }
         }
+    }
 
-        if (string.Equals(printed, net, StringComparison.Ordinal))
+    /// <summary>True when something in the spec can only have been meant as a conversion.</summary>
+    private static bool HoldsAConversionAttempt(string net)
+    {
+        for (var i = 0; i < net.Length; i++)
         {
-            scene.Problem($"T: fmt \"{format}\" holds no conversion, "
-                          + "so it prints itself instead of the number");
+            // A conversion is always a letter, and a `%` with anything after it is one cut short
+            // (`%-`, `%50`). A LONE TRAILING `%` is the percent sign of "50%", which `ToNet`
+            // leaves alone and which `%%` has already collapsed to by the time this runs.
+            if (char.IsLetter(net[i]) || (net[i] == '%' && i + 1 < net.Length))
+                return true;
         }
+
+        return false;
     }
 
     private static VecShadow[]? ParseShadows(SS.UiProp[] map, VecScene? scene)

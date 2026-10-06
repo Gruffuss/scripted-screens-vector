@@ -354,7 +354,9 @@ internal readonly struct TextPart
         Name = name;
         Index = index;
         Value = value;
-        Net = format == null ? null : Printf.ToNet(format);
+        // An empty spec -- `{$v:}` -- is the DEFAULT format, as an absent one is, not an empty
+        // composite format that swallows the number and prints nothing.
+        Net = string.IsNullOrEmpty(format) ? null : Printf.ToNet(format!);
         Prefix = Suffix = string.Empty;
         Spec = "0.##";
         Split = Net == null || Printf.TrySplit(Net, out Prefix, out Spec, out Suffix);
