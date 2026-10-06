@@ -605,7 +605,7 @@ is the reason this release does not ship a problem border on working consoles.
   `-` and died at 8,125 with `Stack overflow.`, exit 127; the same number written as an ordinary
   numeric attribute survived 60,000, which is what pinned the fault to the colour path rather
   than to depth in general. After the fix both survive 200,000. The 17-scene fingerprint is
-  byte-identical at all three `t` values, the colour-expression probe's 20 checks are unchanged,
+  byte-identical at all three `t` values, the 20 colour-expression checks are unchanged,
   and the unit suite passes.
 
   The memo is allocated only for a tree that is genuinely deep, so an ordinary `mix` keeps the
