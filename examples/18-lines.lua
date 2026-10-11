@@ -57,10 +57,12 @@ local src = table.concat({
     "L p=[144,56,158,38,172,56] s=#7FB2F0 sw=7 join=bevel",
 
     -- 3 THE MITER LIMIT. The miter runs 1/sin(angle/2) times the stroke width, so a limit of
-    -- 4 is only reached below about 29 degrees: this spike is 28, which just crosses it.
+    -- 4 is only reached below about 29 degrees: this spike is 19, well under it, so `ml=4` cuts
+    -- it; `ml=10` holds down to about 11.5 degrees, so the other keeps its point. The point
+    -- overshoots the vertex by about 12 units here, which is why the spike stops short of the label.
     'T x=4 y=64 w=192 h=6 text="ml: a 19-degree spike. left keeps its point, right is cut off"',
-    "L p=[19,104,24,74,29,104] s=#C98BE0 sw=4 join=miter ml=10",
-    "L p=[103,104,108,74,113,104] s=#C98BE0 sw=4 join=miter ml=4",
+    "L p=[20.67,104,24,84,27.33,104] s=#C98BE0 sw=4 join=miter ml=10",
+    "L p=[104.67,104,108,84,111.33,104] s=#C98BE0 sw=4 join=miter ml=4",
 
     -- 4 DASHES
     'T x=4 y=110 w=192 h=6 text="dash: [on,off], and a dotted line is round caps on a short dash"',
@@ -72,10 +74,10 @@ local src = table.concat({
 
     -- 5 OPEN VERSUS CLOSED
     'T x=4 y=158 w=192 h=6 text="open SP, then SP close=1 (fills), then Y: the same 5 points"',
-    "SP p=[14,168,34,162,50,178,34,194,14,188] seg=12 s=#5FD9A8 sw=2 f=none",
-    "SP p=[70,168,90,162,106,178,90,194,70,188] seg=12 close=1 f=#2E8B6E s=#5FD9A8 sw=2",
+    "SP p=[14,172,34,166,50,182,34,198,14,192] seg=12 s=#5FD9A8 sw=2 f=none",
+    "SP p=[70,172,90,166,106,182,90,198,70,192] seg=12 close=1 f=#2E8B6E s=#5FD9A8 sw=2",
     --   the same points as a polygon, for comparison: straight edges, same corners
-    "Y p=[126,168,146,162,162,178,146,194,126,188] f=#24405A s=#7FB2F0 sw=2",
+    "Y p=[126,172,146,166,162,182,146,198,126,192] f=#24405A s=#7FB2F0 sw=2",
 }, "\n")
 
 ui:element({

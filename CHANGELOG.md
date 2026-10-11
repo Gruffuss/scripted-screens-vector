@@ -24,6 +24,8 @@ ScriptedScreens Vector, newest first.
   folder the repository does not have; its files are at the root.
 - **The GitHub page said text, blur, drop shadows and concave clipping were not supported.** All
   four have shipped. The status now lists what the format covers, and the one thing it does not.
+- **`examples/18-lines.lua` drew its miter spikes and its closing curves over their own labels**,
+  and its comment called a 19-degree spike 28. Shapes moved clear, same angles, same behaviour.
 
 ## 0.11.111
 
