@@ -24,6 +24,19 @@ ScriptedScreens Vector, newest first.
   Reported as a *measurement* fault from the console before it was found in code, and that reading
   was right.
 
+- **An inset shadow no longer washes a rounded shape it cannot reach into** (`931e3a0`). The
+  rings stop at `uHi`, bounded by the first fold on the outline — on a rounded rectangle, its
+  **corner radius** — and everything below them was one flat fan at whatever alpha the rings had
+  reached. So a 24-unit blur inside a 9.5-unit radius painted the whole panel at 0.138 alpha and
+  never returned to the panel colour. Measured, red channel down the panel:
+
+  ```
+  depth    3     9    15    25    35    55
+  CSS    9.8  15.5  20.9  26.7  28.6  29.0
+  before  11    17    22    22    22    22
+  after   11    17    22    27    28    29
+  ```
+
 ### Diagnostics
 
 - **The ring feather is timed at last.** Only the band feather fed `BandFeatherMs`, and the band
