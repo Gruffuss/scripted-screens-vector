@@ -1165,7 +1165,7 @@ container, where it will be clipped away and look like nothing happened.
 | `fo` | opacity `0..1`, as on any shape; multiplied by the enclosing group's `o` |
 | `align` | `left` (default), `center`, `right`, `justified` (extra width goes between words, as CSS) |
 | `valign` | `top` (default), `middle`, `bottom` |
-| `font` | a registered TMP face, named exactly: `Family` for the regular weight and `Family Style` otherwise — `Barlow`, `Barlow Bold` — e.g. from the companion fonts mod or a `FONT` def. Case and spaces count. Omitted draws in the game's own font. **A name nothing is registered under draws the game's own font and is reported**, in the log and under `vector_stats`' TEXT section, since 0.11.102. A page's own `FONT` callback re-applies its labels once; a successful lookup clears the warning. A face registered by another route after the page has drawn still needs a scene re-push, as before |
+| `font` | a registered TMP face, named exactly: `Family` for the regular weight and `Family Style` otherwise — `Barlow`, `Barlow Bold` — e.g. from the companion fonts mod or a `FONT` def. Case and spaces count. Omitted draws in the game's own font. **A name nothing is registered under draws the game's own font and is reported**, in the log and under `vector_stats`' TEXT section, since 0.11.102. A page's own `FONT` callback re-applies its labels once; a successful lookup clears the warning. With a fonts mod that exposes its registration count, a label that fell back also re-applies when a face registers by any other route -- the game's own fonts load for minutes after start -- so no re-push is needed. Without it, a face that arrives after the page has drawn still needs a scene re-push |
 | `weight` | `bold`, a number ≥ 600, or `normal`; omitted draws the face's regular weight |
 | `cspace` | character spacing, default `0` |
 | `kern` | `0` turns pair kerning off for this label; on otherwise. Only a font that carries kerning pairs is affected, so a label on the game's own font is unchanged either way |
@@ -2009,7 +2009,8 @@ Face names come from the font file's metadata, **not from the link**: `Family` f
 Use those exact names, including case and spaces, in a T node's `font=`. When a font arrives,
 every current scene declaring its link re-applies its labels once, including rich-text fonts
 and `fl` first-line fonts. A successful face lookup clears its "not registered" warning.
-A face registered by another route after a page has drawn still needs a scene re-push, as before.
+A label that fell back also re-applies when a face registers by any other route, with no
+re-push, as long as the fonts mod is installed.
 
 `vector_stats` reports each link under **FONTS**:
 

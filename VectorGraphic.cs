@@ -1234,6 +1234,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>The image cache version this surface last rebuilt against, while it waits on one.</summary>
     private int _imagesWaitingOn = -1;
 
+    /// <summary>The fonts mod's registration count when a label here last fell back, or -1.</summary>
+    private int _fontsWaitingOn = -1;
+
     /// <summary>The texture slice 0 carries when an `IMG` is the first thing drawn.</summary>
     [SerializeField] private Texture? _texture;
 
@@ -2134,6 +2137,28 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             _imagesWaitingOn = -1;
             _needsRebuild = true;
         }
+
+        // A label that fell back because its face was not registered waits on the fonts mod's
+        // registration count, the way a picture waits on the image cache. A drawn label never
+        // re-resolves its own face, so without this a face that arrives by any route other than
+        // this page's own FONT link -- the game's fonts load for minutes after start -- leaves the
+        // label in the game's face until the page is pushed again. Read only while a label is
+        // waiting: the count also moves for faces no page asked for.
+        // ponytail: a graphic whose scene changed keeps its old warning, so it may refresh on a
+        // few registrations it no longer needs; those are rare, and clearing warnings per scene
+        // would re-log them every tick on a page that re-applies its structure each tick.
+        if (_text != null && _text.HasUnresolvedFonts)
+        {
+            var registered = PageFontBridge.Registrations();
+            if (registered >= 0 && _fontsWaitingOn >= 0 && registered != _fontsWaitingOn)
+            {
+                _text.RefreshFonts();
+                _needsRebuild = true;
+            }
+            _fontsWaitingOn = registered;
+        }
+        else
+            _fontsWaitingOn = -1;
 
         if (VectorConfig.RendererEnabled && _scene != null && _job == null
             && (_needsRebuild || ((animated || _dataDirty) && DueForRebuild())))

@@ -985,6 +985,9 @@ internal sealed class TextLayer
 
     internal bool FontNotRegistered(string? family) => family != null && _fontWarnings.ContainsKey(family);
 
+    /// <summary>Some label fell back because its face was not registered when it was drawn.</summary>
+    internal bool HasUnresolvedFonts => _fontWarnings.Count > 0;
+
     /// <summary>Everything this layer has warned about, for the vector_stats report.</summary>
     /// <remarks>
     /// The warnings used to reach the BepInEx log only. `vector_stats` printed "no problems"

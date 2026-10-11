@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
@@ -10,6 +10,38 @@ internal static class PageFontBridge
 {
     internal static readonly PageFonts Requests = new();
     private static readonly Lazy<(MethodInfo? Method, string Reason)> Api = new(FindApi);
+    private static readonly Lazy<Func<int>?> RegistrationCount = new(FindRegistrations);
+
+    /// <summary>
+    /// Faces the fonts mod has registered this session by every route -- page requests, its own
+    /// folders, downloads, the game's own fonts as their bundles load -- or -1 without it, or with
+    /// a version that predates the count. It only ever increases.
+    /// </summary>
+    /// <remarks>
+    /// A delegate rather than <c>PropertyInfo.GetValue</c>, which boxes the int on every read:
+    /// a graphic still waiting on a face reads this once a frame.
+    /// </remarks>
+    internal static int Registrations() => RegistrationCount.Value?.Invoke() ?? -1;
+
+    private static Func<int>? FindRegistrations()
+    {
+        try
+        {
+            var getter = AppDomain.CurrentDomain.GetAssemblies()
+                .Where(a => a.GetName().Name == "ScriptedScreensFonts")
+                .Select(a => a.GetType("ScriptedScreensFonts.FontApi"))
+                .FirstOrDefault(t => t != null)
+                ?.GetProperty("Registrations", BindingFlags.Public | BindingFlags.Static)
+                ?.GetGetMethod();
+            return getter == null || getter.ReturnType != typeof(int)
+                ? null
+                : (Func<int>)Delegate.CreateDelegate(typeof(Func<int>), getter);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
 
     private static double Now() => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
 

@@ -2,6 +2,19 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.112
+
+### Fixed
+
+- **A label drawn before its face registered stayed in the game's font until the page was
+  pushed again**, whatever route the face arrived by. A drawn label never re-resolves its face on
+  its own, and 0.11.111 refreshed labels only when the page's own `FONT` link delivered. The
+  game's own fonts load for minutes after start, so a page naming one of them could be drawn too
+  early and stay wrong. A label that fell back now re-applies whenever the fonts mod registers a
+  face by any route. The fonts mod's registration count is read once a frame, and only while a
+  label is waiting on a face; a page with every face resolved never reads it. Needs the fonts mod
+  (a version with the count); without it, a re-push is still the way.
+
 ## 0.11.111
 
 ### Added
