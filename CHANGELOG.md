@@ -24,6 +24,14 @@ ScriptedScreens Vector, newest first.
   Reported as a *measurement* fault from the console before it was found in code, and that reading
   was right.
 
+- **The ring feather asked for its own width twice** (`d526f0c`). `FeatherWidth` evaluates the
+  node's `fea` expression, and the ring feather called it once directly and once inside the
+  `FeatherFalloff` argument of the same expression — so every ring feather did that work twice,
+  and the falloff was free to disagree with the width it scales. Hoisted into a local. No
+  behaviour change is intended and none is measured: the 17-scene fingerprint is byte-identical.
+  Whether it cost anything is a question this release can answer for the first time, since the
+  `ring feather` timing above is the first version of that block with a timer around it.
+
 - **An inset shadow no longer washes a rounded shape it cannot reach into** (`931e3a0`). The
   rings stop at `uHi`, bounded by the first fold on the outline — on a rounded rectangle, its
   **corner radius** — and everything below them was one flat fan at whatever alpha the rings had
