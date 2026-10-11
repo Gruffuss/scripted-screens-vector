@@ -3054,7 +3054,11 @@ internal static class Tessellator
         // Ramp the width down toward the threshold rather than switching off at it. A stack
         // of thin bands crosses a hard cutoff as the camera moves, so antialiasing appeared
         // and disappeared and the whole thing shimmered.
-        var feather = FeatherWidth(node, context, frame.Scale) * FeatherFalloff(contour, FeatherWidth(node, context, frame.Scale));
+        // One call, not two: `FeatherWidth` evaluates the node's `fea` expression, so asking it
+        // twice in one line did that work twice and left the falloff free to disagree with the
+        // width it scales.
+        var width = FeatherWidth(node, context, frame.Scale);
+        var feather = width * FeatherFalloff(contour, width);
         if (feather > 0.0001f)
         {
             var ringMark = Stopwatch.GetTimestamp();
