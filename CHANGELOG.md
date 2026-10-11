@@ -2,6 +2,42 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.109
+
+### Fixed
+
+- **A border thinner than its own anti-aliasing was drawn as a smear wider than the line, and the
+  smear covered whatever sat beside it.** The auto feather aims at 1.3 SCREEN pixels, so in scene
+  units it is `1.3 / px-per-unit`: on a 1500-unit scene shown on a 719 px surface — 0.48 px/unit —
+  that is **2.7 units of feather on a 1-unit border**, three times more feather than border. The
+  border washed out, and its smear reached depths 1–2 *inside* the shape, which is exactly where
+  an inset shadow is darkest, so the shadow read as absent. Measured against the CSS closed form
+  on such a panel, red channel by depth:
+
+  ```
+  depth      1     2     3
+  CSS     19.0  21.0  23.1
+  before    65    40    23
+  after     20    22    23
+  ```
+
+  A filled shape has bounded its feather by its own smallest dimension all along; a stroke's width
+  is the same question asked of a line, so the two now share one ramp — full feather at three
+  times the width, none at one, smooth between.
+
+- **An inset shadow started at the stroke's centreline instead of inside the border.** CSS draws
+  one in the **padding box**, but a stroke here straddles the outline (`path ± width/2`), so the
+  shadow began half a stroke width too far out and the stroke covered its darkest band. A `sw=6`
+  border left the shadow reading 28 of 29 by the time it cleared the stroke; a `sw=20` border hid
+  it completely.
+
+- **An outset shadow had the mirror of that fault**, casting from the centreline rather than the
+  **border box**, so a thick border covered it from the outside. With a `sw=20` border it measured
+  alpha 0 at every depth outside the stroke; it now fades 52, 32, 17, 9, 5, 2, 1 across the seven
+  units beyond it.
+
+  Both shifts are half a stroke width of extra spread, which the shadow field already understood.
+
 ## 0.11.108
 
 ### Fixed
