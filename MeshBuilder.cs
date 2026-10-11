@@ -106,6 +106,9 @@ internal sealed class MeshBuilder
     /// <summary>One emitted vertex's position and first texture coordinate, for tests.</summary>
     internal (Vector3 Position, Vector2 Uv) Vertex(int index) => (_positions[index], _uv0[index]);
 
+    /// <summary>What a vertex was coloured. For checks that assert on paint, not shape.</summary>
+    internal Color Colour(int index) => _colours[index];
+
     /// <summary>
     /// The first mesh is left empty and the geometry starts at the second, so a label can draw
     /// underneath the very first shape.

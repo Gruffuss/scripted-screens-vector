@@ -68,6 +68,9 @@ internal static class Shadow
     /// </remarks>
     private const int MaxRings = 96;
 
+    /// <summary>How many bands the core may take to finish a ramp the rings could not.</summary>
+    private const int CoreBands = 24;
+
     /// <summary>Gaussian support. Past three sigma the contribution is under 0.2%.</summary>
     private const float Support = 3f;
 
@@ -688,6 +691,68 @@ internal static class Shadow
         // The core, inside the deepest ring. Skipped when it is fully clear of shadow.
         if (field.Alpha(Centroid(outer)) <= 0.002f && field.Alpha(outer[0]) <= 0.002f)
             return;
+
+        // The rings stop at `uHi`: the shape's own middle, or the first fold on its outline,
+        // which on a rounded rectangle is the CORNER RADIUS. Filling everything below that with
+        // one flat fan painted the whole interior at the alpha of wherever they happened to
+        // stop -- a 24-unit blur inside a 9.5-unit radius left a panel's middle at 22 of 29 for
+        // ever, where CSS is back to 29 by depth 35, and the shadow read as a wash over the
+        // whole panel rather than a band under its top edge.
+        //
+        // Walk inward instead, a band at a time, shrinking toward the centroid and taking each
+        // vertex's depth from the field. Shrinking cannot fold the way an offset can, and the
+        // bands are only as many as the ramp still has left to fall, so a shape whose rings
+        // already reached three sigma emits none of them.
+        var centre = Centroid(outer);
+        var step = Mathf.Max(1f, sigma * 0.5f);
+        var ring = new List<Vector2>(outer);
+        var ringDepth = new List<float>(ring.Count);
+        var nextRing = new List<Vector2>(ring.Count);
+        var nextDepth = new List<float>(ring.Count);
+
+        for (var i = 0; i < ring.Count; i++)
+            ringDepth.Add(uHi);
+
+        for (var band = 0; band < CoreBands; band++)
+        {
+            nextRing.Clear();
+            nextDepth.Clear();
+
+            var clear = true;
+            var collapsed = true;
+
+            for (var i = 0; i < ring.Count; i++)
+            {
+                var inward = centre - ring[i];
+                var span = inward.magnitude;
+                var point = span <= step ? centre : ring[i] + inward * (step / span);
+
+                nextRing.Add(point);
+                nextDepth.Add(field.Depth(point));
+
+                if (span > step)
+                    collapsed = false;
+                if (field.AlphaAtDepth(nextDepth[i]) > 0.002f)
+                    clear = false;
+            }
+
+            for (var i = 0; i < ring.Count; i++)
+            {
+                var j = (i + 1) % ring.Count;
+                EmitPiece(vh, region, field, matrix, triangle, piece, ring[i], ring[j], nextRing[j],
+                    ringDepth[i], ringDepth[j], nextDepth[j]);
+                EmitPiece(vh, region, field, matrix, triangle, piece, ring[i], nextRing[j], nextRing[i],
+                    ringDepth[i], nextDepth[j], nextDepth[i]);
+            }
+
+            (ring, nextRing) = (nextRing, ring);
+            (ringDepth, nextDepth) = (nextDepth, ringDepth);
+
+            if (clear || collapsed)
+                break;
+        }
+
+        outer = ring;
 
         var core = region.ClipPolygon(outer, piece);
         if (core.Count < 3 || Tessellator.Starved(vh, core.Count, "an inset shadow"))

@@ -76,6 +76,7 @@ internal static class SweepTests
         PercentPairs(run);
         PlaceholderFormatStartsAtTheFirstColon(run);
         RepeatCountIsNotTruncated(run);
+        InsetShadowFadesInsideACorneredShape(run);
         AblationSwitchesDoNotLeak(run);
         ClickNeedsAnId(run);
         SampledPaintBindsToItsSample(run);
@@ -556,4 +557,115 @@ internal static class SweepTests
             + $"{Band(Rows, "=6+10*hover", new[] { "ln" }, 1, 1).H:0.##} / "
             + $"{Band(Rows, "=6+10*hover", new[] { "ln" }, 1, 2).H:0.##}, wanted 6 / 16 / 6");
     }
+
+    /// <summary>
+    /// An inset shadow fades to nothing inside the shape, even one with rounded corners.
+    /// </summary>
+    /// <remarks>
+    /// Reported from a console 2026-10-11: an inset shadow on a rounded panel washed the WHOLE
+    /// panel instead of banding under its top edge. The rings stop at the first fold on the
+    /// outline -- for a rounded rectangle, its corner radius -- and the core below them used to
+    /// be filled flat at whatever alpha the rings had reached, so a 24-unit blur inside a
+    /// 9.5-unit radius painted the middle at 0.14 alpha for ever. Measured against the CSS
+    /// closed form it left the panel's centre at 22 of 29 where CSS is back to 29 by depth 35.
+    ///
+    /// Watched failing on 0.11.107: centre alpha 0.138. A sharp-cornered box was always right,
+    /// which is what pinned it to the corner radius, so the box is kept here as the control.
+    /// </remarks>
+    internal static void InsetShadowFadesInsideACorneredShape(TestRun run)
+    {
+        // sigma is half the blur, so the ramp is finished three sigma in: 36 units.
+        var shadow = new VecShadow(0f, 8f, 24f, 0f, new Color(0f, 0f, 0f, 1f), inset: true);
+        const float Finished = 30f;
+
+        var rounded = Emit(RoundedRect(0f, 0f, 452f, 607f, 9.5f), shadow);
+        var square = Emit(RoundedRect(0f, 0f, 452f, 607f, 0f), shadow);
+
+        // The fault: the rings stop at the first fold -- the corner radius -- and everything
+        // below was one flat fan at the alpha they reached, so the whole panel was washed.
+        run.Check("inset: a rounded panel's shadow is drawn the full depth of its ramp",
+            rounded.Deepest >= Finished, $"deepest {rounded.Deepest:F1} of {Finished}");
+
+        run.Check("inset: and a square-cornered one, which always was",
+            square.Deepest >= Finished, $"deepest {square.Deepest:F1} of {Finished}");
+
+        run.Check("inset: nothing is painted past the end of the ramp",
+            rounded.AlphaPast < 0.01f, rounded.AlphaPast.ToString("F3"));
+
+        // ...and the band under the top edge, which is the point of the thing, is still there.
+        run.Check("inset: and the shadow is still dark near the edge",
+            rounded.AlphaUnderTop > 0.3f, rounded.AlphaUnderTop.ToString("F3"));
+    }
+
+    /// <summary>What an inset shadow drew, by depth into the shape.</summary>
+    private static (float Deepest, float AlphaPast, float AlphaUnderTop) Emit(List<Vector2> outline, VecShadow shadow)
+    {
+        var vh = new MeshBuilder();
+        Shadow.EmitInset(vh, outline, shadow, Matrix4x4.identity, 0.48f, null);
+
+        float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue;
+        foreach (var p in outline)
+        {
+            x0 = Mathf.Min(x0, p.x); x1 = Mathf.Max(x1, p.x);
+            y0 = Mathf.Min(y0, p.y); y1 = Mathf.Max(y1, p.y);
+        }
+
+        var deepest = 0f;
+        var past = 0f;
+        var underTop = 0f;
+
+        for (var i = 0; i < vh.currentVertCount; i++)
+        {
+            var v = vh.Vertex(i).Position;
+            var depth = Mathf.Min(Mathf.Min(v.x - x0, x1 - v.x), Mathf.Min(v.y - y0, y1 - v.y));
+            var alpha = vh.Colour(i).a;
+
+            if (depth > deepest)
+                deepest = depth;
+
+            // Past the ramp nothing should be painted at all.
+            if (depth > 40f)
+                past = Mathf.Max(past, alpha);
+
+            // Near the edge the shadow is at its darkest. A straight edge carries no points of
+            // its own -- only the corner arcs do -- so this reads by depth, not by position.
+            if (depth <= 20f)
+                underTop = Mathf.Max(underTop, alpha);
+        }
+
+        return (deepest, past, underTop);
+    }
+
+    /// <summary>A rounded rectangle as the tessellator would hand one to the shadow.</summary>
+    private static List<Vector2> RoundedRect(float x, float y, float w, float h, float r)
+    {
+        var outline = new List<Vector2>();
+        if (r <= 0f)
+        {
+            outline.Add(new Vector2(x, y));
+            outline.Add(new Vector2(x + w, y));
+            outline.Add(new Vector2(x + w, y + h));
+            outline.Add(new Vector2(x, y + h));
+            return outline;
+        }
+
+        const int Steps = 6;
+        var corners = new[]
+        {
+            (new Vector2(x + w - r, y + r), -90f),
+            (new Vector2(x + w - r, y + h - r), 0f),
+            (new Vector2(x + r, y + h - r), 90f),
+            (new Vector2(x + r, y + r), 180f),
+        };
+
+        foreach (var (centre, start) in corners)
+            for (var k = 0; k <= Steps; k++)
+            {
+                var angle = (start + 90f * k / Steps) * Mathf.Deg2Rad;
+                outline.Add(centre + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * r);
+            }
+
+        return outline;
+    }
+
 }
