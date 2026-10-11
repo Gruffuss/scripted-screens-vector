@@ -4,6 +4,12 @@ ScriptedScreens Vector, newest first.
 
 ## 0.11.112
 
+### Added
+
+- **`examples/19-webfonts.lua`**: a page that brings its own typeface. One `FONT` link, the two
+  faces it delivers used by the names the font gives them, an inline tag, and a line written to
+  read the same without the font.
+
 ### Fixed
 
 - **A label drawn before its face registered stayed in the game's font until the page was
@@ -14,6 +20,10 @@ ScriptedScreens Vector, newest first.
   face by any route. The fonts mod's registration count is read once a frame, and only while a
   label is waiting on a face; a page with every face resolved never reads it. Needs the fonts mod
   (a version with the count); without it, a re-push is still the way.
+- **The Workshop description's two links led nowhere.** They pointed at a `ScriptedScreensVector/`
+  folder the repository does not have; its files are at the root.
+- **The GitHub page said text, blur, drop shadows and concave clipping were not supported.** All
+  four have shipped. The status now lists what the format covers, and the one thing it does not.
 
 ## 0.11.111
 

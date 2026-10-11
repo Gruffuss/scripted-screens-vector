@@ -1758,6 +1758,11 @@ filled with the colour, blurred with a Gaussian whose sigma is **half** the blur
 drawn beneath the shape. Several stack as CSS stacks them, **the first on top**. A single
 shadow may be written unwrapped.
 
+**On a stroked shape the shadow follows the CSS box model** (since 0.11.109): an outset shadow
+is cast from the stroke's outer edge, the CSS border box, and an inset one starts at its inner
+edge, the padding box. A stroke straddles its outline, so that is half the stroke width from the
+outline either way, and a border never covers its own shadow. An unstroked shape is unchanged.
+
 **An entry needs four numbers and a colour.** `dx`, `dy`, `blur` and `spread`, then a colour
 string that parses, and optionally the sixth field below. An `sh` that is not a list at all, an
 entry with fewer than five values, and one whose fifth value is not a colour string are each

@@ -1,84 +1,8 @@
-﻿## A page cannot ASK for a font, only name one that is already there
+﻿## CLOSED: a page can ask for a font (0.11.111 and 0.11.112, 2026-10-11)
 
-`font=` on a `T` looks a face up by name, so a page can only use faces the fonts mod has already
-registered — the ones a player dropped in the fonts folder, plus the game's own. The fonts mod can
-also fetch a font on request, and that capability is reachable only from mod code today, not from
-a page.
-
-What is wanted: a page declares the font it needs **in its Lua props, the way it declares
-everything else here**, and the mod does the asking — no C# on the author's side. Something of the
-shape `fonts = { "<a font link>" }` on the element or in the scene header, with the labels drawing
-in the fallback face until the faces arrive and a rebuild when they do, since the fetch is
-asynchronous and returns the face names it registered.
-
-Constraints that are not negotiable when this is built:
-- The fonts mod decides which hosts may be fetched from, and its default is deliberately narrow.
-  This must go through that setting and must not widen it — a font file is parsed by native code on
-  every player's machine, so "any CDN" is not an option.
-- A font that never arrives, a link that is refused, and a face name that does not match what
-  arrived must each be REPORTED, not silently fall back. Everything else in this format reports a
-  mistake the author made.
-- It is an addition: a page that names no font behaves exactly as it does now.
-
-**The fonts mod's side is answered, from its source (2026-10-06). Do not re-derive this:**
-
-- `RequestFont(link, done)` — **the signature will not change, and it will never gain an
-  overload.** Both consumers resolve it with `GetMethod("RequestFont")` by name alone, so a second
-  overload would throw `AmbiguousMatchException` at reflection time, breaking both at once with no
-  compile error anywhere. A richer call would get a DIFFERENT NAME instead.
-- **The two failures arrive differently, and a page must handle both.** A refused request —
-  malformed, not http(s), a host outside the allowed set, loader not running — returns **`false`
-  synchronously and never calls back**, so the return value must be read; waiting for a callback
-  there waits for ever. An accepted request that loads nothing — download failed, file switched
-  off, face cap reached — **calls back with an EMPTY array**. That is the "never arrived" signal.
-- **Accepted means exactly one callback, always.** Asking this question found a hole on their side:
-  the loader waited without limit for conditions a request cannot influence, so a callback could
-  simply never arrive and a page could not tell "still loading" from "never coming". That wait is
-  bounded now and gives up through the same delivery path. Fixed on their side the same day.
-- **The callback runs on the main thread**, from a coroutine, so a scene may be rebuilt directly
-  inside it.
-- **A label already drawn keeps the face it resolved to**, so rebuilding when the callback lands is
-  not an optimisation, it is the mechanism that makes the font appear at all.
-- **The names that come back are the font's own** (`Manrope`, `Manrope Bold`), NOT derived from the
-  link — so an author cannot know what to write in `font=` without loading it once. Checking the
-  author's name against the array the callback delivers, and reporting a mismatch, is the answer to
-  that, and is why that report is on the list above rather than optional.
-
-- **There is a second entry point that gives the REASON, and it is the one to use:**
-  `RequestFontWithReason(link, Action<string[], string> done)`. Same contract; the second callback
-  argument is a short stable token, empty on success, otherwise one of `download-failed` (the
-  link or the network — the author's problem), `disabled` (the player switched that font off —
-  theirs to undo), `face-limit` (this session has built its maximum page faces — station-wide),
-  `load-failed` (the file arrived and is not a font this engine reads) or `loader-unavailable`.
-  Those five map straight onto what a report should tell whoever can act, which is the whole
-  reason for asking: a player at a console cannot read the log.
-  **A PAGE LINK CAN ONLY PRODUCE THREE OUTCOMES — build for three, not five** (measured on a
-  console, 2026-10-06): refused (`false` synchronously, no callback at all), `download-failed`, or
-  `disabled`. `load-failed` is effectively unreachable by URL, because the downloader validates the
-  file before it ever becomes a path, so a non-font answers `download-failed`; it would take an
-  already-cached file going corrupt. `face-limit` needs 48 page faces in one session. Three
-  reachable outcomes is a simpler report than five, and the report should be built on those.
-
-  Verified on a console: `download-failed` (twice — a 404 on an allowed host, and an allowed host
-  serving a non-font), `disabled` (a cached font switched off in the config, which also showed the
-  font never registering that session), and a disallowed host returning `false` with NO callback.
-  **The two still intended-only are `face-limit` and `loader-unavailable`**, and neither can occur
-  naturally. `loader-unavailable` needs the loader unready for a full 60 seconds, which does not
-  happen, and `face-limit` needs the cap lowered in a temporary build — such a run checks the
-  arithmetic and the delivery path, NOT that the situation occurs. Keep both in the weaker column
-  permanently, even after they are reported done.
-  `loader-unavailable`'s whole history is that shape: an unbounded wait nobody ever saw hang, now a
-  bounded one nobody will see fire — the value is that a caller cannot be left waiting for ever,
-  not that the path is common.
-- **Do NOT build request dedup here.** `RequestFont` already deduplicates by absolute URI: fifteen
-  consoles declaring one link produce ONE download, every joined caller's callback still fires, and
-  a caller arriving after the link finished gets the stored result immediately. Two edges: the key
-  is the EXACT absolute URI, so two spellings of one font (`wght@400;700` against `wght@700;400`)
-  are two rounds even though the file cache saves the download; and a request that produced nothing
-  is deliberately forgotten, so a later request is a real retry rather than a replayed failure.
-
-Unanswered here: whether a request belongs per element or per scene, and what a page should do
-about a face that arrives after a capture has already been taken.
+`DEFS { FONT src="…" }` requests a webfont through the ScriptedScreens Fonts mod, and labels
+switch to it when it arrives, by any route. Seen on a console. REFERENCE.md, under `FONT`, has
+the behaviour, the states `vector_stats` reports and the limits.
 
 ## The work budget's figure is measured on .NET 8, not on Mono
 

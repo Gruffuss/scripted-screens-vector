@@ -57,6 +57,7 @@ Then read the examples in order — each one introduces exactly one idea and run
 | [`16-pointer.lua`](examples/16-pointer.lua) | hold, hover, where you hit, drag and drop — and hover styling with no chip round trip |
 | [`17-pictures.lua`](examples/17-pictures.lua) | `IMG`: the five `fit` modes, `at`, `uv` crops, tiling, nine-slice |
 | [`18-lines.lua`](examples/18-lines.lua) | `cap`, `join`, `ml`, `dash`, and open versus closed curves |
+| [`19-webfonts.lua`](examples/19-webfonts.lua) | `FONT`: a page that brings its own typeface from Google Fonts |
 
 [`Patterns.lua`](Patterns.lua) holds the same building blocks as copy-paste functions.
 
@@ -285,6 +286,9 @@ Two limits: the shadow is not knocked out under the shape, so a **translucent** 
 over its own shadow and reads darker than a CSS mockup. Add `"inset"` as a sixth field for an
 inner shadow, drawn over the fill and cut to the shape — convex shapes only.
 
+On a stroked shape both kinds meet the border as CSS does: an outset shadow starts at the
+stroke's outer edge and an inset one just inside it, so a thick border never hides its shadow.
+
 **On text, `sh` works like CSS `text-shadow`**, several entries included (each extra one is a
 copy of the label). Offset is free — a shadow
 that would not fit is drawn by an offset copy of the label — but **blur is capped by the font**:
@@ -503,6 +507,27 @@ engine that has the glyph metrics rather than estimated in Lua.
 
 A label element is still the right answer for text that must update the instant a value
 changes, and for anything the player has to select or copy.
+
+### Fonts a page brings with it — `FONT`
+
+`font=` names a face that is already registered. A page can also ask for one: a `FONT` line in
+`DEFS` names a Google Fonts link, and the ScriptedScreens Fonts mod fetches it on every
+player's machine.
+
+```
+DEFS { FONT src="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700" }
+T x=18 y=15 w=164 h=16 font="Orbitron Bold" text="REACTOR 2"
+```
+
+- **The names come from the font, not the link**: `Family` for the regular weight and
+  `Family Style` otherwise, so that link brings `Orbitron` and `Orbitron Bold`. `vector_stats`
+  lists what each link delivered under FONTS, and names any `font=` that did not arrive.
+- **Labels switch when the font arrives**, with no re-push: `font=` and inline `<font=Name>`
+  tags alike.
+- **Each player fetches it for themselves**, under their own fonts-mod settings, which allow
+  Google Fonts only by default. Write the page so it still reads well in the game's own font.
+- This mod never downloads anything itself. Without the fonts mod a `FONT` line is reported and
+  the labels draw in the game's font. `examples/19-webfonts.lua` shows it end to end.
 
 ### Text and draw order
 

@@ -43,7 +43,7 @@ What that buys on top of the framerate:
 |---|---|
 | [`README.md`](/README.md) | the authoring guide — start here |
 | [`REFERENCE.md`](/REFERENCE.md) | every node, attribute and expression function |
-| [`examples/`](/examples) | fifteen progressive examples, each runnable on paste |
+| [`examples/`](/examples) | nineteen progressive examples, each runnable on paste |
 | [`CHANGELOG.md`](/CHANGELOG.md) | release history |
 | [`vector-format-spec.md`](/vector-format-spec.md) | the format specification and the reasoning behind it |
 
@@ -105,12 +105,13 @@ seen to fail is an assumption, not a test.
 
 Working and in use on real consoles. The format covers groups, repeats, rectangles, ellipses,
 SVG paths with holes, polylines, polygons, sampled bands and lines, Catmull-Rom splines,
-linear and radial gradients, convex clipping, strokes with caps/joins/dashes, geometric
-feathering, and a full expression grammar with deterministic hashing.
+linear, radial and conic gradients, clipping (convex and concave), strokes with
+caps/joins/dashes, geometric feathering, drop and inset shadows, blur on a group, text with
+control over draw order, pictures, clickable nodes, webfonts a page asks for, and a full
+expression grammar with deterministic hashing.
 
-Not supported, deliberately: text (use ScriptedScreens' own labels over the artwork), blur and
-drop shadow (both need an offscreen pass), non-convex clipping (needs a stencil buffer), and
-self-intersecting fills.
+Not supported: self-intersecting fills. Ear clipping is undefined on them, and detecting them
+costs more than the fill.
 
 ---
 

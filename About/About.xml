@@ -15,25 +15,24 @@ Adds a [b]vector[/b] element: describe a screen once -- shapes, gradients, text,
 [*] Rounded panels, paths, liquid tanks, waves, charts and particle fields
 [*] Linear, radial and conic gradients, real transparency, soft and inner shadows
 [*] Any number -- and any colour -- can be an expression over time, repeat index or your data, so gauges move smoothly and a button lights under the pointer with nothing sent to the chip
-[*] Clipping, scrolling lists, clickable nodes and text in any game font
+[*] Clipping, scrolling lists, clickable nodes, and text in any game font or a Google Font the page asks for
 [*] Tessellated on a worker thread: an animated console costs well under 1% of a frame
 [/list]
 
 [h2]Getting started[/h2]
-The mod folder holds eighteen examples that run on paste, a guide (README.md), a full reference (REFERENCE.md) and the release history (CHANGELOG.md), also [url=https://github.com/Gruffuss/scripted-screens-vector/tree/main/ScriptedScreensVector]on GitHub[/url]. With StationeersLua installed, AI editors can read and search the same docs through its MCP server.
+The mod folder holds nineteen examples that run on paste, a guide (README.md), a full reference (REFERENCE.md) and the release history (CHANGELOG.md), also [url=https://github.com/Gruffuss/scripted-screens-vector]on GitHub[/url]. With StationeersLua installed, AI editors can read and search the same docs through its MCP server.
 
-[h2]What's new (0.11.31 to 0.11.93)[/h2]
+[h2]What's new (0.11.94 to 0.11.112)[/h2]
 [list]
-[*] [b]Smooth glows.[/b] Soft fades and shadows no longer band: coverage rides in a float channel and the output is dithered per pixel
-[*] [b]Colours can be expressions[/b] -- [b]f = "=if(down,#A,if(hover,#B,#C))"[/b] is a three-state button in one node, and [b]mix(a,b,t)[/b] blends between two
-[*] [b]Everything is clickable[/b]: polylines, polygons, splines and paths register hit areas, and an open shape answers along its stroke
-[*] Letter spacing ([b]kern[/b]), closed splines ([b]SP close = 1[/b]), per-corner radii, defaults on the scene root, and [b]v = 0[/b] on any node
-[*] [b]blur[/b] on a group reaches every closed shape, and gradients fade the way a browser does
-[*] Three new examples: the pointer, pictures, and line ends
-[*] [b]Nothing nests too deep[/b] -- groups, expressions and arrays go as far as you like, and a scene built by a tool is no longer a special case
-[*] Many fixes, including several that could stop a console drawing or end the game outright
+[*] [b]Pages bring their own fonts.[/b] A [b]FONT[/b] line names a Google Fonts link, every player's game fetches it (with the ScriptedScreens Fonts mod), and labels switch to it when it arrives -- no re-push
+[*] [b]Shadows meet borders the way a browser draws them[/b]: inset shadows fade their full depth inside rounded panels, and a border no longer hides its own shadow
+[*] [b]Thin borders stay crisp[/b] at any size and distance, and shapes stay sharp when you walk right up to a console
+[*] [b]Mistakes are reported, not silent[/b] -- dozens of quiet failures now show the problem border and a line in vector_stats
+[*] [b]ver[/b] now reads major*1000000 + minor*1000 + patch, so a newer version always compares higher -- check any script that compares it
+[*] A new example: fonts from the web
+[*] Many fixes, including one that could end the game
 [/list]
-Full history: [url=https://github.com/Gruffuss/scripted-screens-vector/blob/main/ScriptedScreensVector/CHANGELOG.md]CHANGELOG.md[/url].
+Full history: [url=https://github.com/Gruffuss/scripted-screens-vector/blob/main/CHANGELOG.md]CHANGELOG.md[/url].
 
 [h2]Requirements[/h2]
 [list]

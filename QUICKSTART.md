@@ -210,5 +210,5 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
 | all traps, explained | `stationeers://vector/guide/traps` |
 | debugging | `stationeers://vector/guide/when-something-looks-wrong` |
 | cost and limits | `stationeers://vector/guide/how-much-a-console-can-hold`, `stationeers://vector/guide/performance` |
-| runnable examples, one idea each | `stationeers://vector/examples/index` (01-hello to 15-effects) |
+| runnable examples, one idea each | `stationeers://vector/examples/index` (01-hello to 19-webfonts) |
 | what changed in which version | `stationeers://vector/changelog` |
