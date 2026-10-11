@@ -77,6 +77,7 @@ internal static class SweepTests
         PlaceholderFormatStartsAtTheFirstColon(run);
         RepeatCountIsNotTruncated(run);
         InsetShadowFadesInsideACorneredShape(run);
+        ShadowSpreadMovesTheRamp(run);
         AblationSwitchesDoNotLeak(run);
         ClickNeedsAnId(run);
         SampledPaintBindsToItsSample(run);
@@ -597,8 +598,38 @@ internal static class SweepTests
             rounded.AlphaUnderTop > 0.3f, rounded.AlphaUnderTop.ToString("F3"));
     }
 
+
+    /// <summary>`spread` moves an inset shadow's ramp inward by that much.</summary>
+    /// <remarks>
+    /// This is the machinery the stroke shift rides on. CSS casts an inset shadow from the
+    /// PADDING box and an outset one from the BORDER box, while a stroke here straddles the
+    /// outline (`path +- width/2`), so both shadows are moved by half a stroke width -- as extra
+    /// spread, which is exactly this. Measured before that shift went in: a `sw=20` border
+    /// straddling -10..+10 left an outset shadow at alpha 0 everywhere outside it, and an inset
+    /// one reading 28 of 29 by the time it cleared the stroke. Both were entirely hidden.
+    ///
+    /// The wiring itself (Tessellator reading `node.StrokeWidth` and passing it) is verified
+    /// offline through the probe, not here: it needs a parsed node, and a shadow colour cannot
+    /// be parsed headless.
+    /// </remarks>
+    internal static void ShadowSpreadMovesTheRamp(TestRun run)
+    {
+        var outline = RoundedRect(0f, 0f, 452f, 607f, 0f);
+        var plain = new VecShadow(0f, 0f, 24f, 0f, new Color(0f, 0f, 0f, 1f), inset: true);
+        var spread = new VecShadow(0f, 0f, 24f, 20f, new Color(0f, 0f, 0f, 1f), inset: true);
+
+        // By how deep the ramp REACHES, not by what a vertex happens to carry: an earlier
+        // version of this check asked for the alpha within half a unit of a depth and read 0,
+        // because no vertex landed there. Extent is placement-independent.
+        var plainReach = Emit(outline, plain).Deepest;
+        var spreadReach = Emit(outline, spread).Deepest;
+
+        run.Check("shadow: spread 20 carries the ramp about 20 units deeper",
+            spreadReach > plainReach + 15f, $"{plainReach:F1} -> {spreadReach:F1}");
+    }
+
     /// <summary>What an inset shadow drew, by depth into the shape.</summary>
-    private static (float Deepest, float AlphaPast, float AlphaUnderTop) Emit(List<Vector2> outline, VecShadow shadow)
+    private static Drawn Emit(List<Vector2> outline, VecShadow shadow)
     {
         var vh = new MeshBuilder();
         Shadow.EmitInset(vh, outline, shadow, Matrix4x4.identity, 0.48f, null);
@@ -633,7 +664,22 @@ internal static class SweepTests
                 underTop = Mathf.Max(underTop, alpha);
         }
 
-        return (deepest, past, underTop);
+        return new Drawn(deepest, past, underTop, vh, x0, x1, y0, y1);
+    }
+
+    /// <summary>What an inset shadow drew, with a reading at any depth.</summary>
+    private readonly struct Drawn
+    {
+        internal readonly float Deepest, AlphaPast, AlphaUnderTop;
+        private readonly MeshBuilder _vh;
+        private readonly float _x0, _x1, _y0, _y1;
+
+        internal Drawn(float deepest, float past, float underTop, MeshBuilder vh, float x0, float x1, float y0, float y1)
+        {
+            Deepest = deepest; AlphaPast = past; AlphaUnderTop = underTop;
+            _vh = vh; _x0 = x0; _x1 = x1; _y0 = y0; _y1 = y1;
+        }
+
     }
 
     /// <summary>A rounded rectangle as the tessellator would hand one to the shadow.</summary>

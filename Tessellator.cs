@@ -2629,13 +2629,20 @@ internal static class Tessellator
 
         var opacity = ShadowOpacity(node, context, frame);
 
+        // The mirror of the inset case: CSS casts an outset shadow from the BORDER BOX -- the
+        // border's OUTER edge -- while a stroke here straddles the outline, so that edge is half
+        // a stroke width further out. Without the shift the stroke overlaps the shadow's darkest
+        // band from the outside, and a thick border hides most of it. `spread` grows an outset
+        // shadow outward, so the same addition serves.
+        var grow = node.HasStroke ? Mathf.Max(0f, node.StrokeWidth.Evaluate(context)) * 0.5f : 0f;
+
         // CSS paints the first shadow on top, so the list is drawn last to first. It was drawn in
         // list order, the reverse of CSS and of text shadows here.
         for (var k = node.Shadows.Length - 1; k >= 0; k--)
         {
             var shadow = node.Shadows[k];
             if (!shadow.Inset)
-                Shadow.Emit(vh, outline, Faded(shadow, opacity), frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+                Shadow.Emit(vh, outline, Faded(shadow, opacity, grow), frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
         }
     }
 
@@ -2654,14 +2661,14 @@ internal static class Tessellator
         return frame.Opacity * Mathf.Clamp01(node.FillOpacity.Evaluate(context));
     }
 
-    private static VecShadow Faded(VecShadow shadow, float opacity)
+    private static VecShadow Faded(VecShadow shadow, float opacity, float extraSpread = 0f)
     {
-        if (opacity >= 0.9999f)
+        if (opacity >= 0.9999f && extraSpread <= 0f)
             return shadow;
 
         var colour = shadow.Colour;
         colour.a *= opacity;
-        return new VecShadow(shadow.Dx, shadow.Dy, shadow.Blur, shadow.Spread, colour, shadow.Inset);
+        return new VecShadow(shadow.Dx, shadow.Dy, shadow.Blur, shadow.Spread + extraSpread, colour, shadow.Inset);
     }
 
     /// <summary>Inset shadows, inside the outline. Convex outlines only.</summary>
@@ -2671,6 +2678,15 @@ internal static class Tessellator
             return;
 
         var opacity = ShadowOpacity(node, context, frame);
+
+        // CSS draws an inset shadow in the PADDING box -- inside the border -- so its reference
+        // edge is the border's inner edge, not the element's outline. A stroke here straddles the
+        // outline (`path +- width/2`, Stroke.cs), so that inner edge is half a stroke width in,
+        // and the shadow has to start there or the stroke sits on top of its darkest band.
+        // Measured before this: a `sw=6` border straddling depths -3..+3 left the shadow reading
+        // 28 of 29 by the time it cleared the stroke -- essentially the whole thing hidden.
+        // `spread` already moves the ramp inward, so the shift costs nothing but an addition.
+        var inset = node.HasStroke ? Mathf.Max(0f, node.StrokeWidth.Evaluate(context)) * 0.5f : 0f;
 
         // First on top, as for outset shadows.
         for (var k = node.Shadows.Length - 1; k >= 0; k--)
@@ -2687,7 +2703,7 @@ internal static class Tessellator
                 continue;
             }
 
-            Shadow.EmitInset(vh, outline, Faded(shadow, opacity), frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
+            Shadow.EmitInset(vh, outline, Faded(shadow, opacity, inset), frame.Matrix, frame.Scale * ScreenScale, frame.Clip);
         }
     }
 
@@ -3094,8 +3110,21 @@ internal static class Tessellator
         }
 
         var smallest = Mathf.Min(max.x - min.x, max.y - min.y);
+        return Falloff(smallest, feather);
+    }
 
-        // Full feather at 3x the width, none at 1x, smooth between.
+    /// <summary>
+    /// How much of a feather a feature that size can carry: full at 3x, none at 1x.
+    /// </summary>
+    /// <remarks>
+    /// Anti-aliasing wider than the thing it smooths does not smooth it, it replaces it with a
+    /// smear -- and the smear covers whatever sits beside it.
+    /// </remarks>
+    private static float Falloff(float smallest, float feather)
+    {
+        if (feather <= 0.0001f)
+            return 0f;
+
         var t = Mathf.Clamp01((smallest / feather - 1f) * 0.5f);
         return t * t * (3f - 2f * t);
     }
@@ -4303,7 +4332,17 @@ internal static class Tessellator
             return;
 
         var paint = ResolvePaint(scene, node, context, frame, stroke: true);
+
+        // A stroke thinner than its own anti-aliasing is drawn as a smear WIDER THAN THE LINE.
+        // The auto feather aims at 1.3 SCREEN pixels, so in scene units it is 1.3 / px-per-unit:
+        // on a 1500-unit scene shown on a 719 px surface that is 2.7 units of feather on a
+        // 1-unit border. Measured on such a panel, the border washed out AND its smear covered
+        // depths 1-2 inside the shape -- exactly where an inset shadow is darkest -- so the
+        // shadow read as absent (65 and 40 where CSS has 19 and 21). The shape path has bounded
+        // its feather by the shape's smallest dimension all along; a stroke's own width is the
+        // same question asked of a line.
         var feather = FeatherWidth(node, context, frame.Scale);
+        feather *= Falloff(width, feather);
 
         // An undashed stroke is one run -- the outline itself -- so it is drawn straight
         // rather than through a list built to hold it. The list was the last per-shape
