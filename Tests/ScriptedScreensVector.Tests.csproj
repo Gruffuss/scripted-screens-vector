@@ -56,6 +56,7 @@
 <Compile Include="ScaleChoiceTests.cs" />
 <Compile Include="..\TextOutline.cs" />
 <Compile Include="TextOutlineTests.cs" />
+        <Compile Include="DashTests.cs" />
         <Compile Include="..\ColourFilter.cs" />
         <Compile Include="..\ConvexPartition.cs" />
         <Compile Include="ImageCacheStub.cs" />

@@ -2,6 +2,18 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.114
+
+### Fixed
+
+- Long dashed segments could hang the drawing worker when float precision stopped advancing
+  along the line. Dash lengths and progress now use double precision.
+- Distant dashes could create millions of runs on every rebuild. Dashes are now generated only
+  where the stroke can reach the console screen, including overflow beyond the vector element;
+  nothing visible changes.
+- Odd-length dash patterns now repeat with the correct on/off parity for every offset.
+  Negative pattern entries are clamped to zero before walking.
+
 ## 0.11.113
 
 ### Fixed

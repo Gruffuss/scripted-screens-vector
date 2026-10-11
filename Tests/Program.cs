@@ -204,6 +204,7 @@ internal static class Program
         ImageDecodeTests.Run(run);
         ScaleChoiceTests.Run(run);
         TextOutlineTests.Run(run);
+        DashTests.Run(run);
         EasingTests.Curves(run);
         EasingTests.Payload(run);
 

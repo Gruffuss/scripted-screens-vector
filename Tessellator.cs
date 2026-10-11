@@ -288,6 +288,7 @@ internal static class Tessellator
 
     /// <summary>True on the second and later piece of a concave clip: geometry only, no text, hits or scrolls.</summary>
     [ThreadStatic] private static bool _repeatPiece;
+    [ThreadStatic] private static Rect? _visible;
 
     /// <summary>
     /// Tessellates a scene and harvests its diagnostics before returning.
@@ -297,7 +298,7 @@ internal static class Tessellator
     /// a worker filled them in — it would see its own empty copy. They are copied out here,
     /// on the thread that produced them, while the job still owns the stats object.
     /// </remarks>
-    internal static int Emit(MeshBuilder vh, VecScene scene, EvalContext context, Rect target, float screenPixelsPerUnit, bool screenSizeKnown, TessellationStats stats)
+    internal static int Emit(MeshBuilder vh, VecScene scene, EvalContext context, Rect target, float screenPixelsPerUnit, bool screenSizeKnown, TessellationStats stats, Rect? visible = null)
     {
         // Belt as well as braces for the state a throw could strand. The three places that
         // save and restore now do it in a `finally`, but `_repeatPiece` is [ThreadStatic] and
@@ -305,6 +306,7 @@ internal static class Tessellator
         // or an older path added later without the same care -- would poison every later
         // rebuild on this worker. Starting clean costs two assignments.
         _repeatPiece = false;
+        _visible = visible;
         context.ResetRepeats();
 
         int shapes;
@@ -323,6 +325,7 @@ internal static class Tessellator
             NoFill = false;
             NoFeather = false;
             NoEval = false;
+            _visible = null;
         }
 
         System.Array.Copy(OpMilliseconds, stats.OpMilliseconds, stats.OpMilliseconds.Length);
@@ -4363,7 +4366,21 @@ internal static class Tessellator
             return;
         }
 
-        foreach (var run in Stroke.Dash(Loop(points, closed), node.DashPattern, node.DashOffset.Evaluate(context)))
+        Rect? window = null;
+        if (_visible is Rect visible)
+        {
+            var inverse = AffineInverse(frame.Matrix);
+            var a = inverse.MultiplyPoint3x4(new Vector3(visible.xMin, visible.yMin));
+            var b = inverse.MultiplyPoint3x4(new Vector3(visible.xMin, visible.yMax));
+            var c = inverse.MultiplyPoint3x4(new Vector3(visible.xMax, visible.yMin));
+            var d = inverse.MultiplyPoint3x4(new Vector3(visible.xMax, visible.yMax));
+            var min = Vector3.Min(Vector3.Min(a, b), Vector3.Min(c, d));
+            var max = Vector3.Max(Vector3.Max(a, b), Vector3.Max(c, d));
+            var reach = width * 0.5f * Mathf.Max(1f, node.MiterLimit) + width + feather;
+            window = Rect.MinMaxRect(min.x - reach, min.y - reach, max.x + reach, max.y + reach);
+        }
+
+        foreach (var run in Stroke.Dash(Loop(points, closed), node.DashPattern, node.DashOffset.Evaluate(context), window))
             StrokeRun(vh, run, false, width, paint, node, feather, frame);
     }
 

@@ -24,6 +24,25 @@ namespace ScriptedScreensVector;
 internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, IScrollHandler, IBeginDragHandler, IDragHandler, IEndDragHandler,
     IPointerDownHandler, IPointerUpHandler, IPointerExitHandler, IPointerMoveHandler, ICanvasRaycastFilter
 {
+    private static readonly Vector3[] CanvasCorners = new Vector3[4];
+
+    private Rect? VisibleRect()
+    {
+        if (canvas == null || canvas.rootCanvas.transform is not RectTransform root)
+            return null;
+
+        root.GetWorldCorners(CanvasCorners);
+        var min = rectTransform.InverseTransformPoint(CanvasCorners[0]);
+        var max = min;
+        for (var i = 1; i < CanvasCorners.Length; i++)
+        {
+            var corner = rectTransform.InverseTransformPoint(CanvasCorners[i]);
+            min = Vector3.Min(min, corner);
+            max = Vector3.Max(max, corner);
+        }
+        return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+    }
+
     /// <summary>
     /// Per-surface rebuild cost, reported periodically.
     /// </summary>
@@ -1166,7 +1185,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         Tessellator.BakeFades = true;
         try
         {
-            Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats);
+            Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats, VisibleRect());
         }
         catch (Exception e)
         {
@@ -2449,6 +2468,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // then is a far better estimate than 1 -- it is at worst slightly stale, where 1 is
         // categorically wrong. 1 survives only as the first-ever value, before anything is known.
         var scale = ScaleChoice.Choose(known, screenScale, _lastKnownScale);
+        var visible = VisibleRect();
 
         _job = Task.Run(() =>
         {
@@ -2462,7 +2482,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             // surface with it -- whatever was built before the throw is still drawn.
             try
             {
-                Tessellator.Emit(builder, scene, context, rect, scale, known, stats);
+                Tessellator.Emit(builder, scene, context, rect, scale, known, stats, visible);
 
                 // Off-thread on purpose: this is a rect test per label per later shape, and it
                 // has to happen before Slices() is asked how the mesh divides.

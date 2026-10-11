@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -153,7 +154,7 @@ internal static class Stroke
         return band;
     }
 
-    internal static List<List<Vector2>> Dash(IReadOnlyList<Vector2> points, float[] pattern, float offset)
+    internal static List<List<Vector2>> Dash(IReadOnlyList<Vector2> points, float[] pattern, float offset, Rect? window = null)
     {
         var runs = new List<List<Vector2>>();
         if (points.Count < 2 || pattern == null || pattern.Length == 0)
@@ -162,9 +163,13 @@ internal static class Stroke
             return runs;
         }
 
-        var total = 0f;
-        foreach (var length in pattern)
-            total += Mathf.Max(0f, length);
+        var lengths = new double[pattern.Length];
+        var total = 0d;
+        for (var i = 0; i < pattern.Length; i++)
+        {
+            lengths[i] = Math.Max(0d, pattern[i]);
+            total += lengths[i];
+        }
 
         if (total <= Epsilon)
         {
@@ -172,41 +177,66 @@ internal static class Stroke
             return runs;
         }
 
-        var index = 0;
-        var remaining = pattern[0];
-        var on = true;
-
-        // Consume the dash offset before drawing anything.
-        var skip = Mathf.Repeat(offset, total);
-        while (skip > 0f)
-        {
-            var step = Mathf.Min(skip, remaining);
-            remaining -= step;
-            skip -= step;
-            if (remaining <= Epsilon)
-            {
-                index = (index + 1) % pattern.Length;
-                remaining = pattern[index];
-                on = !on;
-            }
-        }
-
+        var entries = pattern.Length % 2 == 0 ? pattern.Length : pattern.Length * 2;
+        var period = pattern.Length % 2 == 0 ? total : total * 2d;
+        var phase = WrapDashPhase(offset, period);
+        DashState(lengths, entries, phase, out var index, out var remaining);
+        var on = index % 2 == 0;
         var current = on ? new List<Vector2> { points[0] } : null;
 
         for (var i = 0; i < points.Count - 1; i++)
         {
             var from = points[i];
             var to = points[i + 1];
-            var segment = Vector2.Distance(from, to);
-            var travelled = 0f;
+            var dx = (double)to.x - from.x;
+            var dy = (double)to.y - from.y;
+            var segment = Math.Sqrt(dx * dx + dy * dy);
+            if (segment <= Epsilon)
+                continue;
 
-            while (segment - travelled > Epsilon)
+            var enter = 0d;
+            var exit = 1d;
+            if (window is Rect bounds &&
+                (!DashClip(-dx, (double)from.x - bounds.xMin, ref enter, ref exit) ||
+                 !DashClip(dx, (double)bounds.xMax - from.x, ref enter, ref exit) ||
+                 !DashClip(-dy, (double)from.y - bounds.yMin, ref enter, ref exit) ||
+                 !DashClip(dy, (double)bounds.yMax - from.y, ref enter, ref exit)))
             {
-                var step = Mathf.Min(segment - travelled, remaining);
+                if (current is { Count: >= 2 })
+                    runs.Add(current);
+                current = null;
+                phase = WrapDashPhase(phase + segment % period, period);
+                DashState(lengths, entries, phase, out index, out remaining);
+                on = index % 2 == 0;
+                continue;
+            }
+
+            if (enter > 0d)
+            {
+                if (current is { Count: >= 2 })
+                    runs.Add(current);
+                current = null;
+                phase = WrapDashPhase(phase + (segment * enter) % period, period);
+                DashState(lengths, entries, phase, out index, out remaining);
+                on = index % 2 == 0;
+            }
+
+            var start = new Vector2((float)(from.x + dx * enter), (float)(from.y + dy * enter));
+            if (on && current == null)
+                current = new List<Vector2> { start };
+
+            // Work relative to the entry point, so a distant prefix cannot swallow a dash step.
+            var inside = segment * (exit - enter);
+            var travelled = 0d;
+            while (inside - travelled > Epsilon)
+            {
+                var step = Math.Min(inside - travelled, remaining);
                 travelled += step;
                 remaining -= step;
+                phase = WrapDashPhase(phase + step, period);
 
-                var at = Vector2.Lerp(from, to, travelled / segment);
+                var at = new Vector2((float)(from.x + dx * (enter + travelled / segment)),
+                    (float)(from.y + dy * (enter + travelled / segment)));
                 current?.Add(at);
 
                 if (remaining > Epsilon)
@@ -219,8 +249,18 @@ internal static class Stroke
                 on = !on;
                 current = on ? new List<Vector2> { at } : null;
 
-                index = (index + 1) % pattern.Length;
-                remaining = pattern[index];
+                index = (index + 1) % entries;
+                remaining = lengths[index % lengths.Length];
+            }
+
+            if (exit < 1d)
+            {
+                if (current is { Count: >= 2 })
+                    runs.Add(current);
+                current = null;
+                phase = WrapDashPhase(phase + (inside - travelled + segment * (1d - exit)) % period, period);
+                DashState(lengths, entries, phase, out index, out remaining);
+                on = index % 2 == 0;
             }
         }
 
@@ -228,6 +268,37 @@ internal static class Stroke
             runs.Add(current);
 
         return runs;
+    }
+
+    private static double WrapDashPhase(double phase, double period)
+    {
+        phase %= period;
+        return phase < 0d ? phase + period : phase;
+    }
+
+    private static void DashState(double[] lengths, int entries, double phase, out int index, out double remaining)
+    {
+        // A boundary selects the next entry, including zero entries; the walk toggles those too.
+        for (index = 0; index < entries - 1; index++)
+        {
+            var length = lengths[index % lengths.Length];
+            if (phase == 0d || phase < length)
+                break;
+            phase -= length;
+        }
+        remaining = lengths[index % lengths.Length] - phase;
+    }
+
+    private static bool DashClip(double direction, double distance, ref double enter, ref double exit)
+    {
+        if (direction == 0d)
+            return distance >= 0d;
+        var at = distance / direction;
+        if (direction < 0d)
+            enter = Math.Max(enter, at);
+        else
+            exit = Math.Min(exit, at);
+        return enter <= exit;
     }
 
     /// <summary>
