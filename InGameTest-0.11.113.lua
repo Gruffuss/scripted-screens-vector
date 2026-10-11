@@ -6,8 +6,11 @@
 -- Measure, do not eyeball: each outlined row's ink box should be 4 px larger on every side than
 -- the plain row above it, which has the same text in the same place.
 --
--- What you should see: in each outlined row, the white face of the letters still showing inside
--- a red band. Before 0.11.113 the band filled the stems and counters and no white was left.
+-- What you should see: the outlined rows keep their letter shapes, counters open. On
+-- LiberationSans a thin white face still shows inside the red band; Barlow's stems at this size
+-- are about as thin as an 8-unit stroke centred on them, so they fill, as CSS fills them too.
+-- Before 0.11.113 the band reached 7-8 units out, the letters swelled into blobs and the counters
+-- nearly closed. Measured in game for 0.11.113: 4/4/4/4 units outside on both fonts.
 -- The Barlow rows need the ScriptedScreens Fonts mod; without it they fall back and say so.
 local ui = ss.ui.surface("main")
 ss.ui.activate("main")
