@@ -501,10 +501,27 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         CollectForcedScrolls(scene.Root, _forcedScrollNodes);
 
         _scene = scene;
+        FontUsers.Remove(this);
+        if (scene.FontLinks.Count > 0)
+        {
+            FontUsers.Add(this);
+            foreach (var link in scene.FontLinks)
+                PageFontBridge.Request(link);
+        }
         _needsRebuild = true;
         _sceneId = string.IsNullOrEmpty(scene.Id) ? "?" : scene.Id;
         _startTime = Now();
         SetVerticesDirty();
+    }
+
+    // Disabled graphics also need fresh labels when they become visible again.
+    private static readonly List<VectorGraphic> FontUsers = new();
+
+    internal static void PageFontChanged(string link)
+    {
+        foreach (var graphic in FontUsers)
+            if (graphic != null && graphic._scene!.FontLinks.Contains(link))
+                graphic._needsRebuild = true;
     }
 
     /// <summary>
@@ -1480,6 +1497,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         if (_stats.Starved != null)
             into.AppendLine($"  TOO LARGE at this size: {_stats.Starved} was dropped");
 
+        var fontProblem = DescribePageFonts(into);
         if (_scene.Problems.Count > 0)
         {
             into.AppendLine("  PROBLEMS");
@@ -1509,8 +1527,45 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // Every section above counts. This line used to consider only two of them, so a
         // dropped shape or a shrunk text shadow still read as "no problems".
         if (_scene.Problems.Count == 0 && _stats.Missing.Count == 0 && _stats.Starved == null
-            && dropped == null && textWarnings is not { Count: > 0 })
+            && dropped == null && textWarnings is not { Count: > 0 } && !fontProblem)
             into.AppendLine("  no problems");
+    }
+
+    private bool DescribePageFonts(System.Text.StringBuilder into)
+    {
+        if (_scene!.FontLinks.Count == 0)
+            return false;
+
+        into.AppendLine("  FONTS");
+        var problem = false;
+        foreach (var link in _scene.FontLinks)
+        {
+            var request = PageFontBridge.Requests.Get(link);
+            into.AppendLine($"    {link}: {request?.Describe() ?? "pending"}");
+            problem |= request is { State: "refused" or "download-failed" or "disabled" };
+        }
+
+        if (!PageFontBridge.Requests.Settled(_scene.FontLinks))
+            return problem;
+
+        var pending = new Stack<VecNode>(_scene.Root);
+        var warned = new HashSet<string>(StringComparer.Ordinal);
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            if (node.Op == VecOp.Text)
+            {
+                var warning = PageFontBridge.Requests.Mismatch(_scene.FontLinks, node.FontFamily);
+                if (warning != null && warned.Add(warning))
+                {
+                    into.AppendLine($"    {warning}");
+                    problem = true;
+                }
+            }
+            foreach (var child in node.Children)
+                pending.Push(child);
+        }
+        return problem;
     }
 
     /// <summary>Applies a `nodes = { id = { ... } }` patch from the data element.</summary>
@@ -2609,6 +2664,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <inheritdoc />
     protected override void OnDestroy()
     {
+        FontUsers.Remove(this);
         _text?.Destroy();
         _text = null;
 

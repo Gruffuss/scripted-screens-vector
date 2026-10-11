@@ -2,6 +2,20 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.111
+
+### Added
+
+- `FONT src="…"` in `DEFS` requests page webfonts through the optional ScriptedScreens Fonts
+  mod. `vector_stats` reports each link's state and delivered face names, and warns about
+  requested faces that did not arrive once all links settle. Font arrivals rebuild every
+  current scene declaring the link; failed requests retry when a scene is applied again.
+
+### Fixed
+
+- An unchanged label using the fallback font now retries its requested face on each rebuild,
+  so a font registering later can replace the fallback and clear the warning.
+
 ## 0.11.110
 
 ### Fixed

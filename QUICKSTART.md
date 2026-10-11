@@ -108,6 +108,7 @@ R x=12 y==85-clamp($level,0,1)*70 w=20 h==clamp($level,0,1)*70 rx=3 f=#2E8B6E
 | scrolling list | `SC` (`id`, `ch` = content height) |
 | picture from a URL or `data:` | `IMG` (`src`, `fit`; PNG, JPEG, BMP, GIF first frame) |
 | gradient, clip shape, reusable part | `defs`: `GL` `GR` `GC`, `CP`, `SYM` + `USE` |
+| page webfont | `DEFS { FONT src="https://fonts.googleapis.com/css2?family=Inter" }`, then `T … font="Inter"`; requires ScriptedScreens Fonts. Read delivered face names and request states in `vector_stats`; keep the page readable in the default font |
 
 ## Syntax essentials
 

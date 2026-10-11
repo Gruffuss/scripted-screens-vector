@@ -398,6 +398,7 @@ internal sealed class VecScene
     internal float ViewHeight = 100f;
     internal FitMode Fit = FitMode.Stretch;
     internal List<VecNode> Root = new();
+    internal readonly List<string> FontLinks = new();
     internal bool UsesTime;
 
     /// <summary>Some expression reads `hover` or `down`, so pointer movement over a clickable node redraws.</summary>
@@ -1568,7 +1569,10 @@ internal static class SceneParser
             if (header ? SceneLiteralKeys.Contains(prop.Key) : LiteralKeys.Contains(prop.Key))
                 CheckLiteral(prop, scene, op, id);
 
-            if (KnownKeys.Contains(prop.Key))
+            if (string.Equals(op, "FONT", StringComparison.OrdinalIgnoreCase)
+                ? string.Equals(prop.Key, "op", StringComparison.OrdinalIgnoreCase)
+                  || string.Equals(prop.Key, "src", StringComparison.OrdinalIgnoreCase)
+                : KnownKeys.Contains(prop.Key))
                 continue;
 
             // The header is checked with op "SCENE", and its own vocabulary -- the node list,
@@ -2373,7 +2377,7 @@ internal static class SceneParser
 
     }
 
-    /// <summary>Reads gradient (GL/GR) and clip-path (CP) declarations.</summary>
+    /// <summary>Reads font, symbol, gradient and clip-path declarations.</summary>
     private static void ParseDefs(SS.UiValue? defs, VecScene scene)
     {
         if (defs == null || defs.Value.Type != SS.UiValueType.Array || defs.Value.Array == null)
@@ -2393,6 +2397,16 @@ internal static class SceneParser
             // catch. CHANGES WHAT AN EXISTING SCENE LOOKS LIKE: one that carries a typo on a
             // def now reports it and shows the magenta border, where before it drew clean.
             Validate(map, scene, op, id);
+
+            if (op == "FONT")
+            {
+                var link = PropString(map, "src");
+                if (string.IsNullOrEmpty(link))
+                    scene.Problem("FONT: src needs a non-empty string URL");
+                else if (!scene.FontLinks.Contains(link!))
+                    scene.FontLinks.Add(link!);
+                continue;
+            }
 
             if (op is "GL" or "GR" or "GC")
             {
@@ -2757,7 +2771,7 @@ internal static class SceneParser
             // which is invisible on an opaque fill and obvious through transparency and feather.
             // Counted in two kinds, because they fail for different reasons and an author who
             // wrote a `GL` inside a `CP` needs to be told something else than one who wrote two
-            // rects. A def op -- GL, GR, GC, CP, SYM -- returns null from ParseNode, since
+            // rects. A def op (GL, GR, GC, CP, SYM, FONT) returns null from ParseNode, since
             // ParseDefs owns those, so the shape count below would silently pass over it.
             var extra = 0;
             var defs = 0;
@@ -2770,7 +2784,7 @@ internal static class SceneParser
                 }
 
                 var restOp = PropString(rest.Map, "op")?.ToUpperInvariant();
-                if (restOp is "GL" or "GR" or "GC" or "CP" or "SYM")
+                if (restOp is "GL" or "GR" or "GC" or "CP" or "SYM" or "FONT")
                     defs++;
                 else if (ParseNode(rest.Map, new VecScene()) != null)
                     extra++;

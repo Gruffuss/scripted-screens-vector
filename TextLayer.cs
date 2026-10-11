@@ -124,9 +124,11 @@ internal sealed class TextLayer
         // Nothing about this label changed since the last rebuild, and it is in the state that
         // rebuild left it: leave it alone. The two health checks are the repairs further down
         // this method -- an empty glyph mesh after a capture, a renderer with no material --
-        // so skipping can never freeze a label that still needed one of them.
+        // so skipping can never freeze a label that still needed one of them. An unresolved
+        // font also needs work: its face may have registered since the last rebuild.
         if (_applied[index] is { } last
             && last.SameAs(placement)
+            && PageFonts.FaceResolved(placement.Font, label.font == null ? null : label.font.name)
             && label.gameObject.activeSelf
             && (label.mesh == null || label.mesh.vertexCount > 0 || string.IsNullOrEmpty(placement.Text))
             && label.canvasRenderer != null && label.canvasRenderer.materialCount > 0)
@@ -999,20 +1001,25 @@ internal sealed class TextLayer
     /// is TMP runtime state and fills as asset bundles come in, so this is not a question the
     /// parser could answer -- `SceneModel` compiles without TextMeshPro and must keep doing so.
     /// The wording is "not registered", not "does not exist", because a scene pushed before its
-    /// font arrives is in exactly this state and the warning is never cleared.
+    /// font arrives is in exactly this state. A successful lookup clears that warning.
     /// </remarks>
     private void ApplyFont(TextMeshProUGUI label, string family)
     {
+        var warning = $"font \"{family}\" is not registered; drawn in the game's own font";
         if (label.font != null && label.font.name == family)
+        {
+            _warned.Remove(warning);
             return;
+        }
 
         if (MaterialReferenceManager.TryGetFontAsset(TMP_TextUtilities.GetSimpleHashCode(family), out var asset))
         {
             label.font = asset;
+            _warned.Remove(warning);
             return;
         }
 
-        Warn($"font \"{family}\" is not registered; drawn in the game's own font");
+        Warn(warning);
 
         if (_defaultFont != null && label.font != _defaultFont)
             label.font = _defaultFont;

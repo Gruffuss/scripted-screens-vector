@@ -199,6 +199,7 @@ internal static class Program
         RequirementTests.PointerScope(run);
         RequirementTests.PositionAndHover(run);
         SweepTests.Run(run);
+        PageFontTests.Run(run);
         PatchPathTests.Run(run);
         ImageDecodeTests.Run(run);
         ScaleChoiceTests.Run(run);

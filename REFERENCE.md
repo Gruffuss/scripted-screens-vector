@@ -31,7 +31,7 @@ from the **element**, always, so a `scene=` on a `SCENE` line does not pair anyt
 | `scene` | string | scene id; pairs the two elements |
 | `w`, `h` | number | viewbox size — the units all artwork is written in. Each **defaults to `100`** and is **clamped up to `1`**, independently and silently: `0`, a negative and `0.2` all give `1`, so `w = 0.2` alone is a `1 x 100` viewbox. Above `1` nothing is changed and there is **no upper bound** — `1.5` stays `1.5`, `100000` is accepted as written |
 | `fit` | string | `stretch` (default), `contain`, `cover` |
-| `defs` | array | gradient and clip-path declarations |
+| `defs` | array | font, symbol, gradient and clip-path declarations |
 | `root` | array | the node list |
 
 ### Data element
@@ -1164,7 +1164,7 @@ container, where it will be clipped away and look like nothing happened.
 | `fo` | opacity `0..1`, as on any shape; multiplied by the enclosing group's `o` |
 | `align` | `left` (default), `center`, `right`, `justified` (extra width goes between words, as CSS) |
 | `valign` | `top` (default), `middle`, `bottom` |
-| `font` | a registered TMP face, named exactly: `Family` for the regular weight and `Family Style` otherwise — `Barlow`, `Barlow Bold` — e.g. from the companion fonts mod. Case and spaces count. Omitted draws in the game's own font. **A name nothing is registered under draws the game's own font and is reported**, in the log and under `vector_stats`' TEXT section, since 0.11.102. Before that it did nothing at all: labels are pooled by index, so the label kept whatever face the node using that slot last rebuild had asked for, and the typo showed up as a different label's font once placement order changed. A font registers when its bundle loads, so a scene pushed before its font arrives warns and falls back — and the warning is not cleared when the font turns up |
+| `font` | a registered TMP face, named exactly: `Family` for the regular weight and `Family Style` otherwise — `Barlow`, `Barlow Bold` — e.g. from the companion fonts mod or a `FONT` def. Case and spaces count. Omitted draws in the game's own font. **A name nothing is registered under draws the game's own font and is reported**, in the log and under `vector_stats`' TEXT section, since 0.11.102. A label using the fallback retries lookup on every rebuild; once resolved, its warning clears. A `FONT` callback triggers a rebuild for every current scene declaring that link |
 | `weight` | `bold`, a number ≥ 600, or `normal`; omitted draws the face's regular weight |
 | `cspace` | character spacing, default `0` |
 | `kern` | `0` turns pair kerning off for this label; on otherwise. Only a font that carries kerning pairs is affected, so a label on the game's own font is unchanged either way |
@@ -1978,6 +1978,52 @@ Without feathering every edge is hard — UGUI applies no antialiasing of its ow
 ---
 
 ## `defs`
+
+### `FONT` — page webfonts
+
+Requires the **ScriptedScreens Fonts** mod to be installed. Declare one or more links in
+the scene's existing `DEFS` block:
+
+```text
+DEFS {
+  FONT src="https://fonts.googleapis.com/css2?family=Inter:wght@400;700"
+  FONT src="https://fonts.googleapis.com/css2?family=Karla"
+}
+T x=0 y=0 w=100 h=20 text="Hello" font="Inter"
+```
+
+`src` is the only FONT attribute and must be a non-empty string URL. Links keep declaration
+order and exact duplicates are requested once. FONT is a definition, so it cannot appear
+at the scene root. Table form is `defs = { { op = "FONT", src = "https://…" } }`.
+
+Only the fonts mod downloads fonts, under its own `PageFontHosts` host allowlist (Google
+Fonts by default). Vector does not extend that allowlist. The fonts mod permits **48 page
+faces per game session**, across all requests. Each player fetches their own fonts; design
+the page to read fine in the game's own font for a player who never receives them.
+
+Face names come from the font file's metadata, **not from the link**: `Family` for Regular,
+`Family Style` otherwise. A request for `wght@400;700` can deliver `Inter` and `Inter Bold`.
+Use those exact names, including case and spaces, in a T node's `font=`. When a font arrives,
+every current scene declaring its link rebuilds so labels resolve the new face. A label
+still using the fallback retries its requested face on each rebuild; a successful lookup
+clears its "not registered" warning.
+
+`vector_stats` reports each link under **FONTS**:
+
+| State | Meaning |
+|-------|---------|
+| `pending` | the fonts mod accepted the request; waiting for its callback |
+| `loaded` | includes the exact face names that arrived |
+| `refused` | no callback will follow; includes the known reason, such as the fonts mod being absent, an incompatible API, or a URL/host/loader refusal |
+| `download-failed` | an accepted request delivered no faces; includes the reason token when available |
+| `disabled` | the fonts mod reported that loading is disabled |
+
+Pending and loaded links are requested at most once per process. A failed or refused link
+is tried again the next time a scene declaring it is applied. Once all this scene's FONT
+links have settled, a T node asking for an undelivered face gets a warning such as
+`font "Inter SemiBold" did not arrive; this page's fonts delivered: Inter, Inter Bold`.
+If none arrived, the list says `none`. Scenes without FONT declarations make no page font
+requests and receive no page font diagnostics.
 
 ### `GL` — linear gradient
 

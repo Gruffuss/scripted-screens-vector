@@ -45,6 +45,8 @@
         <Compile Include="..\MeshBuilder.cs" />
         <Compile Include="..\TextOrder.cs" />
         <Compile Include="..\SceneModel.cs" />
+        <Compile Include="..\PageFonts.cs" />
+        <Compile Include="PageFontTests.cs" />
         <Compile Include="..\PathData.cs" />
         <Compile Include="..\Stroke.cs" />
         <Compile Include="..\Shadow.cs" />
