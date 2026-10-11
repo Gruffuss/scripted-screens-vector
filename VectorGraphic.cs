@@ -2363,7 +2363,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // orders of magnitude is not. The surface was being drawn a frame ago, so the scale from
         // then is a far better estimate than 1 -- it is at worst slightly stale, where 1 is
         // categorically wrong. 1 survives only as the first-ever value, before anything is known.
-        var scale = known ? screenScale : (_lastKnownScale > 0f ? _lastKnownScale : 1f);
+        var scale = ScaleChoice.Choose(known, screenScale, _lastKnownScale);
 
         _job = Task.Run(() =>
         {

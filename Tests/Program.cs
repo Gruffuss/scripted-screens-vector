@@ -201,6 +201,7 @@ internal static class Program
         SweepTests.Run(run);
         PatchPathTests.Run(run);
         ImageDecodeTests.Run(run);
+        ScaleChoiceTests.Run(run);
         EasingTests.Curves(run);
         EasingTests.Payload(run);
 

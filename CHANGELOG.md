@@ -37,6 +37,13 @@ ScriptedScreens Vector, newest first.
   after   11    17    22    27    28    29
   ```
 
+- The fallback decision is now its own Unity-free helper, `ScaleChoice.Choose`, so the suite can
+  own it. The camera half — whether the projection resolves at all — still needs a real near plane
+  and rests on in-game measurement, but the DECISION is where the fault lived and it is covered by
+  six checks. The regression one, `Choose(false, 0f, 60f)` must not be 1, was **watched failing**
+  against the 0.11.107 logic (exit 1, two checks red, the other four still green) before it was
+  trusted.
+
 ### Diagnostics
 
 - **The ring feather is timed at last.** Only the band feather fed `BandFeatherMs`, and the band
