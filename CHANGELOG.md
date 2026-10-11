@@ -20,6 +20,9 @@ ScriptedScreens Vector, newest first.
   before. Up to 0.11.112 it was `ow * pointSize / (gradientScale * size)`. **A page tuned against
   the old width now draws a thinner outline.** Found and measured in game by the fonts mod's
   owner; the headless check was watched failing on the old formula at the same 7.2 px.
+- **REFERENCE said `nofill` still draws radial-gradient and `blur`red fills.** It has dropped
+  both since 0.11.105, which fixed exactly that and left the reference behind. The code was
+  right; the reference now matches it.
 
 ## 0.11.112
 
@@ -706,7 +709,7 @@ written, each in the reference's own section rather than appended beside the wro
   `fmt`, or a literal holding placeholders. On a plain literal it does nothing, unreported, and
   an unresolved name draws `missing` without it.
 - **What the three debug switches remove.** `nofill` leaves radial-gradient and `blur`red fills
-  drawn and drops every `T` label; `nofeather` touches only the feather ring and a `YS`'s edge;
+  drawn (it drops those too since 0.11.105) and drops every `T` label; `nofeather` touches only the feather ring and a `YS`'s edge;
   `noeval` is not expression evaluation in general but the `x`/`y`/`w`/`h` of every rectangle,
   replaced with fixed numbers, and it does not hold the vertex count still.
 - **An index outside an array and a name that is not an array are different faults**, and only

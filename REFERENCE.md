@@ -676,7 +676,7 @@ none of them leaves the picture as drawn.
 
 | Prop | What it removes |
 |------|-----------------|
-| `nofill` | the interior fill of `R`, `C`, `P`, `Y`, `SP` and `YS`, flat, linear or conic, **and every `T` label**, dropped whole so the label count reads `0`. Still drawn: strokes, the feathered edge ring of a shape (an `R` at the default feather keeps its 8 vertices), shadows, `blur`red fills, pictures, and **radial-gradient fills**, which it does not skip |
+| `nofill` | the interior fill of `R`, `C`, `P`, `Y`, `SP` and `YS` (flat, linear, conic or radial, and a fill drawn as a group's `blur` silhouette) **and every `T` label**, dropped whole so the label count reads `0`. Still drawn: strokes, the feathered edge ring of a shape (an `R` at the default feather keeps its 8 vertices), shadows, and pictures. Up to 0.11.104 it also left radial-gradient and `blur`red fills drawn |
 | `nofeather` | the soft edge ring of closed fills and the sampled edge of a `YS`. A stroke's feather is unchanged, and so is any shape written with `fea = 0` |
 | `noeval` | **not expression evaluation in general.** It replaces `x`, `y`, `w` and `h` of every rectangle with the fixed values `40, 40, 2, 2`, constants as much as expressions. Every rectangle means an `R`, the box of an `IMG` (which then draws nothing you can see), the box of an `SC`, and the `R` of a clip whose box is an expression; a clip written with plain numbers is cut when the scene is parsed and keeps its shape. Everything else is evaluated as usual: `rx`, `ry`, `fo`, `sw`, and everything on `C`, `G`, `YS` and `T` |
 
