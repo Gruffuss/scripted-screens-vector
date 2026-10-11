@@ -49,6 +49,7 @@
         <Compile Include="PageFontTests.cs" />
         <Compile Include="..\PathData.cs" />
         <Compile Include="..\Stroke.cs" />
+        <Compile Include="..\DashWindow.cs" />
         <Compile Include="..\Shadow.cs" />
         <Compile Include="..\Tessellator.cs" />
         <Compile Include="..\TessellationStats.cs" />

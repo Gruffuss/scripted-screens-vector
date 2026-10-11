@@ -163,7 +163,14 @@ internal static class Stroke
             return runs;
         }
 
-        var lengths = new double[pattern.Length];
+        if (window is Rect boundsToCheck && !DashWindow.Finite(boundsToCheck))
+            window = null;
+        if (!float.IsFinite(offset))
+            offset = 0f;
+
+        if (_dashLengths == null || _dashLengths.Length < pattern.Length)
+            _dashLengths = new double[pattern.Length];
+        var lengths = _dashLengths;
         var total = 0d;
         for (var i = 0; i < pattern.Length; i++)
         {
@@ -180,7 +187,7 @@ internal static class Stroke
         var entries = pattern.Length % 2 == 0 ? pattern.Length : pattern.Length * 2;
         var period = pattern.Length % 2 == 0 ? total : total * 2d;
         var phase = WrapDashPhase(offset, period);
-        DashState(lengths, entries, phase, out var index, out var remaining);
+        DashState(lengths, pattern.Length, phase, out var index, out var remaining);
         var on = index % 2 == 0;
         var current = on ? new List<Vector2> { points[0] } : null;
 
@@ -191,6 +198,13 @@ internal static class Stroke
             var dx = (double)to.x - from.x;
             var dy = (double)to.y - from.y;
             var segment = Math.Sqrt(dx * dx + dy * dy);
+            if (double.IsNaN(segment) || double.IsInfinity(segment))
+            {
+                if (current is { Count: >= 2 })
+                    runs.Add(current);
+                current = null;
+                continue;
+            }
             if (segment <= Epsilon)
                 continue;
 
@@ -206,7 +220,7 @@ internal static class Stroke
                     runs.Add(current);
                 current = null;
                 phase = WrapDashPhase(phase + segment % period, period);
-                DashState(lengths, entries, phase, out index, out remaining);
+                DashState(lengths, pattern.Length, phase, out index, out remaining);
                 on = index % 2 == 0;
                 continue;
             }
@@ -217,7 +231,7 @@ internal static class Stroke
                     runs.Add(current);
                 current = null;
                 phase = WrapDashPhase(phase + (segment * enter) % period, period);
-                DashState(lengths, entries, phase, out index, out remaining);
+                DashState(lengths, pattern.Length, phase, out index, out remaining);
                 on = index % 2 == 0;
             }
 
@@ -250,7 +264,7 @@ internal static class Stroke
                 current = on ? new List<Vector2> { at } : null;
 
                 index = (index + 1) % entries;
-                remaining = lengths[index % lengths.Length];
+                remaining = lengths[index % pattern.Length];
             }
 
             if (exit < 1d)
@@ -259,7 +273,7 @@ internal static class Stroke
                     runs.Add(current);
                 current = null;
                 phase = WrapDashPhase(phase + (inside - travelled + segment * (1d - exit)) % period, period);
-                DashState(lengths, entries, phase, out index, out remaining);
+                DashState(lengths, pattern.Length, phase, out index, out remaining);
                 on = index % 2 == 0;
             }
         }
@@ -276,17 +290,18 @@ internal static class Stroke
         return phase < 0d ? phase + period : phase;
     }
 
-    private static void DashState(double[] lengths, int entries, double phase, out int index, out double remaining)
+    private static void DashState(double[] lengths, int count, double phase, out int index, out double remaining)
     {
+        var entries = count % 2 == 0 ? count : count * 2;
         // A boundary selects the next entry, including zero entries; the walk toggles those too.
         for (index = 0; index < entries - 1; index++)
         {
-            var length = lengths[index % lengths.Length];
+            var length = lengths[index % count];
             if (phase == 0d || phase < length)
                 break;
             phase -= length;
         }
-        remaining = lengths[index % lengths.Length] - phase;
+        remaining = lengths[index % count] - phase;
     }
 
     private static bool DashClip(double direction, double distance, ref double enter, ref double exit)
@@ -473,6 +488,8 @@ internal static class Stroke
     [System.ThreadStatic] private static Vector2[]? _left;
 
     [System.ThreadStatic] private static Vector2[]? _right;
+
+    [System.ThreadStatic] private static double[]? _dashLengths;
 
     private static Vector2[] Buffer(ref Vector2[]? slot, int count)
     {

@@ -28,6 +28,9 @@ internal sealed class TessellationStats
 
     internal int Shapes;
 
+    /// <summary>A dashed outline extended beyond the build window and may have been culled.</summary>
+    internal bool CulledDashes;
+
     /// <summary>
     /// Whether the rebuild reached anything that reads `t` -- a node drawn, or a def. False
     /// when every animated node sat under a hidden group, which leaves the scene idle until

@@ -289,6 +289,7 @@ internal static class Tessellator
     /// <summary>True on the second and later piece of a concave clip: geometry only, no text, hits or scrolls.</summary>
     [ThreadStatic] private static bool _repeatPiece;
     [ThreadStatic] private static Rect? _visible;
+    [ThreadStatic] private static bool _culledDashes;
 
     /// <summary>
     /// Tessellates a scene and harvests its diagnostics before returning.
@@ -307,6 +308,7 @@ internal static class Tessellator
         // rebuild on this worker. Starting clean costs two assignments.
         _repeatPiece = false;
         _visible = visible;
+        _culledDashes = false;
         context.ResetRepeats();
 
         int shapes;
@@ -336,6 +338,7 @@ internal static class Tessellator
         stats.RingFeatherMs = RingFeatherMs;
         stats.BandQuads = BandQuads;
         stats.Shapes = shapes;
+        stats.CulledDashes = _culledDashes;
         stats.DrewTime = DrewTime || scene.DefsUseTime;
         stats.AlphaGroups.Clear();
         if (AlphaFound != null)
@@ -4378,6 +4381,19 @@ internal static class Tessellator
             var max = Vector3.Max(Vector3.Max(a, b), Vector3.Max(c, d));
             var reach = width * 0.5f * Mathf.Max(1f, node.MiterLimit) + width + feather;
             window = Rect.MinMaxRect(min.x - reach, min.y - reach, max.x + reach, max.y + reach);
+        }
+
+        if (!_culledDashes && window is Rect bounds && DashWindow.Finite(bounds) && points.Count > 0)
+        {
+            var min = points[0];
+            var max = min;
+            for (var i = 1; i < points.Count; i++)
+            {
+                min = Vector2.Min(min, points[i]);
+                max = Vector2.Max(max, points[i]);
+            }
+            _culledDashes = min.x < bounds.xMin || min.y < bounds.yMin
+                || max.x > bounds.xMax || max.y > bounds.yMax;
         }
 
         foreach (var run in Stroke.Dash(Loop(points, closed), node.DashPattern, node.DashOffset.Evaluate(context), window))
