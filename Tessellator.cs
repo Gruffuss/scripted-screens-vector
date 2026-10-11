@@ -4333,16 +4333,25 @@ internal static class Tessellator
 
         var paint = ResolvePaint(scene, node, context, frame, stroke: true);
 
-        // A stroke thinner than its own anti-aliasing is drawn as a smear WIDER THAN THE LINE.
-        // The auto feather aims at 1.3 SCREEN pixels, so in scene units it is 1.3 / px-per-unit:
-        // on a 1500-unit scene shown on a 719 px surface that is 2.7 units of feather on a
-        // 1-unit border. Measured on such a panel, the border washed out AND its smear covered
-        // depths 1-2 inside the shape -- exactly where an inset shadow is darkest -- so the
-        // shadow read as absent (65 and 40 where CSS has 19 and 21). The shape path has bounded
-        // its feather by the shape's smallest dimension all along; a stroke's own width is the
-        // same question asked of a line.
-        var feather = FeatherWidth(node, context, frame.Scale);
-        feather *= Falloff(width, feather);
+        // A STROKE IS NEVER SOFTER THAN IT IS WIDE, and that bound is its own width -- not a
+        // ramp to zero, which 0.11.109 shipped and which drops a sub-pixel line entirely.
+        //
+        // The auto feather aims at 1.3 SCREEN pixels, so in scene units it is 1.3 / px-per-unit,
+        // which GROWS as a console shrinks on screen. Both failures are that number against the
+        // line's width, measured on a 1-unit border over an inset shadow:
+        //
+        // * More feather than width smears the line over its neighbours. At 0.48 px/unit the
+        //   feather is 2.7 units on a 1-unit border, and the smear covered depths 1-2 inside the
+        //   shape -- exactly where an inset shadow is darkest -- so the shadow read as absent
+        //   (65 and 40 where CSS has 19 and 21).
+        // * Zero feather drops the line between sample points. A hard 0.48 px line missed the
+        //   raster entirely and the border drew as the near-black shadow behind it: red 2 where
+        //   the stroke's own colour is 90.
+        //
+        // Clamping to the width does neither: the line draws about a pixel wide at partial
+        // alpha, which is what a browser does with a hairline. It also holds at every distance,
+        // since both the feather and this bound are in scene units.
+        var feather = Mathf.Min(FeatherWidth(node, context, frame.Scale), width);
 
         // An undashed stroke is one run -- the outline itself -- so it is drawn straight
         // rather than through a list built to hold it. The list was the last per-shape

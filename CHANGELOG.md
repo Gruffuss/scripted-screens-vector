@@ -2,6 +2,34 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.110
+
+### Fixed
+
+- **A border thinner than one pixel vanished instead of drawing as a hairline.** 0.11.109 fixed a
+  stroke being smeared WIDER than itself by ramping its feather to zero once the feather exceeded
+  the width. Zero is the other wrong answer: a hard sub-pixel line falls between sample points and
+  draws nothing at all. On a 1-unit border over an inset shadow, red at the border's own centre,
+  where the stroke's colour is 90:
+
+  ```
+  px per unit   0.24   0.48   1.22   3.0
+  0.11.109        19     18     90    90
+  0.11.110        19     57     90    90
+  ```
+
+  18 is the inset shadow behind it: at 0.48 px/unit the border was simply not there. A stroke now
+  takes its own width as the bound instead — `min(feather, width)` — so it is never softer than it
+  is wide and never harder than one sample. The line draws about a pixel wide at partial alpha,
+  which is what a browser does with a hairline, and it holds at every viewing distance because
+  both the feather and the bound are in scene units.
+
+  The cost, stated rather than buried: at 1.22 px/unit one row just inside the border reads 31
+  where it read 18, because a 1-unit border now carries a full unit of feather. One transition row
+  slightly lighter, against a border that disappeared entirely when the console got small.
+
+  At 0.24 px/unit the border is gone either way. A quarter-pixel line cannot be drawn.
+
 ## 0.11.109
 
 ### Fixed
