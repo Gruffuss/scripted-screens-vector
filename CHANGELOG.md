@@ -142,8 +142,6 @@ ScriptedScreens Vector, newest first.
 
 ### Known
 
-- `Tessellator.cs:3048` calls `FeatherWidth` **twice** — once directly and once inside the
-  `FeatherFalloff` argument. Redundant; left alone because the feather is being reworked.
 - The 171–188 ms rebuild remains unexplained and is still not density. See 0.11.107.
 
 ## 0.11.107
