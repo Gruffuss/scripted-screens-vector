@@ -48,47 +48,64 @@ internal static class PageFontTests
 
         var requests = new PageFonts();
         var links = new[] { Inter, Karla };
-        run.Check("FONT first request", requests.Begin(Inter) && requests.Get(Inter)!.State == "pending", "new link pending");
-        run.Check("FONT pending request once", !requests.Begin(Inter), "same URL remains pending");
-        requests.Complete(Inter, new[] { "Inter", "Inter Bold" }, "");
-        run.Check("FONT loaded request once", !requests.Begin(Inter), "same URL remains loaded");
+        run.Check("FONT first request", requests.Begin(Inter, 0) && requests.Get(Inter)!.State == "pending", "new link pending");
+        run.Check("FONT pending request once", !requests.Begin(Inter, 1000), "same URL remains pending");
+        requests.Complete(Inter, new[] { "Inter", "Inter Bold" }, "", 1000);
+        run.Check("FONT loaded request once", !requests.Begin(Inter, 2000), "same URL remains loaded");
         run.Check("FONT loaded faces report", requests.Get(Inter)!.Describe() == "loaded: Inter, Inter Bold", requests.Get(Inter)!.Describe());
-        run.Check("FONT exact URL records", requests.Begin(Inter.ToLowerInvariant()), "URL case is significant");
-        foreach (var failure in new[] { "refused", "download-failed", "disabled", "empty" })
+        run.Check("FONT exact URL records", requests.Begin(Inter.ToLowerInvariant(), 0), "URL case is significant");
+        foreach (var token in new[] { "refused", "download-failed", "disabled", "face-limit", "load-failed", "loader-unavailable", "" })
         {
             var retry = new PageFonts();
-            retry.Begin(Inter);
-            if (failure == "refused") retry.Refuse(Inter, "fonts mod not installed");
-            else retry.Complete(Inter, Array.Empty<string>(), failure == "empty" ? "" : failure);
-            var expected = failure == "empty" ? "download-failed" : failure;
-            run.Check($"FONT reports {failure}", retry.Get(Inter)!.State == expected, retry.Get(Inter)!.Describe());
-            run.Check($"FONT retry after {failure}", retry.Begin(Inter) && retry.Get(Inter)!.State == "pending"
-                && !retry.Begin(Inter), "failed link accepts one fresh attempt");
+            retry.Begin(Inter, 0);
+            if (token == "refused") retry.Refuse(Inter, "fonts mod not installed", 100);
+            else retry.Complete(Inter, Array.Empty<string>(), token, 100);
+            var expected = token == "refused" ? "refused" : "failed";
+            run.Check($"FONT token state: {token}", retry.Get(Inter)!.State == expected, retry.Get(Inter)!.Describe());
+            run.Check($"FONT token retained: {token}", retry.Get(Inter)!.Reason == (token == "refused" ? "fonts mod not installed" : token),
+                retry.Get(Inter)!.Describe());
+            run.Check($"FONT retry just before 60s: {token}", !retry.Begin(Inter, 159.999), "60s measured from failure, not request");
+            run.Check($"FONT retry just after 60s: {token}", retry.Begin(Inter, 160.001)
+                && retry.Get(Inter)!.State == "pending" && !retry.Begin(Inter, 300), "one fresh attempt after cooldown");
+            retry.Refuse(Inter, "again", 400);
+            run.Check($"FONT next failure restarts cooldown: {token}", !retry.Begin(Inter, 459.999), "each failure starts its own interval");
+            run.Check($"FONT retry at exactly 60s: {token}", retry.Begin(Inter, 460), "at least 60 seconds");
         }
+        var capped = new PageFonts();
+        for (var i = 0; i < 48; i++)
+        {
+            var link = $"https://fonts.googleapis.com/css2?family=Face{i}";
+            run.Check($"FONT session link {i + 1} accepted", capped.Begin(link, 0), "within session limit");
+            capped.Refuse(link, "refused", 0);
+        }
+        run.Check("FONT session link 49 refused", !capped.Begin(Inter, 0)
+            && capped.Get(Inter) is { State: "refused", Reason: "page font limit reached (48 links per session)" },
+            capped.Get(Inter)?.Describe() ?? "missing record");
+        run.Check("FONT session limit persists after cooldown", !capped.Begin(Inter, 1000)
+            && !capped.Begin(Karla, 1000), "never download additional links");
+        run.Check("FONT previous link can retry at limit", capped.Begin("https://fonts.googleapis.com/css2?family=Face0", 60),
+            "retries do not consume a distinct link");
         run.Check("FONT unknown link unsettled", !requests.Settled(links), "second link has no request");
-        requests.Begin(Karla);
+        requests.Begin(Karla, 0);
         run.Check("FONT pending link unsettled", !requests.Settled(links)
-            && requests.Mismatch(links, "Inter SemiBold") == null, "no warning until all links settle");
-        requests.Complete(Karla, new[] { "Karla", "Inter" }, "");
+            && requests.Mismatch(links, "Inter SemiBold", true) == null, "no warning until all links settle");
+        requests.Complete(Karla, new[] { "Karla", "Inter" }, "", 0);
         run.Check("FONT all loaded settled", requests.Settled(links), "both complete");
-        var mismatch = requests.Mismatch(links, "Inter SemiBold");
+        var mismatch = requests.Mismatch(links, "Inter SemiBold", true);
         run.Check("FONT mismatch lists arrivals", mismatch == "font \"Inter SemiBold\" did not arrive; this page's fonts delivered: Inter, Inter Bold, Karla",
             mismatch ?? "no warning");
-        run.Check("FONT delivered face matches", requests.Mismatch(links, "Inter Bold") == null, "regular and style names match exactly");
-        run.Check("FONT matching is case sensitive", requests.Mismatch(links, "inter") != null, "TMP face names are exact");
-        requests.Refuse(Karla, "not installed");
+        run.Check("FONT registered elsewhere has no mismatch", requests.Mismatch(links, "Barlow", false) == null,
+            "only TextLayer's current not-registered warning enables mismatch");
+        run.Check("FONT missing family has mismatch", requests.Mismatch(links, "Barlow", true) != null, "fallback warning enables mismatch");
+        run.Check("FONT delivered face matches", requests.Mismatch(links, "Inter Bold", true) == null, "regular and style names match exactly");
+        run.Check("FONT matching is case sensitive", requests.Mismatch(links, "inter", true) != null, "TMP face names are exact");
+        requests.Refuse(Karla, "not installed", 0);
         run.Check("FONT failure also settled", requests.Settled(links), "refusal does not wait for a callback");
-        requests.Complete(Inter, Array.Empty<string>(), "disabled");
-        run.Check("FONT empty delivery warning", requests.Mismatch(links, "Inter") == "font \"Inter\" did not arrive; this page's fonts delivered: none",
-            requests.Mismatch(links, "Inter") ?? "no warning");
+        requests.Complete(Inter, Array.Empty<string>(), "disabled", 0);
+        run.Check("FONT empty delivery warning", requests.Mismatch(links, "Inter", true) == "font \"Inter\" did not arrive; this page's fonts delivered: none",
+            requests.Mismatch(links, "Inter", true) ?? "no warning");
         run.Check("no FONT no warnings", !requests.Settled(Array.Empty<string>())
-            && requests.Mismatch(Array.Empty<string>(), "Existing") == null && requests.Mismatch(links, null) == null,
+            && requests.Mismatch(Array.Empty<string>(), "Existing", true) == null && requests.Mismatch(links, null, true) == null,
             "no declarations or no requested face");
-        run.Check("FONT fallback cannot skip", !PageFonts.FaceResolved("Inter", "LiberationSans")
-            && !PageFonts.FaceResolved("Inter", null), "retry unresolved requested face");
-        run.Check("FONT resolved can skip", PageFonts.FaceResolved("Inter", "Inter"), "requested asset assigned");
-        run.Check("FONT differently cased cannot skip", !PageFonts.FaceResolved("Inter", "inter"), "face comparison is exact");
-        run.Check("no FONT skip unchanged", PageFonts.FaceResolved(null, "LiberationSans")
-            && PageFonts.FaceResolved("", null), "no requested family preserves skip");
     }
 }

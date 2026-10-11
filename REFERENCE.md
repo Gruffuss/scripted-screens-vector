@@ -261,8 +261,8 @@ vanishes. A longer level of bracket has no such collision.
 Grammar: one node per line, `OP` then `key=value`, `{` … `}` for children, `#` comments to
 end of line. `SCENE` carries the viewbox, `fit`, `ztext`, the debug switches, and the root's
 inherited paint defaults written as bare keys (`SCENE w=200 h=240 f=#5FD9A8 fea=0`); `DEFS { … }`
-holds gradients and clips. There is no `style` key in the text form — a map cannot be written, so
-`SCENE style=…` is read as a string and ignored. Same op names, keys and expression syntax as the
+holds fonts, symbols, gradients and clips. There is no `style` key in the text form — a map
+cannot be written, so `SCENE style=…` is read as a string and ignored. Same op names, keys and expression syntax as the
 table form.
 
 Values: a plain number is a number, `[a,b,c]` is an array and nests, anything else is a
@@ -387,7 +387,8 @@ design decision.
 **The unknown-attribute check is a union of every key the renderer reads**, so it catches a
 typo — `fille`, `strke` — which otherwise vanishes silently because unknown keys are ignored
 by design. It does not catch a real key on the wrong op. `USE` and `SYM` are exempt, since
-symbol parameters are arbitrary by definition.
+symbol parameters are arbitrary by definition. `FONT` accepts only `op` and `src`; all other
+keys on it are reported as unknown attributes.
 
 ### Enum words
 
@@ -1164,7 +1165,7 @@ container, where it will be clipped away and look like nothing happened.
 | `fo` | opacity `0..1`, as on any shape; multiplied by the enclosing group's `o` |
 | `align` | `left` (default), `center`, `right`, `justified` (extra width goes between words, as CSS) |
 | `valign` | `top` (default), `middle`, `bottom` |
-| `font` | a registered TMP face, named exactly: `Family` for the regular weight and `Family Style` otherwise — `Barlow`, `Barlow Bold` — e.g. from the companion fonts mod or a `FONT` def. Case and spaces count. Omitted draws in the game's own font. **A name nothing is registered under draws the game's own font and is reported**, in the log and under `vector_stats`' TEXT section, since 0.11.102. A label using the fallback retries lookup on every rebuild; once resolved, its warning clears. A `FONT` callback triggers a rebuild for every current scene declaring that link |
+| `font` | a registered TMP face, named exactly: `Family` for the regular weight and `Family Style` otherwise — `Barlow`, `Barlow Bold` — e.g. from the companion fonts mod or a `FONT` def. Case and spaces count. Omitted draws in the game's own font. **A name nothing is registered under draws the game's own font and is reported**, in the log and under `vector_stats`' TEXT section, since 0.11.102. A page's own `FONT` callback re-applies its labels once; a successful lookup clears the warning. A face registered by another route after the page has drawn still needs a scene re-push, as before |
 | `weight` | `bold`, a number ≥ 600, or `normal`; omitted draws the face's regular weight |
 | `cspace` | character spacing, default `0` |
 | `kern` | `0` turns pair kerning off for this label; on otherwise. Only a font that carries kerning pairs is affected, so a label on the game's own font is unchanged either way |
@@ -1992,21 +1993,23 @@ DEFS {
 T x=0 y=0 w=100 h=20 text="Hello" font="Inter"
 ```
 
-`src` is the only FONT attribute and must be a non-empty string URL. Links keep declaration
+`FONT` accepts only `op` and `src`; `src` must be a non-empty string URL. Links keep declaration
 order and exact duplicates are requested once. FONT is a definition, so it cannot appear
 at the scene root. Table form is `defs = { { op = "FONT", src = "https://…" } }`.
 
 Only the fonts mod downloads fonts, under its own `PageFontHosts` host allowlist (Google
-Fonts by default). Vector does not extend that allowlist. The fonts mod permits **48 page
-faces per game session**, across all requests. Each player fetches their own fonts; design
-the page to read fine in the game's own font for a player who never receives them.
+Fonts by default). Vector does not extend that allowlist. Vector requests at most **48 distinct
+links per process**; further links are refused with `page font limit reached (48 links per session)`.
+The fonts mod also permits **48 page faces per game session**, across all requests. Each
+player fetches their own fonts; design the page to read fine in the game's own font for a
+player who never receives them.
 
 Face names come from the font file's metadata, **not from the link**: `Family` for Regular,
 `Family Style` otherwise. A request for `wght@400;700` can deliver `Inter` and `Inter Bold`.
 Use those exact names, including case and spaces, in a T node's `font=`. When a font arrives,
-every current scene declaring its link rebuilds so labels resolve the new face. A label
-still using the fallback retries its requested face on each rebuild; a successful lookup
-clears its "not registered" warning.
+every current scene declaring its link re-applies its labels once, including rich-text fonts
+and `fl` first-line fonts. A successful face lookup clears its "not registered" warning.
+A face registered by another route after a page has drawn still needs a scene re-push, as before.
 
 `vector_stats` reports each link under **FONTS**:
 
@@ -2015,12 +2018,22 @@ clears its "not registered" warning.
 | `pending` | the fonts mod accepted the request; waiting for its callback |
 | `loaded` | includes the exact face names that arrived |
 | `refused` | no callback will follow; includes the known reason, such as the fonts mod being absent, an incompatible API, or a URL/host/loader refusal |
-| `download-failed` | an accepted request delivered no faces; includes the reason token when available |
-| `disabled` | the fonts mod reported that loading is disabled |
+| `failed` | an accepted request delivered no faces; shows the fonts mod's reason token unchanged |
+
+Failure reason tokens:
+
+| Token | Meaning |
+|-------|---------|
+| `download-failed` | the fonts mod could not download the font |
+| `disabled` | the player switched that font off in the fonts mod's settings |
+| `face-limit` | the fonts mod reached its session face limit |
+| `load-failed` | the fonts mod could not load the downloaded font |
+| `loader-unavailable` | the fonts mod's font loader was unavailable |
 
 Pending and loaded links are requested at most once per process. A failed or refused link
-is tried again the next time a scene declaring it is applied. Once all this scene's FONT
-links have settled, a T node asking for an undelivered face gets a warning such as
+may be tried again on a scene apply only after at least 60 seconds since its failure; the
+48-link session limit still applies. Once all this scene's FONT links have settled, only a
+T family currently reported as not registered under TEXT gets a warning such as
 `font "Inter SemiBold" did not arrive; this page's fonts delivered: Inter, Inter Bold`.
 If none arrived, the list says `none`. Scenes without FONT declarations make no page font
 requests and receive no page font diagnostics.

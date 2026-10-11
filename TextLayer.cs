@@ -107,6 +107,18 @@ internal sealed class TextLayer
     /// </remarks>
     private readonly List<TextPlacement?> _applied = new();
 
+    internal void RefreshFonts()
+    {
+        _applied.Clear();
+        _firstLines.Clear();
+        // TMP's unchanged text setter does nothing; ForceMeshUpdate reparses rich fonts,
+        // including fl and shadow copies, even on inactive labels, once per FONT callback.
+        foreach (var mask in _masks)
+            if (mask != null)
+                foreach (var label in mask.GetComponentsInChildren<TextMeshProUGUI>(true))
+                    label.ForceMeshUpdate(true);
+    }
+
     private void Show(int index, TextPlacement placement)
     {
         while (_pool.Count <= index)
@@ -124,11 +136,9 @@ internal sealed class TextLayer
         // Nothing about this label changed since the last rebuild, and it is in the state that
         // rebuild left it: leave it alone. The two health checks are the repairs further down
         // this method -- an empty glyph mesh after a capture, a renderer with no material --
-        // so skipping can never freeze a label that still needed one of them. An unresolved
-        // font also needs work: its face may have registered since the last rebuild.
+        // so skipping can never freeze a label that still needed one of them.
         if (_applied[index] is { } last
             && last.SameAs(placement)
-            && PageFonts.FaceResolved(placement.Font, label.font == null ? null : label.font.name)
             && label.gameObject.activeSelf
             && (label.mesh == null || label.mesh.vertexCount > 0 || string.IsNullOrEmpty(placement.Text))
             && label.canvasRenderer != null && label.canvasRenderer.materialCount > 0)
@@ -971,6 +981,9 @@ internal sealed class TextLayer
 
     /// <summary>One of each distinct complaint, not one per label per frame.</summary>
     private readonly HashSet<string> _warned = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _fontWarnings = new(StringComparer.Ordinal);
+
+    internal bool FontNotRegistered(string? family) => family != null && _fontWarnings.ContainsKey(family);
 
     /// <summary>Everything this layer has warned about, for the vector_stats report.</summary>
     /// <remarks>
@@ -1005,24 +1018,26 @@ internal sealed class TextLayer
     /// </remarks>
     private void ApplyFont(TextMeshProUGUI label, string family)
     {
-        var warning = $"font \"{family}\" is not registered; drawn in the game's own font";
-        if (label.font != null && label.font.name == family)
+        if (label.font == null || label.font.name != family)
         {
-            _warned.Remove(warning);
-            return;
+            if (MaterialReferenceManager.TryGetFontAsset(TMP_TextUtilities.GetSimpleHashCode(family), out var asset))
+                label.font = asset;
+            else
+            {
+                if (!_fontWarnings.TryGetValue(family, out var warning))
+                {
+                    warning = $"font \"{family}\" is not registered; drawn in the game's own font";
+                    _fontWarnings.Add(family, warning);
+                }
+                Warn(warning);
+                if (_defaultFont != null && label.font != _defaultFont)
+                    label.font = _defaultFont;
+                return;
+            }
         }
 
-        if (MaterialReferenceManager.TryGetFontAsset(TMP_TextUtilities.GetSimpleHashCode(family), out var asset))
-        {
-            label.font = asset;
-            _warned.Remove(warning);
-            return;
-        }
-
-        Warn(warning);
-
-        if (_defaultFont != null && label.font != _defaultFont)
-            label.font = _defaultFont;
+        if (_fontWarnings.Remove(family, out var previousWarning))
+            _warned.Remove(previousWarning);
     }
 
     private static void Place(RectTransform rect, Rect where)

@@ -106,7 +106,7 @@ Element A carries these props:
 | `scene` | string | scene id, pairs with element B |
 | `w`, `h` | number | viewbox dimensions |
 | `fit` | string | `stretch` \| `contain` \| `cover` |
-| `defs` | array | gradient and clip-path declarations (§5.3, §7) |
+| `defs` | array | font, symbol, gradient and clip-path declarations (§5.3, §7) |
 | `root` | array | the node list |
 
 Element B carries `scene` (matching id) and `data` (a map of named values, §8).

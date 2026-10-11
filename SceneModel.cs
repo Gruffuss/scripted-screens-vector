@@ -2383,6 +2383,7 @@ internal static class SceneParser
         if (defs == null || defs.Value.Type != SS.UiValueType.Array || defs.Value.Array == null)
             return;
 
+        HashSet<string>? fontLinks = null;
         foreach (var entry in defs.Value.Array)
         {
             if (entry.Type != SS.UiValueType.Map || entry.Map == null)
@@ -2403,7 +2404,7 @@ internal static class SceneParser
                 var link = PropString(map, "src");
                 if (string.IsNullOrEmpty(link))
                     scene.Problem("FONT: src needs a non-empty string URL");
-                else if (!scene.FontLinks.Contains(link!))
+                else if ((fontLinks ??= new HashSet<string>(StringComparer.Ordinal)).Add(link!))
                     scene.FontLinks.Add(link!);
                 continue;
             }

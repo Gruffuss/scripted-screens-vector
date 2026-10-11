@@ -519,9 +519,13 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
     internal static void PageFontChanged(string link)
     {
+        FontUsers.RemoveAll(g => g == null);
         foreach (var graphic in FontUsers)
-            if (graphic != null && graphic._scene!.FontLinks.Contains(link))
+            if (graphic._scene!.FontLinks.Contains(link))
+            {
                 graphic._needsRebuild = true;
+                graphic._text?.RefreshFonts();
+            }
     }
 
     /// <summary>
@@ -1542,7 +1546,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         {
             var request = PageFontBridge.Requests.Get(link);
             into.AppendLine($"    {link}: {request?.Describe() ?? "pending"}");
-            problem |= request is { State: "refused" or "download-failed" or "disabled" };
+            problem |= request is { State: "refused" or "failed" };
         }
 
         if (!PageFontBridge.Requests.Settled(_scene.FontLinks))
@@ -1555,7 +1559,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             var node = pending.Pop();
             if (node.Op == VecOp.Text)
             {
-                var warning = PageFontBridge.Requests.Mismatch(_scene.FontLinks, node.FontFamily);
+                var warning = PageFontBridge.Requests.Mismatch(_scene.FontLinks, node.FontFamily,
+                    _text?.FontNotRegistered(node.FontFamily) == true);
                 if (warning != null && warned.Add(warning))
                 {
                     into.AppendLine($"    {warning}");

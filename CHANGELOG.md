@@ -9,12 +9,14 @@ ScriptedScreens Vector, newest first.
 - `FONT src="…"` in `DEFS` requests page webfonts through the optional ScriptedScreens Fonts
   mod. `vector_stats` reports each link's state and delivered face names, and warns about
   requested faces that did not arrive once all links settle. Font arrivals rebuild every
-  current scene declaring the link; failed requests retry when a scene is applied again.
+  current scene declaring the link; failed requests retry on a scene apply after at least
+  60 seconds. At most 48 distinct links are requested per process.
 
 ### Fixed
 
-- An unchanged label using the fallback font now retries its requested face on each rebuild,
-  so a font registering later can replace the fallback and clear the warning.
+- Labels refresh when the page's own `FONT` link delivers, including rich-text and first-line
+  fonts; a successful face lookup clears the fallback warning. A face registered by any other
+  route after a page has drawn still needs a scene re-push, as before.
 
 ## 0.11.110
 
