@@ -164,6 +164,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 if (breakdown.Length > 0)
                     ScriptedScreensVectorPlugin.Log?.LogInfo($"    by op: {breakdown}");
 
+                if (graphic._ringFeatherMs > 0d)
+                    ScriptedScreensVectorPlugin.Log?.LogInfo(
+                        $"    ring feather: {graphic._ringFeatherMs / graphic._rebuilds:F2}ms/rebuild");
+
                 if (graphic._bandSampleMs + graphic._bandStripMs + graphic._bandFeatherMs > 0d)
                 {
                     ScriptedScreensVectorPlugin.Log?.LogInfo(
@@ -190,6 +194,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 graphic._bandSampleMs = 0d;
                 graphic._bandStripMs = 0d;
                 graphic._bandFeatherMs = 0d;
+                graphic._ringFeatherMs = 0d;
                 System.Array.Clear(graphic._opMs, 0, graphic._opMs.Length);
             }
         }
@@ -378,6 +383,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     private double _bandSampleMs;
     private double _bandStripMs;
     private double _bandFeatherMs;
+
+    private double _ringFeatherMs;
     private int _bandQuads;
 
     /// <summary>The tessellation job in flight, or null.</summary>
@@ -410,6 +417,14 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>Reused while dropping finished glides; a dictionary cannot be edited mid-walk.</summary>
     private readonly List<string> _finishedGlides = new();
     private float _jobScreenPixels = -1f;
+
+    /// <summary>The last scale the projection actually resolved, for when it next declines.</summary>
+    /// <remarks>
+    /// Deliberately NOT reset with the stats counters: it is a property of where the surface is
+    /// on screen, not of a reporting window, and its whole purpose is to outlive the frames where
+    /// the measurement fails.
+    /// </remarks>
+    private float _lastKnownScale = -1f;
     private readonly TessellationStats _stats = new();
 
     private readonly EvalContext _context = new();
@@ -2320,6 +2335,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         var screenScale = ScreenPixelsPerCanvasUnit();
         var known = screenScale > 0f;
+        if (known)
+            _lastKnownScale = screenScale;
 
         _jobScreenPixels = known ? rect.width * screenScale : -1f;
         _needsRebuild = false;
@@ -2330,7 +2347,23 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         var context = _context;
         var builder = _builder;
         var stats = _stats;
-        var scale = known ? screenScale : 1f;
+        // An unknown scale falls back to the LAST KNOWN one, never to 1.
+        //
+        // `1f` means "one screen pixel per canvas unit", which is what a console viewed from
+        // extraordinarily far away would measure -- and every screen-pixel-derived quantity is
+        // computed from it. `FeatherWidth` is `AutoFeatherPixels / (frame.Scale * ScreenScale)`,
+        // so at the real 60 px/unit the auto feather should be about 0.02 canvas units and the
+        // fallback makes it **1.3 units**, roughly sixty times too wide, on EVERY shape at once.
+        // Reported from the console as "ALL vectors became blurry when too close", with TMP text
+        // staying sharp beside them because text never consults this scale.
+        //
+        // The trigger is `ScreenPixelsPerCanvasUnit` declining, which it does correctly: walk
+        // close enough and a corner of the surface crosses the camera's near plane, where the
+        // projection is meaningless. Declining is right; substituting a number that is wrong by
+        // orders of magnitude is not. The surface was being drawn a frame ago, so the scale from
+        // then is a far better estimate than 1 -- it is at worst slightly stale, where 1 is
+        // categorically wrong. 1 survives only as the first-ever value, before anything is known.
+        var scale = known ? screenScale : (_lastKnownScale > 0f ? _lastKnownScale : 1f);
 
         _job = Task.Run(() =>
         {
@@ -2545,6 +2578,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         _bandSampleMs += _stats.BandSampleMs;
         _bandStripMs += _stats.BandStripMs;
         _bandFeatherMs += _stats.BandFeatherMs;
+        _ringFeatherMs += _stats.RingFeatherMs;
         _bandQuads = _stats.BandQuads;
 
         _hits.Clear();

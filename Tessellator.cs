@@ -181,6 +181,13 @@ internal static class Tessellator
     [ThreadStatic] internal static double BandSampleMs;
     [ThreadStatic] internal static double BandStripMs;
     [ThreadStatic] internal static double BandFeatherMs;
+
+    /// <summary>
+    /// Ring-feather time. The band feather above only runs for a `YS`, so `BandFeatherMs`
+    /// stayed at zero on ordinary pages and the "feather Xms" line never printed -- two
+    /// sessions then spent a day reasoning about a feather cost nobody had measured.
+    /// </summary>
+    [ThreadStatic] internal static double RingFeatherMs;
     [ThreadStatic] internal static int BandQuads;
 
     [ThreadStatic] private static double[]? _opMilliseconds;
@@ -323,6 +330,7 @@ internal static class Tessellator
         stats.BandSampleMs = BandSampleMs;
         stats.BandStripMs = BandStripMs;
         stats.BandFeatherMs = BandFeatherMs;
+        stats.RingFeatherMs = RingFeatherMs;
         stats.BandQuads = BandQuads;
         stats.Shapes = shapes;
         stats.DrewTime = DrewTime || scene.DefsUseTime;
@@ -377,6 +385,7 @@ internal static class Tessellator
         BandSampleMs = 0d;
         BandStripMs = 0d;
         BandFeatherMs = 0d;
+        RingFeatherMs = 0d;
         BandQuads = 0;
         DrewTime = false;
 
@@ -3047,7 +3056,11 @@ internal static class Tessellator
         // and disappeared and the whole thing shimmered.
         var feather = FeatherWidth(node, context, frame.Scale) * FeatherFalloff(contour, FeatherWidth(node, context, frame.Scale));
         if (feather > 0.0001f)
+        {
+            var ringMark = Stopwatch.GetTimestamp();
             FeatherRing(vh, contour, paint, feather, frame.Matrix, frame.Clip, shared);
+            RingFeatherMs += Elapsed(ringMark);
+        }
     }
 
     /// <summary>

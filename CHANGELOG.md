@@ -2,6 +2,42 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.108
+
+### Fixed
+
+- **ALL vector shapes went blurry when the camera got close.** An unknown screen scale fell back
+  to `1f`, which means "one screen pixel per canvas unit" — what a console viewed from
+  extraordinarily far away would measure. Every screen-pixel-derived quantity is computed from it,
+  so `FeatherWidth` (`AutoFeatherPixels / (frame.Scale * ScreenScale)`) produced **1.3 canvas
+  units** of auto feather instead of about 0.02 at a real 60 px/unit — roughly sixty times too
+  wide, on every shape at once. TextMeshPro labels never consult that scale, so they stayed razor
+  sharp beside it, which is how the fault was spotted from the console: "ALL vectors became blurry
+  when too close" while the text did not.
+  The trigger is `ScreenPixelsPerCanvasUnit` declining, which it does **correctly**: walk close
+  enough and a corner of the surface crosses the camera's near plane, where the projection is
+  meaningless (measured in game: corners at z 0.011–0.022 against a 0.010 near plane, corner spans
+  of 32704–80845 px, depth ratios 11.3x–42.8x). Declining is right; substituting a number wrong by
+  orders of magnitude is not. It now falls back to the **last scale the projection actually
+  resolved**, which is at worst slightly stale where `1` is categorically wrong. `1` survives only
+  as the first-ever value, before anything has been measured.
+  Reported as a *measurement* fault from the console before it was found in code, and that reading
+  was right.
+
+### Diagnostics
+
+- **The ring feather is timed at last.** Only the band feather fed `BandFeatherMs`, and the band
+  path runs for a `YS` only — so on ordinary pages the counter stayed at zero, the `feather Xms`
+  line never printed, and two sessions spent a day reasoning about a feather cost that nobody had
+  ever measured. `RingFeatherMs` now times the contour feather every filled shape pays and prints
+  as `ring feather: X.XXms/rebuild`.
+
+### Known
+
+- `Tessellator.cs:3048` calls `FeatherWidth` **twice** — once directly and once inside the
+  `FeatherFalloff` argument. Redundant; left alone because the feather is being reworked.
+- The 171–188 ms rebuild remains unexplained and is still not density. See 0.11.107.
+
 ## 0.11.107
 
 ### Fixed

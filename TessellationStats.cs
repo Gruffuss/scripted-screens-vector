@@ -21,6 +21,9 @@ internal sealed class TessellationStats
 
     internal double BandFeatherMs;
 
+    /// <summary>Ring-feather time, the contour feather every filled shape pays.</summary>
+    internal double RingFeatherMs;
+
     internal int BandQuads;
 
     internal int Shapes;
