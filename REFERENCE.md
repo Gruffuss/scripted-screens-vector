@@ -1263,7 +1263,9 @@ text's box (`x y w h`), not the glyphs' ink. Rich-text `<color>` tags multiply i
 face only: text shadows and the outline keep their own colours.
 
 **`ow` outlines the glyphs** inside the text engine's own shader, half inside the letter's edge
-and half outside, as CSS `-webkit-text-stroke` does. How wide it can go depends on the font's
+and half outside, as CSS `-webkit-text-stroke` does: `ow = 8` reaches 4 units outside the
+letters and 4 inside. Up to 0.11.112 it drew about 1.7 to 1.8 times that, depending on the
+font, so a page tuned against those versions now draws a thinner outline. How wide it can go depends on the font's
 atlas padding; past it the outline is capped at the widest the font allows and the surface's
 TEXT warnings say so. A text shadow is cast by the letters, not by their outline.
 

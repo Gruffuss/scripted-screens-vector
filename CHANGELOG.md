@@ -2,6 +2,25 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.113
+
+### Fixed
+
+- **A text outline drew about 1.8 times as wide as `ow` says.** REFERENCE promises CSS
+  `-webkit-text-stroke`, half the width outside the letters and half inside; `ow = 8` at size 96
+  reached 7-8 px outside on LiberationSans and 6-7 on Barlow, where CSS puts 4, and the inward
+  half ate the stems whole. The width handed to TextMeshPro left out two things its shader does:
+  it draws the outline that far on EACH side of the edge, and it scales it by a ratio it
+  recomputes from the width itself. The width is now solved against both:
+  `_OutlineWidth = ow * pointSize / (2 * (gradientScale - 1) * size)` while that stays under
+  `1 - other`, where `other` is the material's bold weight over 4 plus face dilate plus
+  softness; past it TMP shrinks its ratio and the width is solved for that,
+  `target * other / (gradientScale - 1 - target)` with `target = ow * pointSize / (2 * size)`;
+  and it is capped at 1, the widest the font's padding allows, with the shortfall reported as
+  before. Up to 0.11.112 it was `ow * pointSize / (gradientScale * size)`. **A page tuned against
+  the old width now draws a thinner outline.** Found and measured in game by the fonts mod's
+  owner; the headless check was watched failing on the old formula at the same 7.2 px.
+
 ## 0.11.112
 
 ### Added

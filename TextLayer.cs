@@ -360,12 +360,14 @@ internal sealed class TextLayer
             return;
         }
 
-        var width = placement.OutlineWidth * sampling / (gradient * Mathf.Max(1f, placement.Size));
-        if (width > 1f)
-        {
-            Warn($"text outline is wider than the font's SDF padding allows; reduced to {100f / width:F0}%");
-            width = 1f;
-        }
+        // TMP recomputes its outline ratio from the bold weight, face dilate and softness as well as
+        // the width itself, so the inversion needs them. See TextOutline for the measurement.
+        float Read(int id) => shared.HasProperty(id) ? shared.GetFloat(id) : 0f;
+        var other = Mathf.Max(Read(ShaderUtilities.ID_WeightNormal), Read(ShaderUtilities.ID_WeightBold)) / 4f
+                    + Read(ShaderUtilities.ID_FaceDilate) + Read(ShaderUtilities.ID_OutlineSoftness);
+        var width = TextOutline.Width(placement.OutlineWidth, placement.Size, sampling, gradient, other, out var drawn);
+        if (drawn < 0.999f)
+            Warn($"text outline is wider than the font's SDF padding allows; reduced to {100f * drawn:F0}%");
 
         var material = label.fontMaterial;
         if (material == null)

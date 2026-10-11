@@ -203,6 +203,7 @@ internal static class Program
         PatchPathTests.Run(run);
         ImageDecodeTests.Run(run);
         ScaleChoiceTests.Run(run);
+        TextOutlineTests.Run(run);
         EasingTests.Curves(run);
         EasingTests.Payload(run);
 
