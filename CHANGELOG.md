@@ -2,6 +2,39 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.106
+
+### Fixed
+
+- **A degenerate projection no longer drives the tessellator.** `ScreenPixelsPerCanvasUnit`
+  rejected a point behind the camera with a hardcoded `z <= 0.01f`, but the perspective divide
+  blows up as `z` approaches zero and everything between the camera's real near plane and 1 cm
+  is clipped and never drawn — so a reading from there was garbage the renderer then worked
+  from. The threshold is the camera's own `nearClipPlane` now. Its companion sanity bound was
+  `pixels > 100000f`, about 26x a 4K screen, which rejected nothing such a projection could
+  produce; it is four times the larger screen dimension now, and logs a warning when it trips
+  instead of failing silently.
+  Measured in game 2026-10-11: a surface reported **11723 px wide** (six times any other
+  reading, steady across seven samples) and its rebuild went **10 ms to 171-188 ms for the same
+  221 rect ops and FEWER vertices** — 98956 verts at 177.87 ms against 206876 verts at
+  10.34 ms — because every px-driven density term saturated at once. Frame time went 5 ms to
+  40 ms and recovered on its own when the reading did.
+  Not blur: `dense` was False in all 30 logged blur lines, `points/contour` 48 in every one,
+  rings span only 47-96 against a hard `MaxRings` of 96, and px/unit reaches 60.6 in samples
+  that rebuild in 10 ms. Not geometry volume either, per the vertex counts above. Both were
+  theories of mine, and the measurements killed them.
+
+- **Diagnostics rates were overstated whenever frames were slow.** The log reporter divided
+  rebuild counts and load percentages by the constant `ReportIntervalSeconds` (5 s), but the
+  window is only ever *at least* five seconds — `ReportIfDue` is checked from Update, so a
+  frame hitch carries it past. A scene reported **90 Hz against a MaximumHz of 60** (450
+  rebuilds in a window that holds about 300) beside a `worst 5077.21 ms` frame in the same
+  log: a stall that stretches the window to ~10 s and doubles every rate. It divides by the
+  measured window now. `vector_stats` already had this fix (`_countersSince`); its other
+  consumer, the log line, never got it — so `Hz`, `% of a frame on the main thread` and
+  `% of a worker core` were all inflated by the overshoot, in the one situation where anyone
+  reads them. Earlier worker-load figures from this reporter should not be trusted.
+
 ## 0.11.105
 
 Thirteen faults from the reference sweep, every one of them a silence or a disagreement between

@@ -44,6 +44,20 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         private static readonly Stopwatch Timer = new();
         private static float _nextReport;
 
+        /// <summary>When the last report fired, so a rate can be divided by the REAL window.</summary>
+        /// <remarks>
+        /// The window is "at least five seconds", never exactly five: `ReportIfDue` is checked
+        /// from Update, so a frame hitch carries it straight past. Dividing by the constant
+        /// overstates every rate and every percentage by the overshoot -- and the overshoot is
+        /// largest exactly when frames are slow, which is when these numbers get read.
+        /// Measured 2026-10-11: a scene reported **90 Hz against a MaximumHz of 60**, which is
+        /// 450 rebuilds in a window that can hold about 300, beside a `worst 5077.21 ms` frame
+        /// in the same log -- a stall that stretches a 5 s window to 10 s and doubles the rate.
+        /// `vector_stats` already fixed this with `_countersSince`; the log reporter, its other
+        /// consumer, was left dividing by the constant.
+        /// </remarks>
+        private static float _lastReport = -1f;
+
         internal static void Register(VectorGraphic graphic)
         {
             if (!Live.Contains(graphic))
@@ -67,6 +81,13 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             if (now < _nextReport)
                 return;
 
+            // The real window, not the nominal one. First report has no previous mark, so it
+            // falls back to the nominal interval rather than dividing by ~0.
+            var window = _lastReport < 0f ? ReportIntervalSeconds : now - _lastReport;
+            if (window < 0.001f)
+                window = ReportIntervalSeconds;
+
+            _lastReport = now;
             _nextReport = now + ReportIntervalSeconds;
 
             foreach (var graphic in Live)
@@ -87,9 +108,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                     continue;
                 }
 
-                var hz = graphic._rebuilds / ReportIntervalSeconds;
+                var hz = graphic._rebuilds / window;
                 var perRebuild = graphic._milliseconds / graphic._rebuilds;
-                var load = graphic._milliseconds / (ReportIntervalSeconds * 1000d) * 100d;
+                var load = graphic._milliseconds / (window * 1000d) * 100d;
 
                 var tessellate = graphic._tessellateMs / graphic._rebuilds;
                 var upload = graphic._uploadMs / graphic._rebuilds;
@@ -98,12 +119,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 // the big number no longer costs frames and reading it as though it does
                 // would send the next round of tuning straight back at the wrong target.
                 // Main-thread cost is the upload, and only the upload.
-                var mainThread = graphic._uploadMs / (ReportIntervalSeconds * 1000d) * 100d;
+                var mainThread = graphic._uploadMs / (window * 1000d) * 100d;
 
                 // Worker load from CPU time, not stopwatch time. A descheduled worker keeps
                 // accumulating wall milliseconds while burning no CPU, so the stopwatch
                 // figure is an upper bound and can overstate load badly on a busy machine.
-                var cpuLoad = graphic._tessellateCpuMs / (ReportIntervalSeconds * 1000d) * 100d;
+                var cpuLoad = graphic._tessellateCpuMs / (window * 1000d) * 100d;
                 var workerText = graphic._tessellateCpuMs > 0d
                     ? $"{cpuLoad:F1}% of a worker core (cpu; {load:F1}% wall)"
                     : $"{load:F1}% of a worker core (wall)";
@@ -1791,6 +1812,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// detail costs performance; failing toward minimum detail makes the mod look broken,
     /// and that is the wrong way round.
     /// </remarks>
+    private static System.DateTime _lastScaleReport = System.DateTime.MinValue;
+
     private float ScreenPixelsPerCanvasUnit()
     {
         var rect = rectTransform.rect;
@@ -1819,12 +1842,42 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         var b = camera.WorldToScreenPoint(right);
 
         // Behind the camera: the projection wraps and the distance is meaningless.
-        if (a.z <= 0.01f || b.z <= 0.01f)
+        //
+        // The threshold is the camera's OWN near plane, not a hardcoded 0.01. One centimetre
+        // was a stand-in for "in front of the camera", but the perspective divide blows up
+        // as z approaches zero, and everything between the near plane and 0.01 is clipped and
+        // never drawn anyway -- so a reading from there is garbage the renderer then works
+        // from. Measured 2026-10-11: a surface reported 11723 px wide (six times any other
+        // reading, steady across seven samples) and the rebuild went 10 ms -> 171-188 ms for
+        // the SAME 221 rect ops and FEWER vertices (98956 verts at 177.87 ms against 206876
+        // at 10.34 ms), because every px-driven density term saturated at once.
+        var near = Mathf.Max(0.01f, camera.nearClipPlane);
+        if (a.z <= near || b.z <= near)
             return -1f;
 
         var pixels = Vector2.Distance(new Vector2(a.x, a.y), new Vector2(b.x, b.y));
-        if (pixels <= 0.01f || pixels > 100000f)
+
+        // Backstop, not the real guard: the near-plane test above is. 100000 px was 26 times a
+        // 4K screen, so it rejected nothing a degenerate projection could produce -- the 11723 px
+        // reading sailed through it. Four times the larger screen dimension keeps every genuine
+        // close-up (4393 px measured at a normal 26 ms/rebuild) and refuses the rest. Logged
+        // rather than silent, throttled, because if this ever trips the near-plane fix missed a
+        // case and the numbers are the only way to find out which.
+        var ceiling = 4f * Mathf.Max(Screen.width, Screen.height);
+        if (pixels <= 0.01f || pixels > ceiling)
+        {
+            var now = System.DateTime.UtcNow;
+            if ((now - _lastScaleReport).TotalSeconds > 5d)
+            {
+                _lastScaleReport = now;
+                ScriptedScreensVectorPlugin.Log?.LogWarning(
+                    $"scale: \"{_sceneId}\" projected {pixels:0} px wide over {rect.width:0.0} canvas units "
+                    + $"(ceiling {ceiling:0}, screen {Screen.width}x{Screen.height}, "
+                    + $"z {a.z:0.000}/{b.z:0.000}, near {near:0.000}) -- treating the scale as unknown");
+            }
+
             return -1f;
+        }
 
         return pixels / rect.width;
     }
