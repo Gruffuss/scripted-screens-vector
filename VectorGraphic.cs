@@ -1857,26 +1857,36 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         var pixels = Vector2.Distance(new Vector2(a.x, a.y), new Vector2(b.x, b.y));
 
-        // Backstop, not the real guard: the near-plane test above is. 100000 px was 26 times a
-        // 4K screen, so it rejected nothing a degenerate projection could produce -- the 11723 px
-        // reading sailed through it. Four times the larger screen dimension keeps every genuine
-        // close-up (4393 px measured at a normal 26 ms/rebuild) and refuses the rest. Logged
-        // rather than silent, throttled, because if this ever trips the near-plane fix missed a
-        // case and the numbers are the only way to find out which.
+        // Reject only genuinely degenerate output -- NaN and infinity territory. A grazing-angle
+        // view is LEGITIMATE input: the player standing at an angle to a console. Discarding its
+        // scale is a mitigation that breaks correct rendering, not a fix, and 0.11.106 did exactly
+        // that: unknown scale falls back to 1, which collapses a sigma-5 blur from 96 rings to
+        // about 8 (`Clamp(CeilToInt(reach * 1 * 1 / 2), 4, 96)`). Traded correct output for a cost
+        // that was a self-correcting transient, which is the wrong way round.
+        if (pixels <= 0.01f || pixels > 100000f)
+            return -1f;
+
+        // DIAGNOSTIC ONLY -- deliberately changes nothing. A span wider than four screens means
+        // the quad is strongly foreshortened, where a single scalar px-per-unit is a poor model:
+        // measured 2026-10-11, corners at z 0.515 and 0.151, so the true scale varies 3.4x across
+        // the surface. Logged to accumulate the z-ratio data, because the real cost is STILL
+        // unexplained -- 10 ms to 171-188 ms for the SAME 221 rect ops and FEWER vertices (98956
+        // against 206876) -- and that signature, time up with geometry down, points at work being
+        // built and then discarded, not at density. Density was already ruled out: `dense` False
+        // in all 30 logged blur lines, points/contour 48 in every one, rings hard-capped at 96.
         var ceiling = 4f * Mathf.Max(Screen.width, Screen.height);
-        if (pixels <= 0.01f || pixels > ceiling)
+        if (pixels > ceiling)
         {
             var now = System.DateTime.UtcNow;
             if ((now - _lastScaleReport).TotalSeconds > 5d)
             {
                 _lastScaleReport = now;
-                ScriptedScreensVectorPlugin.Log?.LogWarning(
+                ScriptedScreensVectorPlugin.Log?.LogInfo(
                     $"scale: \"{_sceneId}\" projected {pixels:0} px wide over {rect.width:0.0} canvas units "
-                    + $"(ceiling {ceiling:0}, screen {Screen.width}x{Screen.height}, "
-                    + $"z {a.z:0.000}/{b.z:0.000}, near {near:0.000}) -- treating the scale as unknown");
+                    + $"(soft ceiling {ceiling:0}, screen {Screen.width}x{Screen.height}, "
+                    + $"z {a.z:0.000}/{b.z:0.000}, ratio {Mathf.Max(a.z, b.z) / Mathf.Max(0.0001f, Mathf.Min(a.z, b.z)):0.0}x, "
+                    + $"near {near:0.000}) -- used as-is, diagnostic only");
             }
-
-            return -1f;
         }
 
         return pixels / rect.width;

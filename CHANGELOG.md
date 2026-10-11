@@ -2,6 +2,34 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.107
+
+### Fixed
+
+- **Reverted 0.11.106's scale guard: it broke blur on a legitimate view.** Treating an extreme
+  projection as "scale unknown" fell back to `scale = 1f`, which collapses a sigma-5 blur from
+  96 rings to about 8 (`Clamp(CeilToInt(reach * 1 * 1 / 2), 4, 96)`) and makes a 15-unit reach
+  read as 15 px — so the blur did not merely band, it all but disappeared. Reported from the
+  console within minutes of the build loading.
+  A grazing-angle view is **legitimate input** — the player standing at an angle to a console —
+  and the cost it was guarding against was a self-correcting transient. Trading correct output
+  for that is the wrong way round, and this project's own rule already says a cap that refuses
+  valid input is a mitigation, not a fix. The hard reject is back to genuinely degenerate output
+  (`pixels > 100000f`, NaN and infinity territory) and the screen-relative bound is now a
+  **diagnostic that changes nothing**, logging the corner depths and their ratio at info level.
+
+### Known
+
+- **The 20x rebuild cost is still UNEXPLAINED and is not density.** 10 ms to 171–188 ms for the
+  SAME 221 rect ops with FEWER vertices (98956 against 206876). Ruled out by measurement:
+  `dense` was False in all 30 logged blur lines, `points/contour` 48 in every one, rings are
+  hard-capped at 96, and px/unit reaches 60.6 in samples that rebuild in 10 ms. Time up with
+  geometry down points at work being built and then discarded, not at more work. Next step is
+  per-op subtraction with the `nofill` / `nofeather` / `noeval` ablation switches, not another
+  guess — that is three falsified theories in one day on this cost.
+- The `nearClipPlane` change from 0.11.106 is kept and is **inert on this machine**: the game
+  camera's near plane is 0.010, identical to the constant it replaced.
+
 ## 0.11.106
 
 ### Fixed
