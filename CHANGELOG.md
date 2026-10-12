@@ -28,6 +28,11 @@ ScriptedScreens Vector, newest first.
 
 ## 0.11.116
 
+### Fixed
+
+- Automatic hole antialiasing bands now stay inside their clip, including crossing and
+  disjoint holes in the same path.
+
 ### Changed
 
 - Scene text now reads lowercase `true` as `1` and `false` as `0` in literal-only numeric

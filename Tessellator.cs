@@ -3099,7 +3099,11 @@ internal static class Tessellator
             FeatherRing(vh, contour, paint, 0f, frame.Matrix, frame.Clip, shared, pixel, FeatureSize(contour));
             if (holes != null)
                 foreach (var hole in holes)
-                    FeatherRing(vh, hole, paint, 0f, frame.Matrix, frame.Clip, -1, pixel, FeatureSize(hole), inward: true);
+                {
+                    var ring = frame.Clip == null ? hole : frame.Clip.ClipPolygon(hole);
+                    if (ring.Count >= 3)
+                        FeatherRing(vh, ring, paint, 0f, frame.Matrix, frame.Clip, -1, pixel, FeatureSize(hole), inward: true);
+                }
             RingFeatherMs += Elapsed(mark);
             return;
         }

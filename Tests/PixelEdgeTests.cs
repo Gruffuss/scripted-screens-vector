@@ -292,6 +292,14 @@ internal static class PixelEdgeTests
         var pageScene = SceneParser.Parse(SceneText.ToProps(string.Join("\n", lines), "measurement")!)!;
         run.Check("measurement page parses", pageScene.Problems.Count == 0 && lines.Count == 21,
             string.Join("; ", pageScene.Problems) + $" ({lines.Count} lines)");
+        var clippedHoles = Emit("DEFS{CP id=c{R x=100 y=100 w=100 h=100}}\nG clip=c{P d=\"M0 0 H400 V400 H0 Z M150 150 H250 V250 H150 Z M300 300 H350 V350 H300 Z\" fr=evenodd f=#fff}", true);
+        var insideClip = true;
+        for (var i = 0; i < clippedHoles.currentVertCount; i++)
+        {
+            var p = clippedHoles.Vertex(i).Position;
+            insideClip &= p.x >= 100f - 0.001f && p.x <= 200f + 0.001f && p.y >= 200f - 0.001f && p.y <= 300f + 0.001f;
+        }
+        run.Check("review: clipped hole bands stay inside CP", insideClip, "crossing and disjoint holes");
         Meshes(run);
         var mesh = new MeshBuilder();
         mesh.TrackBounds(true);
