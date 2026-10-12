@@ -19,6 +19,8 @@ public sealed class ScriptedScreensVectorPlugin : ModBehaviour
 
     internal static ManualLogSource? Log { get; private set; }
 
+    internal static MainThreadWork? MainThread { get; private set; }
+
     /// <inheritdoc />
     public override void OnLoaded(ContentHandler contentHandler)
     {
@@ -28,6 +30,7 @@ public sealed class ScriptedScreensVectorPlugin : ModBehaviour
             return;
 
         _initialized = true;
+        MainThread = new MainThreadWork();
 
         try
         {
@@ -53,15 +56,11 @@ public sealed class ScriptedScreensVectorPlugin : ModBehaviour
             // Coverage may only ride in a UV if the shader that reads it actually loaded.
             Tessellator.CoverageInUv = DitherMaterial.HasShader;
 
+            FrameMonitor.Install();
             VectorStatsTool.TryRegister();
             Log.LogInfo(Config != null
                 ? "Level-of-detail settings registered with LaunchPad."
                 : "No ConfigFile from LaunchPad; level-of-detail settings use defaults.");
-
-            // Resolving the patch target throws if ScriptedScreens is absent or its
-            // internals moved. About.xml declares the dependency so LaunchPad loads it
-            // first, but a failure here must not take the rest of the game down.
-            FrameMonitor.Install();
 
             // Diagnostics shows scroll reports, so the event can be checked without a subscriber mod.
             VectorGraphic.ScrollChanged += (host, id, offset, max, view) =>
@@ -70,6 +69,9 @@ public sealed class ScriptedScreensVectorPlugin : ModBehaviour
                     Log.LogInfo($"scroll {host.name}/{id}: {offset:F1} of {max:F1}, view {view:F1}");
             };
 
+            // Resolving the patch target throws if ScriptedScreens is absent or its
+            // internals moved. About.xml declares the dependency so LaunchPad loads it
+            // first, but a failure here must not take the rest of the game down.
             _harmony = new Harmony(PluginInfo.PLUGIN_GUID);
             // The ASSEMBLY, not one type. PatchAll(Type) registers exactly that class, so a
             // second patch -- the capture hook lives in a nested one -- compiles in and is

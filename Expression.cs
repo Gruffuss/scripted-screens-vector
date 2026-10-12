@@ -199,6 +199,40 @@ internal sealed class EvalContext
     /// </remarks>
     internal bool KeepUnmentioned { get; set; }
 
+    internal (bool Changed, bool Rebuild) CompareData(EvalContext source, bool usesSince)
+    {
+        var changed = source.Snapped.Count > 0 || source.Eased.Count > 0
+            || !MapsEqual(Scalars, source.Scalars) || !MapsEqual(Strings, source.Strings)
+            || !MapsEqual(Colours, source.Colours) || !ArraysEqual(Arrays, source.Arrays)
+            || !ArraysEqual(StringArrays, source.StringArrays) || !ArraysEqual(ColourArrays, source.ColourArrays);
+        return (changed, changed || usesSince);
+
+        bool MapsEqual<T>(Dictionary<string, T> current, Dictionary<string, T> incoming)
+        {
+            if (!source.KeepUnmentioned && current.Count != incoming.Count)
+                return false;
+            foreach (var pair in incoming)
+                if (!current.TryGetValue(pair.Key, out var value) || !EqualityComparer<T>.Default.Equals(value, pair.Value))
+                    return false;
+            return true;
+        }
+
+        bool ArraysEqual<T>(Dictionary<string, T[]> current, Dictionary<string, T[]> incoming)
+        {
+            if (!source.KeepUnmentioned && current.Count != incoming.Count)
+                return false;
+            foreach (var pair in incoming)
+            {
+                if (!current.TryGetValue(pair.Key, out var value) || value.Length != pair.Value.Length)
+                    return false;
+                for (var i = 0; i < value.Length; i++)
+                    if (!EqualityComparer<T>.Default.Equals(value[i], pair.Value[i]))
+                        return false;
+            }
+            return true;
+        }
+    }
+
     /// <summary>
     /// Numeric names that apply without easing: `snap = 1` on the payload that carried them.
     /// </summary>
@@ -660,6 +694,8 @@ internal sealed class Expression
 
     /// <summary>Set by the parser when an expression reads `hover` or `down`; the scene parser resets and reads it.</summary>
     [ThreadStatic] internal static bool SawPointer;
+
+    [ThreadStatic] internal static bool SawSince;
 
     internal static Expression Parse(string source, float fallback, bool colour = false)
     {
@@ -1700,6 +1736,7 @@ internal sealed class Expression
             if (!Match(')'))
                 throw new FormatException("expected ')' after since($name");
 
+            SawSince = true;
             return new Expression { _kind = Kind.Since, _name = dataName, UsesTime = true };
         }
 

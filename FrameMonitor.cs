@@ -40,6 +40,7 @@ internal sealed class FrameMonitor : MonoBehaviour
 
     private void Update()
     {
+        ScriptedScreensVectorPlugin.MainThread?.Pump();
         if (!VectorConfig.Diagnostics)
             return;
 

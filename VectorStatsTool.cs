@@ -23,6 +23,7 @@ namespace ScriptedScreensVector;
 /// </remarks>
 internal static class VectorStatsTool
 {
+    private static int _loggedPath;
     private const string Schema =
         "{\"type\":\"object\",\"properties\":{\"scene\":{\"type\":\"string\"," +
         "\"description\":\"Optional scene id to report on; omit for all.\"}}}";
@@ -247,6 +248,23 @@ internal static class VectorStatsTool
     }
 
     private static string Handle(JObject? arguments)
+    {
+        try
+        {
+            var mainThread = ScriptedScreensVectorPlugin.MainThread;
+            if (System.Threading.Interlocked.Exchange(ref _loggedPath, 1) == 0)
+                ScriptedScreensVectorPlugin.Log?.LogInfo(mainThread?.IsMainThread == true
+                    ? "vector_stats first call: Unity main thread, describing directly."
+                    : "vector_stats first call: background thread, queued for Unity main thread.");
+            return mainThread?.Invoke(() => Describe(arguments)) ?? "vector_stats: game busy, try again";
+        }
+        catch (Exception ex)
+        {
+            return "vector_stats failed: " + ex.Message;
+        }
+    }
+
+    private static string Describe(JObject? arguments)
     {
         try
         {

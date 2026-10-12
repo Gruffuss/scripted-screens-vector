@@ -1,5 +1,31 @@
 namespace ScriptedScreensVector;
 
+// Refreshed only after landing, so reports never read worker-owned lists.
+internal sealed class BuildDiagnostics
+{
+    internal bool DrewTime = true;
+    internal string? Starved;
+    internal string? Dropped;
+    internal readonly System.Collections.Generic.List<string> Missing = new(16);
+    internal readonly System.Collections.Generic.List<string> Problems = new(16);
+    internal readonly System.Collections.Generic.List<string> TextWarnings = new(16);
+
+    internal void Capture(TessellationStats stats, System.Collections.Generic.List<string> problems,
+        string? dropped, System.Collections.Generic.IReadOnlyCollection<string>? textWarnings)
+    {
+        DrewTime = stats.DrewTime;
+        Starved = stats.Starved;
+        Dropped = dropped;
+        Missing.Clear();
+        Missing.AddRange(stats.Missing);
+        Problems.Clear();
+        Problems.AddRange(problems);
+        TextWarnings.Clear();
+        if (textWarnings != null)
+            TextWarnings.AddRange(textWarnings);
+    }
+}
+
 /// <summary>
 /// Per-surface tessellation diagnostics, filled on the thread that did the work.
 /// </summary>

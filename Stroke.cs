@@ -36,6 +36,18 @@ internal enum JoinStyle
 /// </remarks>
 internal static class Stroke
 {
+    internal static Rect Bounds(List<Vector2> points)
+    {
+        var min = points[0];
+        var max = min;
+        foreach (var point in points)
+        {
+            min = Vector2.Min(min, point);
+            max = Vector2.Max(max, point);
+        }
+        return new Rect(min, max - min);
+    }
+
     private const int RoundCapSegments = 8;
     private const float Epsilon = 0.0001f;
 

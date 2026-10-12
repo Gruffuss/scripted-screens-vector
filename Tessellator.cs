@@ -3811,7 +3811,7 @@ internal static class Tessellator
     /// has no way to say so. Comparing the count before and after catches the one case the
     /// helper below cannot: a stroke that stopped halfway along its own path.
     /// </remarks>
-    private static void StrokeWithBudget(MeshBuilder vh, List<Vector2> points, bool closed, float width, Paint paint, VecNode node, float feather, Matrix4x4 matrix)
+    private static void StrokeWithBudget(MeshBuilder vh, List<Vector2> points, bool closed, float width, Paint paint, VecNode node, float feather, Matrix4x4 matrix, Rect? pathBounds)
     {
         var before = vh.currentVertCount;
 
@@ -3824,15 +3824,8 @@ internal static class Tessellator
         // fill and a stroke using the same gradient line up, which is the point.
         if (paint.Gradient is { BoundingBox: true } && points.Count > 0)
         {
-            var min = points[0];
-            var max = points[0];
-            foreach (var point in points)
-            {
-                min = Vector2.Min(min, point);
-                max = Vector2.Max(max, point);
-            }
-
-            paint = paint.WithBounds(min, max - min);
+            var bounds = pathBounds ?? Stroke.Bounds(points);
+            paint = paint.WithBounds(bounds.min, bounds.size);
         }
 
         Stroke.Emit(vh, points, closed, width, paint, node.Cap, node.Join, node.MiterLimit, feather, matrix, MaxVertices);
@@ -4365,7 +4358,15 @@ internal static class Tessellator
         // on every rebuild.
         if (node.DashPattern.Length == 0)
         {
-            StrokeRun(vh, points, closed, width, paint, node, feather, frame);
+            var strokeBounds = frame.Clip != null && paint.Gradient is { BoundingBox: true } && points.Count > 0
+                ? Stroke.Bounds(points) : (Rect?)null;
+            StrokeRun(vh, points, closed, width, paint, node, feather, frame, strokeBounds);
+            return;
+        }
+
+        if (DashWindow.CullAll(_visible, frame.Matrix))
+        {
+            _culledDashes = true;
             return;
         }
 
@@ -4383,21 +4384,15 @@ internal static class Tessellator
             window = Rect.MinMaxRect(min.x - reach, min.y - reach, max.x + reach, max.y + reach);
         }
 
-        if (!_culledDashes && window is Rect bounds && DashWindow.Finite(bounds) && points.Count > 0)
+        var pathBounds = points.Count > 0 ? Stroke.Bounds(points) : (Rect?)null;
+        if (!_culledDashes && window is Rect bounds && DashWindow.Finite(bounds) && pathBounds is Rect path)
         {
-            var min = points[0];
-            var max = min;
-            for (var i = 1; i < points.Count; i++)
-            {
-                min = Vector2.Min(min, points[i]);
-                max = Vector2.Max(max, points[i]);
-            }
-            _culledDashes = min.x < bounds.xMin || min.y < bounds.yMin
-                || max.x > bounds.xMax || max.y > bounds.yMax;
+            _culledDashes = path.xMin < bounds.xMin || path.yMin < bounds.yMin
+                || path.xMax > bounds.xMax || path.yMax > bounds.yMax;
         }
 
         foreach (var run in Stroke.Dash(Loop(points, closed), node.DashPattern, node.DashOffset.Evaluate(context), window))
-            StrokeRun(vh, run, false, width, paint, node, feather, frame);
+            StrokeRun(vh, run, false, width, paint, node, feather, frame, pathBounds);
     }
 
     /// <summary>
@@ -4408,18 +4403,18 @@ internal static class Tessellator
     /// frame and the paint allocates a display class per call, which is what replaced the
     /// list this was written to remove. Measured, both times.
     /// </remarks>
-    private static void StrokeRun(MeshBuilder vh, List<Vector2> run, bool runClosed, float width, Paint paint, VecNode node, float feather, Frame frame)
+    private static void StrokeRun(MeshBuilder vh, List<Vector2> run, bool runClosed, float width, Paint paint, VecNode node, float feather, Frame frame, Rect? pathBounds = null)
     {
         // A clipped stroke is cut into the pieces that fall inside, rather than being
         // redirected along the boundary the way a filled contour is.
         if (frame.Clip == null)
         {
-            StrokeWithBudget(vh, run, runClosed, width, paint, node, feather, frame.Matrix);
+            StrokeWithBudget(vh, run, runClosed, width, paint, node, feather, frame.Matrix, pathBounds);
             return;
         }
 
         foreach (var piece in frame.Clip.ClipPolyline(Loop(run, runClosed)))
-            StrokeWithBudget(vh, piece, closed: false, width, paint, node, feather, frame.Matrix);
+            StrokeWithBudget(vh, piece, closed: false, width, paint, node, feather, frame.Matrix, pathBounds);
     }
 
     private static Paint ResolvePaint(VecScene scene, VecNode node, EvalContext context, Frame frame, bool stroke, float opacityOverride = -1f)
