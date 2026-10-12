@@ -301,10 +301,12 @@ internal static class VectorElementPatch
         {
             graphic.PatchScene(element.Props);
         }
-        else if (HasProp(element.Props, "nodes"))
+        else if (HasProp(element.Props, "nodes") || HasProp(element.Props, "keep")
+                 || HasProp(element.Props, "snap") || HasProp(element.Props, "ease"))
         {
             // No graphic yet: the structure has not arrived, or the surface is mid-rebuild.
-            // The payload's DATA waits below, and the `nodes` patch used to be dropped here --
+            // The payload's DATA waits below; literal-only control diagnostics wait here too.
+            // The `nodes` patch used to be dropped here --
             // so a script that sent its geometry patch ahead of the structure lost it with
             // nothing reported. It waits with the data and is applied in the same order.
             //

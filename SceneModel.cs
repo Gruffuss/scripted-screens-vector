@@ -680,7 +680,7 @@ internal static class SceneParser
     /// Applies `nodes = { id = { field = value } }` from the data element to a scene.
     /// </summary>
     /// <remarks>
-    /// Returns true when anything changed, so the caller can skip a rebuild otherwise.
+    /// Returns true when geometry or problems changed, so the caller rebuilds the border too.
     ///
     /// This is a prop on the DATA element rather than a method on the element handle. The
     /// handle belongs to ScriptedScreens; this mod is a postfix on ApplyElementInternal and
@@ -701,7 +701,16 @@ internal static class SceneParser
         Expression.Report = message => scene.Problem(message);
         try
         {
-            return PatchNodesCore(props, scene);
+            var problems = scene.Problems.Count;
+            foreach (var prop in props)
+            {
+                if (string.Equals(prop.Key, "keep", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(prop.Key, "snap", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(prop.Key, "ease", StringComparison.OrdinalIgnoreCase))
+                    CheckLiteral(prop, scene, "data", null);
+            }
+
+            return PatchNodesCore(props, scene) || scene.Problems.Count != problems;
         }
         finally
         {
@@ -785,9 +794,13 @@ internal static class SceneParser
 
         foreach (var entry in patch)
         {
-            if (string.IsNullOrEmpty(entry.Key)
-                || entry.Value.Type != SS.UiValueType.Map || entry.Value.Map == null)
+            if (string.IsNullOrEmpty(entry.Key) || entry.Value.Type == SS.UiValueType.Nil
+                || entry.Value.Type == SS.UiValueType.Array && entry.Value.Array is { Length: 0 })
+                continue;
+
+            if (entry.Value.Type != SS.UiValueType.Map || entry.Value.Map == null)
             {
+                scene.Problem($"patch for node id \"{entry.Key}\" must be a map");
                 continue;
             }
 
@@ -1429,14 +1442,14 @@ internal static class SceneParser
     /// typo, `fille` or `strke` -- which otherwise vanishes silently because unknown keys are
     /// ignored by design. It does NOT catch a real key on the wrong op, `rx` on a band say;
     /// that needs per-op sets and risks rejecting combinations that are merely unusual. The
-    /// exceptions are checked one key at a time instead, and against what the author wrote on
-    /// the node rather than the merged map: the enum words in `CheckWords`, and `o` in
-    /// `CheckGroupOpacity`.
+    /// exceptions are checked one key at a time instead. Author-intent checks use what the
+    /// author wrote on the node rather than the merged map: the enum words in `CheckWords`, and `o` in
+    /// `CheckGroupOpacity`. Endpoint coordinates are allowed only on the ops that read them.
     /// </remarks>
     private static readonly HashSet<string> KnownKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "op", "id", "c", "style", "click", "press", "xy", "hoverev", "drag", "drop", "blur", "lod",
-        "x", "y", "w", "h", "cx", "cy", "rx", "ry", "x1", "y1", "x2", "y2", "y2",
+        "x", "y", "w", "h", "cx", "cy", "rx", "ry",
         "n", "p", "d", "seg", "close", "t", "r", "s", "s_", "a", "o", "clip", "ref", "params", "ch",
         "f", "fo", "fo2", "fr", "fea", "fea_edge", "sh",
         "sw", "so", "cap", "join", "ml", "dash", "dofs",
@@ -1488,8 +1501,8 @@ internal static class SceneParser
     ///
     /// Left out because something already reports them: a shadow's four numbers
     /// (`ParseShadow`), `weight` (`CheckWord`) and an `fl`'s `size` (`FirstLineStyle`). `keep`,
-    /// `snap` and `ease` are literal-only too and are NOT here: they live on the DATA element,
-    /// which `ReadData` reads with no scene to report to.
+    /// `snap` and `ease` live on the DATA element and are checked when its payload reaches
+    /// the scene through `PatchNodes`.
     ///
     /// `w` and `h` are in <see cref="SceneLiteralKeys"/> instead, since on a NODE they take an
     /// expression; this set is judged on every op except the header.
@@ -1508,25 +1521,42 @@ internal static class SceneParser
         "w", "h", "nofill", "nofeather", "noeval", "ztext",
     };
 
-    /// <summary>Reports a computed value written where only a literal number is read.</summary>
+    /// <summary>Reports a computed value or unknown word where only a literal number is read.</summary>
     /// <remarks>
     /// An `=` is an expression and a `$` is a data name; both are dropped whole and the key
     /// keeps its default. `%param` is NOT reported: a symbol parameter is substituted before the
     /// node is parsed and keeps its type, so `RP n="%count"` under `USE count=5` really does
-    /// draw five. An array is scanned element by element as well, since a point list is the one
-    /// of these an author is most likely to try to compute.
+    /// draw five. Maps and nested arrays are scanned too, including easing durations and delays.
     /// </remarks>
     private static void CheckLiteral(SS.UiProp prop, VecScene scene, string? op, string? id)
     {
-        var text = ComputedText(prop.Value);
+        var text = InvalidLiteralText(prop.Value);
 
-        if (text == null && prop.Value.Type == SS.UiValueType.Array && prop.Value.Array != null)
+        if (text == null && prop.Value.Type is SS.UiValueType.Array or SS.UiValueType.Map)
         {
-            foreach (var item in prop.Value.Array)
+            var pending = new Stack<SS.UiValue>();
+            pending.Push(prop.Value);
+            var easing = string.Equals(prop.Key, "ease", StringComparison.OrdinalIgnoreCase);
+            while (pending.Count > 0)
             {
-                text = ComputedText(item);
+                var value = pending.Pop();
+                text = InvalidLiteralText(value);
+                // Easing tuples contain literal curve names as well as numbers.
+                if (easing && text != null && text[0] != '=' && text[0] != '$')
+                    text = null;
                 if (text != null)
                     break;
+
+                if (value.Type == SS.UiValueType.Array && value.Array != null)
+                {
+                    for (var i = value.Array.Length - 1; i >= 0; i--)
+                        pending.Push(value.Array[i]);
+                }
+                else if (value.Type == SS.UiValueType.Map && value.Map != null)
+                {
+                    for (var i = value.Map.Length - 1; i >= 0; i--)
+                        pending.Push(value.Map[i].Value);
+                }
             }
         }
 
@@ -1535,17 +1565,21 @@ internal static class SceneParser
 
         scene.Problem($"{op ?? "node"}{(string.IsNullOrEmpty(id) ? "" : " \"" + id + "\"")}: "
                       + $"{prop.Key} \"{text}\" is read as a plain number and is not evaluated; "
-                      + "write a number");
+                      + "write a number"
+                      + (text[0] == '=' || text[0] == '$' ? string.Empty
+                          : "; lowercase true/false are also accepted"));
     }
 
-    /// <summary>The text of a value asking to be computed -- an `=` expression or a `$` name.</summary>
-    private static string? ComputedText(SS.UiValue value)
+    /// <summary>A computed value or word that cannot be read as a literal number.</summary>
+    private static string? InvalidLiteralText(SS.UiValue value)
     {
         if (value.Type != SS.UiValueType.String || string.IsNullOrEmpty(value.String))
             return null;
 
         var text = value.String!;
-        return text[0] == '=' || text[0] == '$' ? text : null;
+        return text[0] == '%' || text == "true" || text == "false"
+               || float.TryParse(text, System.Globalization.NumberStyles.Float,
+                   System.Globalization.CultureInfo.InvariantCulture, out _) ? null : text;
     }
 
     private static void Validate(SS.UiProp[] map, VecScene scene, string? op, string? id)
@@ -1569,6 +1603,12 @@ internal static class SceneParser
             if (header ? SceneLiteralKeys.Contains(prop.Key) : LiteralKeys.Contains(prop.Key))
                 CheckLiteral(prop, scene, op, id);
 
+            var endpoint = prop.Key.ToUpperInvariant() is "X1" or "Y1" or "X2" or "Y2";
+            if (endpoint && (string.Equals(op, "GL", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(op, "YS", StringComparison.OrdinalIgnoreCase)
+                             && string.Equals(prop.Key, "y2", StringComparison.OrdinalIgnoreCase)))
+                continue;
+
             if (string.Equals(op, "FONT", StringComparison.OrdinalIgnoreCase)
                 ? string.Equals(prop.Key, "op", StringComparison.OrdinalIgnoreCase)
                   || string.Equals(prop.Key, "src", StringComparison.OrdinalIgnoreCase)
@@ -1584,7 +1624,15 @@ internal static class SceneParser
                 continue;
             }
 
-            scene.Problem($"{op ?? "node"}{(string.IsNullOrEmpty(id) ? "" : " \"" + id + "\"")}: unknown attribute \"{prop.Key}\"");
+            scene.Problem($"{op ?? "node"}{(string.IsNullOrEmpty(id) ? "" : " \"" + id + "\"")}: unknown attribute \"{prop.Key}\""
+                          + (endpoint ? op?.ToUpperInvariant() switch
+                          {
+                              "L" => "; the line takes p=[x1,y1,x2,y2,...]",
+                              "SP" => "; the spline takes p=[x1,y1,x2,y2,...]",
+                              "LS" => "; the sampled line takes n, x and y; for endpoints use L p=[x1,y1,x2,y2,...]",
+                              "P" => "; the path takes d; for endpoints use L p=[x1,y1,x2,y2,...]",
+                              _ => string.Empty,
+                          } : string.Empty));
         }
     }
 
@@ -3623,6 +3671,8 @@ internal static class SceneParser
         {
             SS.UiValueType.Number => value.Value.Number,
             SS.UiValueType.Bool => value.Value.Bool ? 1f : 0f,
+            SS.UiValueType.String when value.Value.String == "true" => 1f,
+            SS.UiValueType.String when value.Value.String == "false" => 0f,
             _ => fallback,
         };
     }
@@ -3645,6 +3695,8 @@ internal static class SceneParser
         {
             SS.UiValueType.Number => value.Number,
             SS.UiValueType.Bool => value.Bool ? 1f : 0f,
+            SS.UiValueType.String when value.String == "true" => 1f,
+            SS.UiValueType.String when value.String == "false" => 0f,
             _ => 0f,
         };
     }

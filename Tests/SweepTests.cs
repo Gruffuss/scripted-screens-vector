@@ -83,6 +83,12 @@ internal static class SweepTests
         SampledPaintBindsToItsSample(run);
         LiteralSlotsReportAnExpression(run);
         BooleanWordsAreRead(run);
+        LiteralWordsAreReadOrReported(run);
+        BadNodePatchesAreReported(run);
+        NumericMixIsReported(run);
+        DataLiteralExpressionsAreReported(run);
+        EndpointAttributesAreReported(run);
+        ParserReviewRegressions(run);
     }
 
     /// <summary>C21: a number in a slot that holds free text or an identifier.</summary>
@@ -426,9 +432,6 @@ internal static class SweepTests
     /// 0.11.104 -- `v=false` reported `expression "false": unknown variable 'false'` and
     /// left the node VISIBLE, which is the attribute's default.
     ///
-    /// The batch's version of this method also carried three SCENE-TEXT switch cases
-    /// (`nofill=true`, `click=true`, `kern=false`). Those test S9's SceneModel patch, and
-    /// S9 is held out of this release, so they are held out with it.
     /// </remarks>
     internal static void BooleanWordsAreRead(TestRun run)
     {
@@ -440,6 +443,222 @@ internal static class SweepTests
             visible == null
                 ? "v was not read at all"
                 : $"{visible.Evaluate(new EvalContext())}, {Said(hidden)}");
+    }
+
+    internal static void LiteralWordsAreReadOrReported(TestRun run)
+    {
+        foreach (var (word, value) in new[] { ("true", 1f), ("false", 0f) })
+        {
+            var header = Parse($"SCENE nofill=\"{word}\" ztext=\"{word}\"\nR w=10 h=10");
+            run.Check($"literal words: PropNumber {word}",
+                header.DebugNoFill == (value == 1f) && header.TextInOrder == (value == 1f)
+                && header.Problems.Count == 0, Said(header));
+            var matrix = Parse($"SCENE\nG m=[\"{word}\",0,0,1,0,0] {{ R w=10 h=10 }}");
+            run.Check($"literal words: Scalar {word}",
+                matrix.Root[0].GroupMatrix![0] == value && matrix.Problems.Count == 0,
+                $"m[0]={matrix.Root[0].GroupMatrix![0]}, {Said(matrix)}");
+            var label = Parse($"SCENE\nT text=hi kern=\"{word}\"");
+            run.Check($"literal words: kern {word}",
+                label.Root[0].Kern == (value == 1f) && label.Problems.Count == 0, Said(label));
+        }
+
+        foreach (var word in new[] { "wrong", "True", "FALSE" })
+        {
+            var header = Parse($"SCENE nofill=\"{word}\"\nR w=10 h=10");
+            run.Check($"literal words: PropNumber {word} reported",
+                Says(header, $"nofill \"{word}\"") && !header.DebugNoFill, Said(header));
+            var matrix = Parse($"SCENE\nG m=[\"{word}\",0,0,1,0,0] {{ R w=10 h=10 }}");
+            run.Check($"literal words: Scalar {word} reported",
+                Says(matrix, $"m \"{word}\"") && matrix.Root[0].GroupMatrix![0] == 0f, Said(matrix));
+        }
+
+        var numbers = Parse("SCENE nofill=0\nG m=[1,0,0,1,0,0] { R w=10 h=10 }");
+        run.Check("literal words: numbers stay silent", numbers.Problems.Count == 0, Said(numbers));
+    }
+
+    internal static void BadNodePatchesAreReported(TestRun run)
+    {
+        foreach (var value in new[] { Num(5), Str("wrong") })
+        {
+            var scene = Parse("SCENE\nR id=bar w=10 h=10");
+            var changed = SceneParser.PatchNodes(new[] { P("nodes", Map(P("bar", value))) }, scene);
+            run.Check($"nodes: {value.Type} patch reported",
+                Says(scene, "patch for node id \"bar\" must be a map")
+                && scene.Root[0].W.Evaluate(new EvalContext()) == 10f, Said(scene));
+            run.Check($"nodes: {value.Type} diagnostic requests a rebuild", changed, Said(scene));
+        }
+
+        var valid = Parse("SCENE\nR id=bar w=10 h=10");
+        var applied = SceneParser.PatchNodes(new[] { P("nodes", Map(P("hole", default),
+            P("bar", Map(P("w", Num(20)))))) }, valid);
+        run.Check("nodes: Nil hole and valid map stay silent",
+            applied && valid.Root[0].W.Evaluate(new EvalContext()) == 20f
+            && valid.Problems.Count == 0, Said(valid));
+    }
+
+    internal static void NumericMixIsReported(TestRun run)
+    {
+        foreach (var depth in new[] { 0, 300 })
+        {
+            var scene = Parse($"SCENE\nR x=\"={new string('-', depth)}mix(1,2,0.5)\" w=10 h=10");
+            run.Check($"numeric mix: depth {depth} reported at parse time",
+                Says(scene, "mix") && Says(scene, "this attribute takes a number"), Said(scene));
+            run.Check($"numeric mix: depth {depth} still evaluates to zero",
+                scene.Root[0].X.Evaluate(new EvalContext()) == 0f, Said(scene));
+        }
+
+        var numeric = Parse("SCENE\nR x=\"=min(1,2)\" w=10 h=10");
+        run.Check("numeric mix: numeric function stays silent",
+            numeric.Problems.Count == 0 && numeric.Root[0].X.Evaluate(new EvalContext()) == 1f,
+            Said(numeric));
+    }
+
+    internal static void DataLiteralExpressionsAreReported(TestRun run)
+    {
+        foreach (var key in new[] { "keep", "snap", "ease" })
+        {
+            var scene = Parse("SCENE\nR w=10 h=10");
+            var changed = SceneParser.PatchNodes(
+                new[] { P(key, Str("=1")), P("data", Map(P("v", Num(2)))) }, scene);
+            run.Check($"data literals: {key} expression reported",
+                Says(scene, $"{key} \"=1\" is read as a plain number and is not evaluated; write a number"),
+                Said(scene));
+            run.Check($"data literals: {key} diagnostic requests a rebuild", changed, Said(scene));
+        }
+
+        var valid = Parse("SCENE\nR w=10 h=10");
+        var props = new[] { P("keep", Num(1)), P("snap", Num(1)),
+            P("ease", Map(P("v", Num(0.5f)))), P("data", Map(P("v", Num(2)))) };
+        var needsRebuild = SceneParser.PatchNodes(props, valid);
+        var data = new EvalContext();
+        SceneParser.ReadData(props, data);
+        run.Check("data literals: valid controls stay silent and work",
+            !needsRebuild && valid.Problems.Count == 0 && data.KeepUnmentioned && data.Snapped.Contains("v")
+            && data.Eased.Count == 0, Said(valid));
+    }
+
+    internal static void EndpointAttributesAreReported(TestRun run)
+    {
+        const string endpoints = "x1=0 y1=0 x2=100 y2=100";
+        var keys = new[] { "x1", "y1", "x2", "y2" };
+        var line = Parse($"SCENE\nL id=line {endpoints} sw=2");
+        foreach (var key in keys)
+            run.Check($"endpoints: L {key} reported with p guidance",
+                Says(line, $"unknown attribute \"{key}\"; the line takes p=[x1,y1,x2,y2,...]"), Said(line));
+        run.Check("endpoints: L does not adopt endpoint geometry", line.Root[0].Points.Length == 0, Said(line));
+
+        foreach (var op in new[] { "G", "RP", "SC", "R", "C", "Y", "P", "SP", "LS", "T", "IMG" })
+        {
+            var scene = Parse($"SCENE\n{op} {endpoints}");
+            foreach (var key in keys)
+                run.Check($"endpoints: {op} {key} reported",
+                    Says(scene, $"unknown attribute \"{key}\""), Said(scene));
+        }
+
+        var header = Parse($"SCENE {endpoints}\nR w=10 h=10");
+        foreach (var key in keys)
+            run.Check($"endpoints: SCENE {key} reported",
+                Says(header, $"unknown attribute \"{key}\""), Said(header));
+
+        var band = Parse($"SCENE\nYS n=2 x=0 y=0 {endpoints}");
+        foreach (var key in new[] { "x1", "y1", "x2" })
+            run.Check($"endpoints: YS {key} reported",
+                Says(band, $"unknown attribute \"{key}\""), Said(band));
+
+        const string stops = "stops=[[0,transparent],[1,transparent]]";
+        var gradient = Parse($"SCENE\nDEFS {{ GL id=g {endpoints} {stops} }}\nR w=10 h=10");
+        run.Check("endpoints: GL coordinates stay silent", gradient.Problems.Count == 0, Said(gradient));
+        var validBand = Parse("SCENE\nYS n=2 x=0 y=0 y2=100");
+        run.Check("endpoints: YS y2 stays silent and is read",
+            validBand.Problems.Count == 0 && validBand.Root[0].Y2.Evaluate(new EvalContext()) == 100f,
+            Said(validBand));
+        foreach (var op in new[] { "GR", "GC" })
+        {
+            var scene = Parse($"SCENE\nDEFS {{ {op} id=g {endpoints} {stops} }}\nR w=10 h=10");
+            foreach (var key in keys)
+                run.Check($"endpoints: {op} {key} reported",
+                    Says(scene, $"unknown attribute \"{key}\""), Said(scene));
+        }
+
+        var validLine = Parse("SCENE\nL id=line p=[0,0,100,100] sw=2");
+        run.Check("endpoints: L p stays silent", validLine.Problems.Count == 0
+            && validLine.Root[0].Points.Length == 4, Said(validLine));
+        var changed = SceneParser.PatchNodes(new[] { P("nodes", Map(P("line", Map(P("x1", Num(5)))))) }, validLine);
+        run.Check("endpoints: a patch reports unused coordinates with p guidance",
+            changed && Says(validLine, "unknown attribute \"x1\"; the line takes p=[x1,y1,x2,y2,...]")
+            && validLine.Root[0].Points[0] == 0f, Said(validLine));
+
+        var symbol = Parse($"SCENE\nDEFS {{ SYM id=line {endpoints} {{ L p=[%x1,%y1,%x2,%y2] }} }}\n"
+                           + $"USE ref=line {endpoints}");
+        run.Check("endpoints: USE and SYM parameter names stay silent",
+            symbol.Problems.Count == 0 && symbol.Root[0].Children[0].Points.Length == 4, Said(symbol));
+    }
+
+    internal static void ParserReviewRegressions(TestRun run)
+    {
+        foreach (var nodes in new[] { Map(P("bar", Arr()), P("missing", Arr())), Arr(Arr()) })
+        {
+            var scene = Parse("SCENE\nR id=bar w=10 h=10");
+            var changed = SceneParser.PatchNodes(new[] { P("nodes", nodes) }, scene);
+            run.Check($"review: empty {nodes.Type} node patch is a silent no-op",
+                !changed && scene.Problems.Count == 0 && scene.Root[0].W.Evaluate(new EvalContext()) == 10f,
+                Said(scene));
+        }
+
+        var malformed = Parse("SCENE\nR id=bar w=10 h=10");
+        SceneParser.PatchNodes(new[] { P("nodes", Map(P("bar", Arr(Num(5))))) }, malformed);
+        run.Check("review: nonempty array is still not a patch map",
+            Says(malformed, "must be a map"), Said(malformed));
+
+        foreach (var (where, ease) in new[]
+        {
+            ("map value", Map(P("level", Str("=2")))),
+            ("nested duration", Map(P("level", Arr(Str("=2"), Str("linear"))))),
+            ("nested delay", Map(P("level", Arr(Num(0.5f), Str("linear"), Str("=2"))))),
+            ("numeric-keyed array", Arr(Arr(Str("=2"), Str("linear")))),
+        })
+        {
+            var scene = Parse("SCENE\nR w=10 h=10");
+            var changed = SceneParser.PatchNodes(new[] { P("ease", ease) }, scene);
+            run.Check($"review: computed ease {where} is reported",
+                changed && Says(scene, "ease \"=2\" is read as a plain number and is not evaluated; write a number"),
+                Said(scene));
+        }
+
+        var valid = Parse("SCENE\nR w=10 h=10");
+        var props = new[] { P("data", Map(P("level", Num(2)))),
+            P("ease", Map(P("level", Arr(Num(0.5f), Str("linear"), Num(0.1f))))) };
+        SceneParser.PatchNodes(props, valid);
+        var context = new EvalContext();
+        SceneParser.ReadData(props, context);
+        run.Check("review: literal ease duration, curve and delay stay silent",
+            valid.Problems.Count == 0 && context.Eased["level"].Seconds == 0.5f
+            && context.Eased["level"].Delay == 0.1f, Said(valid));
+
+        SceneParser.ReadData(new[] { P("data", Map(
+            P("words", Arr(Num(1), Str("true"), Str("false"))),
+            P("bools", Arr(Bool(true), Bool(false))))) }, context);
+        run.Check("review: numeric DATA arrays read boolean words and Lua booleans as 1/0",
+            context.Arrays["words"][0] == 1f && context.Arrays["words"][1] == 1f
+            && context.Arrays["words"][2] == 0f && context.Arrays["bools"][0] == 1f
+            && context.Arrays["bools"][1] == 0f,
+            $"words=[{string.Join(",", context.Arrays["words"])}], bools=[{string.Join(",", context.Arrays["bools"])}]");
+
+        foreach (var word in new[] { "True", "yes" })
+        {
+            var scene = Parse($"SCENE nofill={word}\nR w=10 h=10");
+            run.Check($"review: {word} diagnostic explains accepted boolean spelling",
+                Says(scene, "lowercase true/false are also accepted"), Said(scene));
+        }
+
+        foreach (var op in new[] { "LS", "SP", "P" })
+        {
+            var scene = Parse($"SCENE\n{op} x1=0 y1=0 x2=10 y2=10");
+            foreach (var key in new[] { "x1", "y1", "x2", "y2" })
+                run.Check($"review: {op} {key} diagnostic gives p guidance",
+                    Says(scene, $"unknown attribute \"{key}\";") && Says(scene, "p=[x1,y1,x2,y2,...]"),
+                    Said(scene));
+        }
     }
 
     /// <summary>S8: the ablation switches do not outlive the rebuild that set them.</summary>
