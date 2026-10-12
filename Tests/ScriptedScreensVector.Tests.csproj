@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <OutputType>Exe</OutputType>
         <TargetFramework>net8.0</TargetFramework>
@@ -54,6 +54,9 @@
         <Compile Include="..\Shadow.cs" />
         <Compile Include="..\Tessellator.cs" />
         <Compile Include="..\TessellationStats.cs" />
+<Compile Include="..\SurfaceProjection.cs" />
+<Compile Include="..\EdgeRamp.cs" />
+<Compile Include="PixelEdgeTests.cs" />
 <Compile Include="..\ScaleChoice.cs" />
 <Compile Include="ScaleChoiceTests.cs" />
 <Compile Include="..\TextOutline.cs" />

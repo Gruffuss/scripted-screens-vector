@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace ScriptedScreensVector.Tests;
@@ -208,6 +208,7 @@ internal static class Program
         RequirementTests.PointerScope(run);
         RequirementTests.PositionAndHover(run);
         SweepTests.Run(run);
+        PixelEdgeTests.Run(run);
         PageFontTests.Run(run);
         PatchPathTests.Run(run);
         ImageDecodeTests.Run(run);

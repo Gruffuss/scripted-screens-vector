@@ -22,6 +22,14 @@ internal static class FingerprintTests
                 == File.ReadAllText(Path.Combine(scenes, "zzz-nofill-control.txt")),
             "same geometry and paints");
         var actual = Fingerprint(scenes, run);
+        var raw = Fingerprint(scenes, run, raw: true);
+        var rawBaseline = Path.Combine(folder, "fingerprint-off-bytes.txt");
+        if (rebaseline && !run.HasFailures && !File.Exists(rawBaseline))
+            File.WriteAllLines(rawBaseline, raw, new UTF8Encoding(false));
+        if (File.Exists(rawBaseline))
+            run.Check("P7: PixelEdges off exact bytes (all 78 rows)",
+                string.Join("\n", raw) == File.ReadAllText(rawBaseline).Replace("\r", "").TrimEnd('\n'),
+                "positions, colours, uv0, uv1 and indices: unrounded SHA256");
         if (rebaseline)
         {
             if (run.HasFailures)
@@ -44,7 +52,7 @@ internal static class FingerprintTests
         }
     }
 
-    private static List<string> Fingerprint(string folder, TestRun run)
+    private static List<string> Fingerprint(string folder, TestRun run, bool raw = false)
     {
         var rows = new List<string>();
         var files = new List<string>(Directory.GetFiles(folder, "*.txt"));
@@ -112,7 +120,7 @@ internal static class FingerprintTests
                 rows.Add(string.Format(CultureInfo.InvariantCulture,
                     "{0}|t={1}|verts={2}|tris={3}|shapes={4}|hits={5}|labels={6}|bounds={7}|problems={8}|mesh={9}",
                     window.Name, time, mesh.currentVertCount, mesh.TriangleCount, shapes,
-                    hits.Count, stats.Text.Count, Bounds(mesh), scene.Problems.Count, MeshChecksum(mesh)));
+                    hits.Count, stats.Text.Count, Bounds(mesh), scene.Problems.Count, MeshChecksum(mesh, raw)));
 
                 if (window.Visible != null)
                     run.Check($"fingerprint: {window.Name} bounded at t={time}",
@@ -145,11 +153,15 @@ internal static class FingerprintTests
         throw new DirectoryNotFoundException("Tests/gate was not found above the test runner.");
     }
 
-    internal static string MeshChecksum(MeshBuilder mesh)
+    internal static string MeshChecksum(MeshBuilder mesh, bool raw = false)
     {
         using var bytes = new MemoryStream();
         using var writer = new BinaryWriter(bytes);
-        void Rounded(float value, double scale) => writer.Write(checked((long)Math.Round(value * scale, MidpointRounding.AwayFromZero)));
+        void Rounded(float value, double scale)
+        {
+            if (raw) writer.Write(value);
+            else writer.Write(checked((long)Math.Round(value * scale, MidpointRounding.AwayFromZero)));
+        }
         writer.Write(mesh.currentVertCount);
         writer.Write(mesh.TriangleCount);
         for (var i = 0; i < mesh.currentVertCount; i++)

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -318,7 +318,9 @@ internal sealed class MeshBuilder
 
     /// <summary>As <see cref="AddVert(Vector3, Color, Vector2)"/>, with a float coverage that
     /// multiplies alpha in the shader instead of being folded into the colour.</summary>
-    internal void AddVert(Vector3 position, Color colour, Vector2 uv, float coverage)
+    internal void AddVert(Vector3 position, Color colour, Vector2 uv, float coverage) => AddVert(position, colour, uv, coverage, 0f);
+
+    internal void AddVert(Vector3 position, Color colour, Vector2 uv, float coverage, float edge)
     {
         // Filters only: a group's mask is multiplied in once its content is known, MaskRange.
         if (Tint != null)
@@ -327,13 +329,13 @@ internal sealed class MeshBuilder
         _positions.Add(position);
         _colours.Add(colour);
         _uv0.Add(uv);
-        _uv1.Add(new Vector2(coverage, 0f));
+        _uv1.Add(new Vector2(coverage, edge));
 
         // Transparent vertices do not count: a feather ring or the fading edge of a shadow
         // cannot cover a label. Counted, they made every pair of flush boxes overlap by a
         // feather's width -- which grows with viewing distance -- and forced mesh cuts for
         // labels nothing covers.
-        if (!_trackBounds || colour.a <= 2f / 255f)
+        if (!_trackBounds || colour.a <= 2f / 255f || edge != 0f)
             return;
 
         if (position.x < _minX) _minX = position.x;
@@ -379,7 +381,7 @@ internal sealed class MeshBuilder
 
             for (var v = from; v < to; v++)
             {
-                if (_colours[v].a <= 2f / 255f)
+                if (_colours[v].a <= 2f / 255f || _uv1[v].y != 0f)
                     continue;
 
                 var local = (Vector2)mask.CanvasToLocal.MultiplyPoint3x4(_positions[v]);

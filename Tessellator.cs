@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Diagnostics;
@@ -53,7 +53,9 @@ internal static class Tessellator
     /// Auto-feather target, in screen pixels. Slightly over one pixel: enough to cover the
     /// hard step between covered and uncovered pixels, small enough not to look soft.
     /// </summary>
-    private const float AutoFeatherPixels = 1.3f;
+    internal const float AutoFeatherPixels = 1.3f;
+    internal const float EdgeBandSafety = 2f;
+    internal const float EdgeDriftLimit = 1.5f;
 
     /// <summary>Parameter span a triangle may cover before a gradient needs it subdivided.</summary>
     private const float GradientTolerance = 0.06f;
