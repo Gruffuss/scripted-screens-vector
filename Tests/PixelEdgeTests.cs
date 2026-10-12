@@ -224,8 +224,51 @@ internal static class PixelEdgeTests
             $"{fallbackVertices} behind vertices match the uniform mesh exactly");
     }
 
+    private static void ReviewProjection(TestRun run)
+    {
+        var m = Matrix4x4.identity;
+        m.m00 = 1.1f; m.m01 = 0.3f; m.m03 = -0.2f;
+        m.m10 = -0.4f; m.m11 = 1.7f; m.m13 = 0.6f;
+        m.m30 = 0.002f; m.m31 = -0.0003f; m.m33 = 2f;
+        var projection = SurfaceProjection.FromMatrix(m, 1920f, 1080f, 0.01f);
+        var matches = true;
+        foreach (var p in new[] { Vector2.zero, new Vector2(200f, 130f), new Vector2(400f, 400f) })
+        {
+            var w = m.m30 * p.x + m.m31 * p.y + m.m33;
+            var expected = new Vector2(960f * (1f + (m.m00 * p.x + m.m01 * p.y + m.m03) / w),
+                540f * (1f + (m.m10 * p.x + m.m11 * p.y + m.m13) / w));
+            matches &= (projection.Project(p) - expected).magnitude < 0.05f && projection.Depth(p) == w;
+        }
+        run.Check("review: camera matrix to screen projection", matches, "independent clip divide and viewport map");
+        var rect = new Rect(0f, 0f, 400f, 400f);
+        run.Check("review: stable projection never retriggers", !SurfaceProjection.Drifted(projection, projection, rect, 1.5f)
+            && !SurfaceProjection.Drifted(default, default, rect, 1.5f), "visible and uniform fallbacks");
+        var visible = Rig(0.02f, 0.515f);
+        var crossing = new SurfaceProjection(visible.A, visible.B, visible.C, 0.025f);
+        run.Check("review: visible corner recovery triggers", SurfaceProjection.Drifted(crossing, visible, rect, 1.5f), "corner becomes valid with unchanged Jacobian");
+        var state = new ScaleMeasurement();
+        var rejected = state.Measure(new Vector3(0f, 0f, 0.001f), new Vector3(100f, 0f, 1f), 0.01f, 400f);
+        run.Check("review: scalar rejection retains raw depth", rejected == -1f && state.Reason == ScaleMeasurement.Status.NearPlane
+            && state.LeftDepth == 0.001f && state.RightDepth == 1f && state.Near == 0.01f, "no formatting needed");
+        state.Measure(new Vector3(0f, 0f, 1f), new Vector3(float.NaN, 0f, 1f), 0.01f, 400f);
+        run.Check("review: invalid scalar span declines", state.Reason == ScaleMeasurement.Status.Span && float.IsNaN(state.Pixels), "documented NaN rejection");
+        void Frame()
+        {
+            state.Measure(new Vector3(0f, 0f, 0.001f), new Vector3(100f, 0f, 1f), 0.01f, 400f);
+            state.Measure(new Vector3(0f, 0f, 1f), new Vector3(200001f, 0f, 1f), 0.01f, 400f);
+            state.Measure(new Vector3(0f, 0f, 1f), new Vector3(100f, 0f, 1f), 0.01f, 400f);
+            SurfaceProjection.Drifted(projection, projection, rect, 1.5f);
+        }
+        for (var i = 0; i < 100; i++) Frame();
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 10000; i++) Frame();
+        var bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        run.Check("review: scalar and drift decisions allocate zero bytes per frame", bytes == 0, $"{bytes} bytes / 10000 frames");
+    }
+
     internal static void Run(TestRun run)
     {
+        ReviewProjection(run);
         foreach (var (name, projection) in new[] { ("frontal", Rig(1f, 1f)), ("grazing", Rig(0.151f, 0.515f)), ("near", Rig(0.013f, 0.549f)) })
         {
             var error = 0f;
@@ -260,9 +303,12 @@ internal static class PixelEdgeTests
             }
             run.Check($"P1 {name}: central differences", error < 1e-3f, $"relative error {error}");
         }
-        run.Check("P3: drift below limit", !SurfaceProjection.Drifted(new[] { 3f, 6f }, new[] { 3f / 1.49f, 6f / 1.49f }, 1.5f), "1.49x");
-        run.Check("P3: drift above limit", SurfaceProjection.Drifted(new[] { 3f, 6f }, new[] { 3f / 1.51f, 6f }, 1.5f), "1.51x");
-        run.Check("P3: lost projection rebuilds", SurfaceProjection.Drifted(new[] { 3f }, new[] { 0f }, 1.5f), "near plane");
+        var driftRect = new Rect(0f, 0f, 400f, 400f);
+        SurfaceProjection Flat(float x, float y) => new SurfaceProjection(new Vector3(x, 0f, 0f), new Vector3(0f, y, 0f), new Vector3(0f, 0f, 1f), 0f);
+        var built = Flat(3f, 6f);
+        run.Check("P3: drift below limit", !SurfaceProjection.Drifted(built, Flat(3f / 1.49f, 6f / 1.49f), driftRect, 1.5f), "1.49x");
+        run.Check("P3: drift above limit", SurfaceProjection.Drifted(built, Flat(3f / 1.51f, 6f), driftRect, 1.5f), "1.51x");
+        run.Check("P3: lost projection rebuilds", SurfaceProjection.Drifted(built, default, driftRect, 1.5f), "near plane");
         foreach (var (feature, effective) in new[] { (1.3f, 0f), (2.6f, 0.65f), (3.9f, 1.3f) })
         {
             var value = EdgeRamp.Coverage(0.325f / feature, 1f / feature, 1f, 1.3f);
@@ -292,6 +338,15 @@ internal static class PixelEdgeTests
         var pageScene = SceneParser.Parse(SceneText.ToProps(string.Join("\n", lines), "measurement")!)!;
         run.Check("measurement page parses", pageScene.Problems.Count == 0 && lines.Count == 21,
             string.Join("; ", pageScene.Problems) + $" ({lines.Count} lines)");
+        var root = Directory.GetParent(Directory.GetParent(gate)!.FullName)!.FullName;
+        var graphicSource = File.ReadAllText(Path.Combine(root, "VectorGraphic.cs"));
+        run.Check("review: scalar rejection defers formatting", !graphicSource.Contains("_scaleUnknownReason = $"), "no frame-time strings");
+        run.Check("review: drift is wired to static rebuild trigger", graphicSource.Contains("ScaleChanged() || ExtentDrifted()")
+            && graphicSource.Contains("_builtProjection = projection;")
+            && graphicSource.Contains("SurfaceProjection.Drifted(_builtProjection, Projection(), rectTransform.rect, Tessellator.EdgeDriftLimit)"), "snapshot and main-thread trigger");
+        run.Check("review: OFF dispatch skips projection", graphicSource.Contains("pixelEdges ? Projection() : default"), "projection gated by effective setting");
+        run.Check("review: compression can change axes", SurfaceProjection.Drifted(Flat(1f, 10f), Flat(10f, 1f), driftRect, 1.5f), "axis turn");
+        run.Check("review: invalid corner becomes visible", SurfaceProjection.Drifted(default, Flat(1f, 1f), driftRect, 1.5f), "near plane recovery");
         var clippedHoles = Emit("DEFS{CP id=c{R x=100 y=100 w=100 h=100}}\nG clip=c{P d=\"M0 0 H400 V400 H0 Z M150 150 H250 V250 H150 Z M300 300 H350 V350 H300 Z\" fr=evenodd f=#fff}", true);
         var insideClip = true;
         for (var i = 0; i < clippedHoles.currentVertCount; i++)

@@ -17,6 +17,18 @@ internal readonly struct SurfaceProjection
             && Finite(b.z) && Finite(c.x) && Finite(c.y) && Finite(c.z);
     }
 
+    internal static Vector2 Corner(Rect rect, int i) => new Vector2((i & 1) == 0 ? rect.xMin : rect.xMax,
+        (i & 2) == 0 ? rect.yMin : rect.yMax);
+
+    internal static SurfaceProjection FromMatrix(Matrix4x4 m, float width, float height, float near)
+    {
+        var hw = 0.5f * width; var hh = 0.5f * height;
+        return new SurfaceProjection(
+            new Vector3(hw * (m.m00 + m.m30), hw * (m.m01 + m.m31), hw * (m.m03 + m.m33)),
+            new Vector3(hh * (m.m10 + m.m30), hh * (m.m11 + m.m31), hh * (m.m13 + m.m33)),
+            new Vector3(m.m30, m.m31, m.m33), near);
+    }
+
     private static bool Finite(float x) => !float.IsNaN(x) && !float.IsInfinity(x);
     internal float Depth(Vector2 p) => C.x * p.x + C.y * p.y + C.z;
     internal Vector2 Project(Vector2 p)
@@ -66,10 +78,29 @@ internal readonly struct SurfaceProjection
         return largest > 0d ? (float)(Math.Abs(det) / largest) : 0f;
     }
 
-    internal static bool Drifted(float[] built, float[] now, float q)
+    internal static bool Drifted(SurfaceProjection built, SurfaceProjection now, Rect rect, float q)
     {
-        for (var i = 0; i < built.Length; i++)
-            if (built[i] > 0f && now[i] < built[i] / q) return true;
+        for (var i = 0; i < 4; i++)
+        {
+            var p = Corner(rect, i);
+            built.Jacobian(p, out var a, out var b, out var c, out var d, out var wasFront);
+            now.Jacobian(p, out var e, out var f, out var g, out var h, out var isFront);
+            if (wasFront != isFront) return true;
+            if (!isFront) continue;
+            var det = (double)a * d - (double)b * c;
+            var nextDet = (double)e * h - (double)f * g;
+            if (Math.Abs(det) < 1e-20)
+            {
+                if (Math.Abs(nextDet) >= 1e-20) return true;
+                continue;
+            }
+            // The relative Jacobian bounds contraction along every edge normal, including turns.
+            var relative = SigmaMin((float)((e * (double)d - f * (double)c) / det),
+                (float)((f * (double)a - e * (double)b) / det),
+                (float)((g * (double)d - h * (double)c) / det),
+                (float)((h * (double)a - g * (double)b) / det));
+            if (!Finite(relative) || relative < 1f / q) return true;
+        }
         return false;
     }
 }

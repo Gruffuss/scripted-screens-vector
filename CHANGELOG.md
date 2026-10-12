@@ -32,6 +32,12 @@ ScriptedScreens Vector, newest first.
 
 - Automatic hole antialiasing bands now stay inside their clip, including crossing and
   disjoint holes in the same path.
+- Screen-scale rejection stores raw measurements without allocating diagnostic strings per
+  frame. With pixel edges off, dispatch skips the per-vertex projection snapshot.
+- Automatic edge bands rebuild when compression turns toward another edge direction or a
+  corner crosses the near plane, while stable projections stay in their drift tolerance.
+- Non-finite scalar screen spans are rejected, including NaN, so an invalid camera projection
+  cannot enter the scale buckets. This validation also applies with pixel edges off.
 
 ### Changed
 

@@ -55,6 +55,7 @@
         <Compile Include="..\Tessellator.cs" />
         <Compile Include="..\TessellationStats.cs" />
 <Compile Include="..\SurfaceProjection.cs" />
+        <Compile Include="..\ScaleMeasurement.cs" />
 <Compile Include="..\EdgeRamp.cs" />
 <Compile Include="PixelEdgeTests.cs" />
 <Compile Include="..\ScaleChoice.cs" />
