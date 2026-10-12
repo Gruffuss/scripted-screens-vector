@@ -2,16 +2,26 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.115
+
+### Fixed
+
+- **A dashed stroke on an element that moved on screen could be missing dashes.** 0.11.114 builds
+  dashes only where they can reach the screen, and took the screen's position once per build; an
+  element that moved without a rebuild (inside a scroll view, say) could slide dashes culled at
+  build time into view. Dashes are now built over the screen plus one screen of margin on every
+  side, and a build that culled anything rebuilds once the screen leaves that margin. A page with
+  nothing culled pays nothing for it.
+- **An element scaled to zero lost every dashed stroke**, since its screen window came out
+  non-finite and rejected every segment. A non-finite window now means no window.
+- **A non-finite `dofs` drew no dashes at all**; it is now read as 0.
+- **A segment with an infinite or NaN end could still spin forever** when no window applied.
+  Such a segment draws nothing and ends the current dash.
+
 ## 0.11.114
 
 ### Fixed
 
-- Dashed strokes now rebuild when moving or scrolling beyond the last build's screen window,
-  with an extra screen of margin on every side to avoid rebuilding on small moves.
-- Non-finite screen windows from zero-scale transforms no longer discard dashed strokes.
-- Non-finite dash offsets are treated as zero.
-- Non-finite polyline segments are skipped and end their current dash run instead of hanging
-  the drawing worker or introducing invalid points.
 - Long dashed segments could hang the drawing worker when float precision stopped advancing
   along the line. Dash lengths and progress now use double precision.
 - Distant dashes could create millions of runs on every rebuild. Dashes are now generated only
