@@ -3305,7 +3305,7 @@ internal static class Tessellator
         if (node.TextIndex != null)
         {
             var at = node.TextIndex.Evaluate(context);
-            var element = StringSlot(context, name, at);
+            var element = StringSlot(context, name, at, scene);
             if (element != null)
                 return WithUnit(element, node, scene, ordinal);
 
@@ -3367,7 +3367,7 @@ internal static class Tessellator
             if (part.Index != null)
             {
                 var index = part.Index.Evaluate(context);
-                var element = StringSlot(context, name, index);
+                var element = StringSlot(context, name, index, scene);
                 if (element != null)
                 {
                     Append(element, ref at);
@@ -3411,8 +3411,15 @@ internal static class Tessellator
     /// One slot of a string array, or null -- without reporting the name missing, which
     /// `StringElement` does and which was wrong for every label bound to a NUMERIC array.
     /// </summary>
-    private static string? StringSlot(EvalContext context, string name, float index)
+    private static string? StringSlot(EvalContext context, string name, float index, VecScene scene)
     {
+        var length = context.StringArrays.TryGetValue(name, out var strings) && strings != null
+            ? strings.Length
+            : context.Arrays.TryGetValue(name, out var numbers) && numbers != null ? numbers.Length : -1;
+        var at = Mathf.RoundToInt(index);
+        if (length >= 0 && (at < 0 || at >= length))
+            scene.Problem($"array \"{name}\": index {at} is outside bounds (length {length}, 0-based)");
+
         return context.StringArrays.ContainsKey(name) ? context.StringElement(name, index) : null;
     }
 

@@ -712,7 +712,18 @@ internal static class SceneParser
                 if (string.Equals(prop.Key, "keep", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(prop.Key, "snap", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(prop.Key, "ease", StringComparison.OrdinalIgnoreCase))
-                    CheckLiteral(prop, scene, "data", null);
+                {
+                    var timings = string.Equals(prop.Key, "ease", StringComparison.OrdinalIgnoreCase)
+                        ? NamedMap(prop.Value) : null;
+                    if (timings != null)
+                    {
+                        foreach (var timing in timings)
+                            CheckLiteral(new SS.UiProp { Key = prop.Key, Value = timing.Value },
+                                scene, "data", timing.Key);
+                    }
+                    else
+                        CheckLiteral(prop, scene, "data", null);
+                }
             }
 
             return PatchNodesCore(props, scene) || scene.Problems.Count != problems;

@@ -47,7 +47,8 @@ from the **element**, always, so a `scene=` on a `SCENE` line does not pair anyt
 
 `keep`, `snap` and `ease` are literal-only: an `=` expression is reported on the paired scene
 and is not evaluated, including expressions inside easing maps and timing arrays. `keep` and
-`snap` keep their defaults; an expression used as an easing duration sets no timing.
+`snap` keep their defaults; an expression used as an easing duration sets no timing. Every
+bad entry in an easing map is reported by name, even when two entries contain the same expression.
 
 **Node patching.** Any node may carry an `id`, anywhere in the tree. The data element can then
 change that node's attributes without resending the scene:
@@ -1248,6 +1249,11 @@ placeholder instead.
 to its format item — is ordinary text and is reported.** An empty spec, `{$v:}`, is the default
 format.
 
+From 0.11.117, a text binding or placeholder with an index outside its array is reported as
+`array "arr": index 2 is outside bounds (length 2, 0-based)`. This applies to string and numeric
+arrays, even with `missing` declared. Its displayed fallback is unchanged: missing text for a
+string slot, `0` for a numeric slot. Numeric expressions retain their silent out-of-range `0`.
+
 **`unit` only follows text that came from data.** It is added after a bound string, after a bound
 number and its `fmt` — `fmt = "%.1f kPa"` with `unit = " U"` draws `12.3 kPa U` — and after the
 last character of a literal that holds placeholders, once, however many of them there are.
@@ -2416,8 +2422,8 @@ for k = 1, #cells do
 end
 ```
 
-**An index outside the array and a name that is not an array are different faults, and only the
-second is reported.** An index past the end or below zero, `$a[5]` over three elements or
+**In a numeric expression, an index outside the array and a name that is not an array are
+different faults, and only the second is reported.** An index past the end or below zero, `$a[5]` over three elements or
 `$a[-1]`, does not fail and is not listed: the array is there and only the slot is missing, which
 is exactly what a repeat of `n = 6` over three values does on purpose, and listing it would flag
 a scene that works. So an off-by-one shows up as a shape stuck at zero, not as an error. A name
