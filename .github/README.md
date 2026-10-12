@@ -106,7 +106,7 @@ seen to fail is an assumption, not a test.
 Working and in use on real consoles. The format covers groups, repeats, rectangles, ellipses,
 SVG paths with holes, polylines, polygons, sampled bands and lines, Catmull-Rom splines,
 linear, radial and conic gradients, clipping (convex and concave), strokes with
-caps/joins/dashes, geometric feathering, drop and inset shadows, blur on a group, text with
+caps/joins/dashes, per-pixel edge anti-aliasing, drop and inset shadows, blur on a group, text with
 control over draw order, pictures, clickable nodes, webfonts a page asks for, and a full
 expression grammar with deterministic hashing.
 

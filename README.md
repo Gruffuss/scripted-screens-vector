@@ -868,8 +868,8 @@ vector_stats            -- every live surface
 vector_stats scene=gas  -- one of them
 ```
 
-It reports node and shape counts, vertices, rebuild rate, tessellation and upload cost,
-on-screen size, whether the scene is animated or scroll-driven, and the same problems and
+It reports which console object each scene lives under, node and shape counts, vertices,
+rebuild rate, tessellation and upload cost, on-screen size, whether the scene is animated or scroll-driven, and the same problems and
 unresolved names. It is bound by reflection, so the mod is perfectly happy without it.
 
 For measuring rather than debugging, turn on `Diagnostics` in the mod settings and read the
@@ -939,6 +939,8 @@ in scene units, strokes clamp their feather to their width, and blur, shadows an
 their existing behavior. Pixel edges require the current shader bundle; missing, stale or
 unsupported bundles fall back to geometric feathering. `vector_stats` and Diagnostics report
 the corner depth ratio, scale spread and the reason when the scalar screen size is unknown.
+To compare the two on one console without a restart, put `nopixeledges=1` on a scene's
+`SCENE` line: that scene draws its automatic edges the old way.
 
 ## Requirements
 
