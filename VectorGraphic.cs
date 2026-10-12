@@ -40,7 +40,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             min = Vector3.Min(min, corner);
             max = Vector3.Max(max, corner);
         }
-        return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+        var visible = Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+        return DashWindow.Finite(visible) ? visible : null;
     }
 
     /// <summary>
@@ -436,6 +437,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>Reused while dropping finished glides; a dictionary cannot be edited mid-walk.</summary>
     private readonly List<string> _finishedGlides = new();
     private float _jobScreenPixels = -1f;
+    private Rect? _jobDashWindow;
+    private Rect? _dashWindow;
+    private bool _culledDashes;
 
     /// <summary>The last scale the projection actually resolved, for when it next declines.</summary>
     /// <remarks>
@@ -1182,10 +1186,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // feathered for a few pixels -- blurred -- with coarse curves and shadow rings.
         // The capture's clone has no renderer alpha of its own, so a fading group's `o` goes
         // into its colours here instead.
+        Rect? visible = null;
         Tessellator.BakeFades = true;
         try
         {
-            Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats, VisibleRect());
+            visible = VisibleRect();
+            Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats, visible);
         }
         catch (Exception e)
         {
@@ -1206,6 +1212,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         if (_scene.TextInOrder)
             TextOrder.Resolve(_stats.Text, _builder, _sliceCount);
         _lastShapeCount = _stats.Shapes;
+        _dashWindow = visible;
+        _culledDashes = _stats.CulledDashes;
         _lastVertices = _builder.currentVertCount;
         _builtForBucket = ScaleBucket();
 
@@ -2157,6 +2165,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             _needsRebuild = true;
         }
 
+        if (_culledDashes && DashWindow.NeedsRebuild(_dashWindow, VisibleRect()))
+        {
+            _culledDashes = false;
+            _needsRebuild = true;
+        }
+
         // A label that fell back because its face was not registered waits on the fonts mod's
         // registration count, the way a picture waits on the image cache. A drawn label never
         // re-resolves its own face, so without this a face that arrives by any route other than
@@ -2468,7 +2482,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // then is a far better estimate than 1 -- it is at worst slightly stale, where 1 is
         // categorically wrong. 1 survives only as the first-ever value, before anything is known.
         var scale = ScaleChoice.Choose(known, screenScale, _lastKnownScale);
-        var visible = VisibleRect();
+        var visible = DashWindow.Expand(VisibleRect());
+        _jobDashWindow = visible;
 
         _job = Task.Run(() =>
         {
@@ -2627,6 +2642,9 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 $"vector \"{_sceneId}\": tessellation failed: {job.Exception?.GetBaseException()}");
             return;
         }
+
+        _dashWindow = _jobDashWindow;
+        _culledDashes = _stats.CulledDashes;
 
         // Timed separately because they are different animals: Emit is our managed code,
         // while Apply and SetMesh are native calls that push the whole vertex buffer at the

@@ -6,6 +6,12 @@ ScriptedScreens Vector, newest first.
 
 ### Fixed
 
+- Dashed strokes now rebuild when moving or scrolling beyond the last build's screen window,
+  with an extra screen of margin on every side to avoid rebuilding on small moves.
+- Non-finite screen windows from zero-scale transforms no longer discard dashed strokes.
+- Non-finite dash offsets are treated as zero.
+- Non-finite polyline segments are skipped and end their current dash run instead of hanging
+  the drawing worker or introducing invalid points.
 - Long dashed segments could hang the drawing worker when float precision stopped advancing
   along the line. Dash lengths and progress now use double precision.
 - Distant dashes could create millions of runs on every rebuild. Dashes are now generated only
