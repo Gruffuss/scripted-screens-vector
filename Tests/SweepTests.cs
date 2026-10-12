@@ -80,6 +80,7 @@ internal static class SweepTests
         LiteralSlotsReportAnExpression(run);
         BooleanWordsAreRead(run);
         LiteralWordsAreReadOrReported(run);
+        NoPixelEdgesSwitch(run);
         BadNodePatchesAreReported(run);
         NumericMixIsReported(run);
         DataLiteralExpressionsAreReported(run);
@@ -441,6 +442,17 @@ internal static class SweepTests
             visible == null
                 ? "v was not read at all"
                 : $"{visible.Evaluate(new EvalContext())}, {Said(hidden)}");
+    }
+
+    internal static void NoPixelEdgesSwitch(TestRun run)
+    {
+        var on = Parse("SCENE nopixeledges=1\nR w=10 h=10");
+        var word = Parse("SCENE nopixeledges=\"true\"\nR w=10 h=10");
+        var off = Parse("SCENE\nR w=10 h=10");
+        run.Check("nopixeledges: read on the scene root, silently",
+            on.DebugNoPixelEdges && word.DebugNoPixelEdges && !off.DebugNoPixelEdges
+            && on.Problems.Count == 0 && word.Problems.Count == 0,
+            $"1={on.DebugNoPixelEdges} true={word.DebugNoPixelEdges} absent={off.DebugNoPixelEdges}, {Said(on)} {Said(word)}");
     }
 
     internal static void LiteralWordsAreReadOrReported(TestRun run)

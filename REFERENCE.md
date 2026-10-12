@@ -680,14 +680,15 @@ drawn after it, and wants that regardless of declaration order.
 
 Set on the **structure** element's props, alongside `root` — on the `SCENE` line in the text
 form. Each is a number: `1` turns one on, and so does a bare or quoted `1` in the text form.
-`0.5` or less is off, and so is `true`, `"yes"` or any other value that is not a number, **with
-no report**. They exist for measuring: each removes one stage so its cost can be subtracted, and
+`0.5` or less is off. Since 0.11.116 lowercase `true` and `false` read as `1` and `0`; any other
+word is reported and leaves the switch off. They exist for measuring: each removes one stage so its cost can be subtracted, and
 none of them leaves the picture as drawn.
 
 | Prop | What it removes |
 |------|-----------------|
 | `nofill` | the interior fill of `R`, `C`, `P`, `Y`, `SP` and `YS` (flat, linear, conic or radial, and a fill drawn as a group's `blur` silhouette) **and every `T` label**, dropped whole so the label count reads `0`. Still drawn: strokes, the feathered edge ring of a shape (an `R` at the default feather keeps its 8 vertices), shadows, and pictures. Up to 0.11.104 it also left radial-gradient and `blur`red fills drawn |
 | `nofeather` | the soft edge ring of closed fills and the sampled edge of a `YS`. A stroke's feather is unchanged, and so is any shape written with `fea = 0` |
+| `nopixeledges` | the per-pixel automatic edge (0.11.117): the scene's automatic edges are built with the geometric feather, exactly as with `Renderer.PixelEdges` off, so the two can be compared on one console without a restart. Explicit feathers, shadows and blur are unchanged either way |
 | `noeval` | **not expression evaluation in general.** It replaces `x`, `y`, `w` and `h` of every rectangle with the fixed values `40, 40, 2, 2`, constants as much as expressions. Every rectangle means an `R`, the box of an `IMG` (which then draws nothing you can see), the box of an `SC`, and the `R` of a clip whose box is an expression; a clip written with plain numbers is cut when the scene is parsed and keeps its shape. Everything else is evaluated as usual: `rx`, `ry`, `fo`, `sw`, and everything on `C`, `G`, `YS` and `T` |
 
 A `noeval` scene is also not the same scene drawn smaller, so any vertex count that follows size
@@ -2349,7 +2350,7 @@ These take one, each number of a pair or list separately:
 
 These take a **literal number only**, and an expression in one of them is not evaluated:
 
-- the scene's `w` `h` `nofill` `nofeather` `noeval` `ztext`, and a data element's `keep` `snap`
+- the scene's `w` `h` `nofill` `nofeather` `nopixeledges` `noeval` `ztext`, and a data element's `keep` `snap`
   and `ease`;
 - every count and switch: `n` (on `RP`, `YS` and `LS`), `lod`, `seg`, `close`, `mid`, `kern`,
   `wrap`, and `click` `press` `xy` `hoverev` `drag` `drop`;

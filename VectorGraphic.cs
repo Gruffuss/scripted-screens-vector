@@ -1234,7 +1234,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         try
         {
             visible = VisibleRect();
-            Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats, visible, pixelEdges: VectorConfig.PixelEdges);
+            Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats, visible, pixelEdges: VectorConfig.PixelEdges && !_scene.DebugNoPixelEdges);
         }
         catch (Exception e)
         {
@@ -2538,7 +2538,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // then is a far better estimate than 1 -- it is at worst slightly stale, where 1 is
         // categorically wrong. 1 survives only as the first-ever value, before anything is known.
         var scale = ScaleChoice.Choose(known, screenScale, _lastKnownScale);
-        var pixelEdges = Tessellator.PixelEdgesAvailable && Tessellator.CoverageInUv && VectorConfig.PixelEdges;
+        var pixelEdges = Tessellator.PixelEdgesAvailable && Tessellator.CoverageInUv && VectorConfig.PixelEdges
+                         && !(_scene?.DebugNoPixelEdges ?? false);
         var projection = pixelEdges ? Projection() : default;
         _builtPixelEdges = pixelEdges;
         _builtProjection = projection;

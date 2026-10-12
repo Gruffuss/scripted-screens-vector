@@ -481,7 +481,7 @@ internal sealed class VecScene
     /// per shape of diffuse work with no obvious peak, and the only way to localise that
     /// without a profiler is to remove one stage at a time and subtract.
     ///
-    /// Set on the scene root: `nofill = 1`, `nofeather = 1`, `noeval = 1`.
+    /// Set on the scene root: `nofill = 1`, `nofeather = 1`, `noeval = 1`, `nopixeledges = 1`.
     /// </remarks>
     internal bool DebugNoFill;
 
@@ -510,6 +510,9 @@ internal sealed class VecScene
     internal bool TextInOrder;
 
     internal bool DebugNoFeather;
+
+    /// <summary>Draw this scene's automatic edges with the geometric feather, as with `Renderer.PixelEdges` off.</summary>
+    internal bool DebugNoPixelEdges;
 
     /// <summary>Evaluate every attribute once and reuse, isolating evaluation from geometry.</summary>
     internal bool DebugNoEval;
@@ -628,6 +631,7 @@ internal static class SceneParser
             DebugNoFill = PropNumber(props, "nofill", 0f) > 0.5f,
             TextInOrder = PropNumber(props, "ztext", 1f) > 0.5f,
             DebugNoFeather = PropNumber(props, "nofeather", 0f) > 0.5f,
+            DebugNoPixelEdges = PropNumber(props, "nopixeledges", 0f) > 0.5f,
             DebugNoEval = PropNumber(props, "noeval", 0f) > 0.5f,
         };
 
@@ -1494,7 +1498,7 @@ internal static class SceneParser
     /// </remarks>
     private static readonly HashSet<string> SceneKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "scene", "root", "defs", "nofill", "nofeather", "noeval", "ztext", "probe",
+        "scene", "root", "defs", "nofill", "nofeather", "nopixeledges", "noeval", "ztext", "probe",
         "visible", "parent_id", "z_index", "zIndex",
         "visor_anchor_look", "visor_anchor_ref", "visor_anchor_dx", "visor_anchor_dy",
     };
@@ -1535,7 +1539,7 @@ internal static class SceneParser
     /// <summary>The scene header's literal-only keys, judged only on the header.</summary>
     private static readonly HashSet<string> SceneLiteralKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "w", "h", "nofill", "nofeather", "noeval", "ztext",
+        "w", "h", "nofill", "nofeather", "nopixeledges", "noeval", "ztext",
     };
 
     /// <summary>Reports a computed value or unknown word where only a literal number is read.</summary>

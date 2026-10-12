@@ -8,6 +8,8 @@ ScriptedScreens Vector, newest first.
 
 - `vector_stats` now names the hierarchy that holds each scene and says when it is inactive,
   so a scene still listed after its element was cleared shows what is keeping it.
+- New scene-root switch `nopixeledges = 1`: that scene's automatic edges use the geometric
+  feather, as with `Renderer.PixelEdges` off, for comparing the two without a restart.
 - `Renderer.PixelEdges` is on by default and takes effect at the next rebuild. Off, or a
   missing, stale or unsupported shader bundle, uses the previous geometric feather.
 - Sharp rectangle sides now get the documented 1.3 px automatic ramp rather than about
@@ -46,6 +48,8 @@ ScriptedScreens Vector, newest first.
   stroke-width clamp and filled-shape size falloff instead of fading across their full extent.
 - Nearly singular projections cannot extend a band more than four surface widths or heights.
   Inward rings keep their direction at spikes, and disabled pixel rings emit no triangles.
+- The reference said the scene-root switches read `true` as off with no report; since
+  0.11.116 `true` turns one on and other words are reported.
 - The automatic 1.3 px ramp also corrects polygon sides: regular hexagons previously got
   about 1.13 px and triangles about 0.65 px, alongside rectangles at about 0.92 px.
 
