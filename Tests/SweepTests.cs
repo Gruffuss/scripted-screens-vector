@@ -83,6 +83,10 @@ internal static class SweepTests
         SampledPaintBindsToItsSample(run);
         LiteralSlotsReportAnExpression(run);
         BooleanWordsAreRead(run);
+        LiteralWordsAreReadOrReported(run);
+        BadNodePatchesAreReported(run);
+        NumericMixIsReported(run);
+        DataLiteralExpressionsAreReported(run);
     }
 
     /// <summary>C21: a number in a slot that holds free text or an identifier.</summary>
@@ -426,9 +430,6 @@ internal static class SweepTests
     /// 0.11.104 -- `v=false` reported `expression "false": unknown variable 'false'` and
     /// left the node VISIBLE, which is the attribute's default.
     ///
-    /// The batch's version of this method also carried three SCENE-TEXT switch cases
-    /// (`nofill=true`, `click=true`, `kern=false`). Those test S9's SceneModel patch, and
-    /// S9 is held out of this release, so they are held out with it.
     /// </remarks>
     internal static void BooleanWordsAreRead(TestRun run)
     {
@@ -440,6 +441,98 @@ internal static class SweepTests
             visible == null
                 ? "v was not read at all"
                 : $"{visible.Evaluate(new EvalContext())}, {Said(hidden)}");
+    }
+
+    internal static void LiteralWordsAreReadOrReported(TestRun run)
+    {
+        foreach (var (word, value) in new[] { ("true", 1f), ("false", 0f) })
+        {
+            var header = Parse($"SCENE nofill=\"{word}\" ztext=\"{word}\"\nR w=10 h=10");
+            run.Check($"literal words: PropNumber {word}",
+                header.DebugNoFill == (value == 1f) && header.TextInOrder == (value == 1f)
+                && header.Problems.Count == 0, Said(header));
+            var matrix = Parse($"SCENE\nG m=[\"{word}\",0,0,1,0,0] {{ R w=10 h=10 }}");
+            run.Check($"literal words: Scalar {word}",
+                matrix.Root[0].GroupMatrix![0] == value && matrix.Problems.Count == 0,
+                $"m[0]={matrix.Root[0].GroupMatrix![0]}, {Said(matrix)}");
+            var label = Parse($"SCENE\nT text=hi kern=\"{word}\"");
+            run.Check($"literal words: kern {word}",
+                label.Root[0].Kern == (value == 1f) && label.Problems.Count == 0, Said(label));
+        }
+
+        foreach (var word in new[] { "wrong", "True", "FALSE" })
+        {
+            var header = Parse($"SCENE nofill=\"{word}\"\nR w=10 h=10");
+            run.Check($"literal words: PropNumber {word} reported",
+                Says(header, $"nofill \"{word}\"") && !header.DebugNoFill, Said(header));
+            var matrix = Parse($"SCENE\nG m=[\"{word}\",0,0,1,0,0] {{ R w=10 h=10 }}");
+            run.Check($"literal words: Scalar {word} reported",
+                Says(matrix, $"m \"{word}\"") && matrix.Root[0].GroupMatrix![0] == 0f, Said(matrix));
+        }
+
+        var numbers = Parse("SCENE nofill=0\nG m=[1,0,0,1,0,0] { R w=10 h=10 }");
+        run.Check("literal words: numbers stay silent", numbers.Problems.Count == 0, Said(numbers));
+    }
+
+    internal static void BadNodePatchesAreReported(TestRun run)
+    {
+        foreach (var value in new[] { Num(5), Str("wrong") })
+        {
+            var scene = Parse("SCENE\nR id=bar w=10 h=10");
+            var changed = SceneParser.PatchNodes(new[] { P("nodes", Map(P("bar", value))) }, scene);
+            run.Check($"nodes: {value.Type} patch reported",
+                Says(scene, "patch for node id \"bar\" must be a map")
+                && scene.Root[0].W.Evaluate(new EvalContext()) == 10f, Said(scene));
+            run.Check($"nodes: {value.Type} diagnostic requests a rebuild", changed, Said(scene));
+        }
+
+        var valid = Parse("SCENE\nR id=bar w=10 h=10");
+        var applied = SceneParser.PatchNodes(new[] { P("nodes", Map(P("hole", default),
+            P("bar", Map(P("w", Num(20)))))) }, valid);
+        run.Check("nodes: Nil hole and valid map stay silent",
+            applied && valid.Root[0].W.Evaluate(new EvalContext()) == 20f
+            && valid.Problems.Count == 0, Said(valid));
+    }
+
+    internal static void NumericMixIsReported(TestRun run)
+    {
+        foreach (var depth in new[] { 0, 300 })
+        {
+            var scene = Parse($"SCENE\nR x=\"={new string('-', depth)}mix(1,2,0.5)\" w=10 h=10");
+            run.Check($"numeric mix: depth {depth} reported at parse time",
+                Says(scene, "mix") && Says(scene, "this attribute takes a number"), Said(scene));
+            run.Check($"numeric mix: depth {depth} still evaluates to zero",
+                scene.Root[0].X.Evaluate(new EvalContext()) == 0f, Said(scene));
+        }
+
+        var numeric = Parse("SCENE\nR x=\"=min(1,2)\" w=10 h=10");
+        run.Check("numeric mix: numeric function stays silent",
+            numeric.Problems.Count == 0 && numeric.Root[0].X.Evaluate(new EvalContext()) == 1f,
+            Said(numeric));
+    }
+
+    internal static void DataLiteralExpressionsAreReported(TestRun run)
+    {
+        foreach (var key in new[] { "keep", "snap", "ease" })
+        {
+            var scene = Parse("SCENE\nR w=10 h=10");
+            var changed = SceneParser.PatchNodes(
+                new[] { P(key, Str("=1")), P("data", Map(P("v", Num(2)))) }, scene);
+            run.Check($"data literals: {key} expression reported",
+                Says(scene, $"{key} \"=1\" is read as a plain number and is not evaluated; write a number"),
+                Said(scene));
+            run.Check($"data literals: {key} diagnostic requests a rebuild", changed, Said(scene));
+        }
+
+        var valid = Parse("SCENE\nR w=10 h=10");
+        var props = new[] { P("keep", Num(1)), P("snap", Num(1)),
+            P("ease", Map(P("v", Num(0.5f)))), P("data", Map(P("v", Num(2)))) };
+        var needsRebuild = SceneParser.PatchNodes(props, valid);
+        var data = new EvalContext();
+        SceneParser.ReadData(props, data);
+        run.Check("data literals: valid controls stay silent and work",
+            !needsRebuild && valid.Problems.Count == 0 && data.KeepUnmentioned && data.Snapped.Contains("v")
+            && data.Eased.Count == 0, Said(valid));
     }
 
     /// <summary>S8: the ablation switches do not outlive the rebuild that set them.</summary>

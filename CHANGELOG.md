@@ -2,6 +2,25 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.116
+
+### Changed
+
+- Scene text now reads lowercase `true` as `1` and `false` as `0` in literal-only numeric
+  slots, including entries in number lists. `nofill="true"`, `close="true"`, `kern="false"`
+  and `ztext="false"` now do what they say, which can change an existing scene's appearance.
+  Other words in these slots are reported instead of silently falling back.
+
+### Fixed
+
+- A `nodes` entry holding a number or string instead of a patch map is now reported. `Nil`
+  holes from sparse tables remain silent. New patch problems request a rebuild so the
+  magenta border appears even when no geometry changed.
+- `mix(...)` in a numeric attribute is now reported even when it contains no colour literal,
+  on both shallow and deep expression paths. Its numeric result remains `0`.
+- `keep`, `snap` and `ease` now report an `=` expression with the same wording as other
+  literal-only slots. Reports also reach a scene when its data arrives before its structure.
+
 ## 0.11.115
 
 ### Fixed

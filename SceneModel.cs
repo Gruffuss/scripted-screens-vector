@@ -680,7 +680,7 @@ internal static class SceneParser
     /// Applies `nodes = { id = { field = value } }` from the data element to a scene.
     /// </summary>
     /// <remarks>
-    /// Returns true when anything changed, so the caller can skip a rebuild otherwise.
+    /// Returns true when geometry or problems changed, so the caller rebuilds the border too.
     ///
     /// This is a prop on the DATA element rather than a method on the element handle. The
     /// handle belongs to ScriptedScreens; this mod is a postfix on ApplyElementInternal and
@@ -701,7 +701,16 @@ internal static class SceneParser
         Expression.Report = message => scene.Problem(message);
         try
         {
-            return PatchNodesCore(props, scene);
+            var problems = scene.Problems.Count;
+            foreach (var prop in props)
+            {
+                if (string.Equals(prop.Key, "keep", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(prop.Key, "snap", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(prop.Key, "ease", StringComparison.OrdinalIgnoreCase))
+                    CheckLiteral(prop, scene, "data", null);
+            }
+
+            return PatchNodesCore(props, scene) || scene.Problems.Count != problems;
         }
         finally
         {
@@ -785,9 +794,12 @@ internal static class SceneParser
 
         foreach (var entry in patch)
         {
-            if (string.IsNullOrEmpty(entry.Key)
-                || entry.Value.Type != SS.UiValueType.Map || entry.Value.Map == null)
+            if (string.IsNullOrEmpty(entry.Key) || entry.Value.Type == SS.UiValueType.Nil)
+                continue;
+
+            if (entry.Value.Type != SS.UiValueType.Map || entry.Value.Map == null)
             {
+                scene.Problem($"patch for node id \"{entry.Key}\" must be a map");
                 continue;
             }
 
@@ -1488,8 +1500,8 @@ internal static class SceneParser
     ///
     /// Left out because something already reports them: a shadow's four numbers
     /// (`ParseShadow`), `weight` (`CheckWord`) and an `fl`'s `size` (`FirstLineStyle`). `keep`,
-    /// `snap` and `ease` are literal-only too and are NOT here: they live on the DATA element,
-    /// which `ReadData` reads with no scene to report to.
+    /// `snap` and `ease` live on the DATA element and are checked when its payload reaches
+    /// the scene through `PatchNodes`.
     ///
     /// `w` and `h` are in <see cref="SceneLiteralKeys"/> instead, since on a NODE they take an
     /// expression; this set is judged on every op except the header.
@@ -1508,7 +1520,7 @@ internal static class SceneParser
         "w", "h", "nofill", "nofeather", "noeval", "ztext",
     };
 
-    /// <summary>Reports a computed value written where only a literal number is read.</summary>
+    /// <summary>Reports a computed value or unknown word where only a literal number is read.</summary>
     /// <remarks>
     /// An `=` is an expression and a `$` is a data name; both are dropped whole and the key
     /// keeps its default. `%param` is NOT reported: a symbol parameter is substituted before the
@@ -1518,13 +1530,13 @@ internal static class SceneParser
     /// </remarks>
     private static void CheckLiteral(SS.UiProp prop, VecScene scene, string? op, string? id)
     {
-        var text = ComputedText(prop.Value);
+        var text = InvalidLiteralText(prop.Value);
 
         if (text == null && prop.Value.Type == SS.UiValueType.Array && prop.Value.Array != null)
         {
             foreach (var item in prop.Value.Array)
             {
-                text = ComputedText(item);
+                text = InvalidLiteralText(item);
                 if (text != null)
                     break;
             }
@@ -1538,14 +1550,16 @@ internal static class SceneParser
                       + "write a number");
     }
 
-    /// <summary>The text of a value asking to be computed -- an `=` expression or a `$` name.</summary>
-    private static string? ComputedText(SS.UiValue value)
+    /// <summary>A computed value or word that cannot be read as a literal number.</summary>
+    private static string? InvalidLiteralText(SS.UiValue value)
     {
         if (value.Type != SS.UiValueType.String || string.IsNullOrEmpty(value.String))
             return null;
 
         var text = value.String!;
-        return text[0] == '=' || text[0] == '$' ? text : null;
+        return text[0] == '%' || text == "true" || text == "false"
+               || float.TryParse(text, System.Globalization.NumberStyles.Float,
+                   System.Globalization.CultureInfo.InvariantCulture, out _) ? null : text;
     }
 
     private static void Validate(SS.UiProp[] map, VecScene scene, string? op, string? id)
@@ -3623,6 +3637,8 @@ internal static class SceneParser
         {
             SS.UiValueType.Number => value.Value.Number,
             SS.UiValueType.Bool => value.Value.Bool ? 1f : 0f,
+            SS.UiValueType.String when value.Value.String == "true" => 1f,
+            SS.UiValueType.String when value.Value.String == "false" => 0f,
             _ => fallback,
         };
     }
@@ -3645,6 +3661,8 @@ internal static class SceneParser
         {
             SS.UiValueType.Number => value.Number,
             SS.UiValueType.Bool => value.Bool ? 1f : 0f,
+            SS.UiValueType.String when value.String == "true" => 1f,
+            SS.UiValueType.String when value.String == "false" => 0f,
             _ => 0f,
         };
     }

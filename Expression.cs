@@ -670,15 +670,15 @@ internal sealed class Expression
             parser.ExpectEnd();
             expression._treeDepth = MeasureDepth(expression);
 
-            // A colour literal is 0 on the numeric path, so `x = "=#5FD9A8"` put the shape at
+            // A colour literal or mix() is 0 on the numeric path, so `x = "=#5FD9A8"` put the shape at
             // 0, `w = "=#fff"` collapsed it, and `mix(#A,#B,t)` in a numeric slot was
             // `mix(0,0,t)` -- all of it silent, while the opposite mistake (a number where a
             // colour belongs) has always been reported. Checked here rather than at each call
             // site because this is the one place a numeric attribute's text becomes a tree;
             // the two attributes that WANT a colour pass `colour: true`.
-            if (!colour && expression.ContainsColour)
+            if (!colour && expression.ContainsColourOperation)
             {
-                Report?.Invoke($"expression \"{source}\" holds a colour, "
+                Report?.Invoke($"expression \"{source}\" holds a colour or mix(), "
                                + "but this attribute takes a number");
             }
 
@@ -883,14 +883,14 @@ internal sealed class Expression
         }
     }
 
-    /// <summary>True when a colour literal is anywhere in this expression.</summary>
+    /// <summary>True when a colour literal or mix() is anywhere in this expression.</summary>
     /// <remarks>
     /// Not the same question as <see cref="IsColour"/>, which asks whether every branch that can
     /// be RETURNED is a colour. This asks whether one is in there at all, which is what makes a
     /// numeric attribute's value wrong: `#5FD9A8+1` is not a colour by `IsColour` and is not a
     /// number either. Iterative for the same reason as every other walk here.
     /// </remarks>
-    internal bool ContainsColour
+    internal bool ContainsColourOperation
     {
         get
         {
@@ -900,7 +900,8 @@ internal sealed class Expression
             while (stack.Count > 0)
             {
                 var node = stack.Pop();
-                if (node._kind == Kind.Colour)
+                if (node._kind == Kind.Colour
+                    || node._kind == Kind.Call && string.Equals(node._name, "mix", StringComparison.Ordinal))
                     return true;
 
                 foreach (var argument in node._args)

@@ -45,6 +45,9 @@ from the **element**, always, so a `scene=` on a `SCENE` line does not pair anyt
 | `snap` | number | `1` applies this payload's numbers and number arrays at once instead of easing them in |
 | `ease` | map | per-name glide timing: `{ name = seconds }` or `{ name = { seconds, "curve", delay } }` |
 
+`keep`, `snap` and `ease` are literal-only: an `=` expression is reported on the paired scene
+and is not evaluated. `keep` and `snap` keep their defaults; an expression in `ease` sets no timing.
+
 **Node patching.** Any node may carry an `id`, anywhere in the tree. The data element can then
 change that node's attributes without resending the scene:
 
@@ -69,7 +72,8 @@ names `1` upwards, which is exactly what was written. Keys of zero or below are 
 host before the mod sees them, leaving an empty table and nothing to report. A `nodes` table
 written as a plain LIST, with `table.insert` or `{ { w = 42 } }`, therefore arrives naming the
 nodes `1`, `2`, `3`: it reaches those ids if they exist and is **reported** as an unknown id if
-they do not.
+they do not. An entry whose value is not a patch map, such as `nodes = { bar = 5 }`, is
+reported. `Nil` entries stay silent because they can be holes left by the Lua bridge.
 
 Use it for a change no expression can express — a different op, a new gradient reference, a
 count. For anything that is only a *value*, prefer `data` and an expression: that path needs
@@ -1877,7 +1881,9 @@ number. **A colour read as a number is `0`, and since 0.11.102 that is reported*
 `x = "=#5FD9A8"`, `x = "=mix(#A,#B,0.5)"` and even `x = "=#5FD9A8+1"` leave the attribute at `0`
 and say so, wherever a number is wanted: an attribute, a `{=...}` placeholder, an array index or
 a gradient stop's position. The value is unchanged, so nothing moves — what is new is that the
-scene shows the problem border instead of drawing at 0 in silence. The other direction was always
+scene shows the problem border instead of drawing at 0 in silence. From 0.11.116, `mix(...)`
+is also reported in a numeric attribute when there is no colour literal anywhere in it:
+`x = "=mix(1,2,0.5)"` still reads `0` and now reports the mistake. The other direction was always
 louder: an expression in a colour attribute that does not give a colour is reported and drawn
 magenta.
 
@@ -2329,8 +2335,11 @@ element by element, so one computed entry among six is reported as well. Where t
 value is one string, `m`, `slice`, `bw` and `uv` also keep their own length message, so one
 mistake there prints two lines; `sh` and `oc` are reported by their own check alone, as are
 `weight`, which is not one of its words, and the `size` inside `fl`, which is not a number.
-**A data element's `keep`, `snap` and `ease` are the silence that is left**: they are read off
-the data element, which has no scene to report to. Sent from a Lua table, a value that only
+**From 0.11.116, a data element's `keep`, `snap` and `ease` report computed values too**, on
+the paired scene, including when the payload arrives before the structure. Scene text also
+reads lowercase `true` and `false` as `1` and `0` in literal-only numeric slots and number
+lists. Other words, including `True` and `FALSE`, are reported and keep the slot's fallback.
+Sent from a Lua table, a value that only
 looks like a number — the string `"3"` — is read as `3` by the keys above and not at all by
 these, and is not reported: it is a number, only spelled as a string.
 
