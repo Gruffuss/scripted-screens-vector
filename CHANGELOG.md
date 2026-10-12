@@ -2,6 +2,24 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.116
+
+### Fixed
+
+- **Dashed strokes with `units=bbox` gradients now use the whole undashed path's bounds.**
+  This changes their appearance: the gradient spans the path instead of restarting on every
+  dash, including dashes cut by the screen window or a clip. Undashed strokes are unchanged.
+- **Collapsed elements no longer walk every dash.** A non-finite screen rectangle culls all
+  dashes and triggers a rebuild when the screen rectangle becomes finite again. Singular or
+  non-finite node transforms also skip dashed strokes.
+- **Identical data payloads no longer rebuild the scene or restart its blend clock.** Full
+  payloads still remove omitted names. Arrival times still advance, and scenes reading
+  `since($name)` rebuild for those arrivals without restarting a value blend.
+- **`vector_stats` now works from either thread.** Background requests run through the main
+  thread's frame pump, with a short timeout reporting “game busy, try again”. The first request
+  logs which path it took. Surfaces being rebuilt report that status while their worker owns
+  the diagnostics.
+
 ## 0.11.115
 
 ### Fixed

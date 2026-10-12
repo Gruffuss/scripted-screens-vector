@@ -404,6 +404,8 @@ internal sealed class VecScene
     /// <summary>Some expression reads `hover` or `down`, so pointer movement over a clickable node redraws.</summary>
     internal bool UsesPointer;
 
+    internal bool UsesSince;
+
     internal bool UsesScroll;
 
     /// <summary>
@@ -615,6 +617,7 @@ internal static class SceneParser
             return null;
 
         Expression.SawPointer = false;
+        Expression.SawSince = false;
 
         var scene = new VecScene
         {
@@ -668,6 +671,7 @@ internal static class SceneParser
         scene.UsesTime |= scene.DefsUseTime;
         scene.UsesScroll |= scene.DefsUseScroll;
         scene.UsesPointer = Expression.SawPointer;
+        scene.UsesSince = Expression.SawSince;
 
         Reindex(scene);
         Expression.Report = null;
@@ -692,6 +696,7 @@ internal static class SceneParser
     internal static bool PatchNodes(SS.UiProp[] props, VecScene scene)
     {
         Expression.SawPointer = false;
+        Expression.SawSince = false;
 
         // A patch re-parses the node, so every expression on it goes through the parser again --
         // but `Report` is only set while the SCENE is being built, so a patch that carried a
@@ -707,6 +712,7 @@ internal static class SceneParser
         {
             Expression.Report = reporting;
             scene.UsesPointer |= Expression.SawPointer;
+            scene.UsesSince |= Expression.SawSince;
         }
     }
 

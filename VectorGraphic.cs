@@ -41,7 +41,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             max = Vector3.Max(max, corner);
         }
         var visible = Rect.MinMaxRect(min.x, min.y, max.x, max.y);
-        return DashWindow.Finite(visible) ? visible : null;
+        return visible;
     }
 
     /// <summary>
@@ -1492,6 +1492,13 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     {
         into.AppendLine($"scene \"{_sceneId}\"");
 
+        // The worker owns the scene diagnostics, text warnings and mesh until it finishes.
+        if (_job is { IsCompleted: false })
+        {
+            into.AppendLine("  rebuild in progress; game busy, try again");
+            return;
+        }
+
         if (_scene == null)
         {
             into.AppendLine("  no scene parsed");
@@ -1707,8 +1714,26 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // values or strings used to restart it too, so a snapped value sent beside an eased one
         // collapsed the eased glide to the 0.05 s minimum -- it jumped. Patches arriving within
         // that minimum of each other are one batch, so two data elements sending in the same
-        // tick do not shorten the glide either. A full payload always starts a batch, as before.
+        // tick do not shorten the glide either. A changed full payload always starts a batch.
         var now = Now();
+        var (changed, rebuild) = _context.CompareData(source, _scene?.UsesSince == true);
+
+        // Arrivals advance even when the values do not; only `since` needs a redraw then.
+        StampArrivals(source.Scalars.Keys, now);
+        StampArrivals(source.Arrays.Keys, now);
+        StampArrivals(source.Strings.Keys, now);
+        StampArrivals(source.Colours.Keys, now);
+        StampArrivals(source.StringArrays.Keys, now);
+        StampArrivals(source.ColourArrays.Keys, now);
+        if (!changed)
+        {
+            if (rebuild)
+            {
+                _dataDirty = true;
+                SetVerticesDirty();
+            }
+            return;
+        }
         var batch = !keep || (EasesSomething(source) && now - _dataArrived >= MinBlendSeconds);
 
         if (batch)
@@ -1739,14 +1764,6 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             else
                 _context.PreviousColours.Remove(pair.Key);
         }
-
-        // `since($name)` counts from here, whatever kind the value is.
-        StampArrivals(source.Scalars.Keys, now);
-        StampArrivals(source.Arrays.Keys, now);
-        StampArrivals(source.Strings.Keys, now);
-        StampArrivals(source.Colours.Keys, now);
-        StampArrivals(source.StringArrays.Keys, now);
-        StampArrivals(source.ColourArrays.Keys, now);
 
         if (!keep)
             _context.Scalars.Clear();

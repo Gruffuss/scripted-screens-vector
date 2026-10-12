@@ -147,7 +147,7 @@ internal static class DashTests
             && !DashWindow.Finite(new Rect(0, 0, float.NegativeInfinity, 50))
             && !DashWindow.Finite(new Rect(0, 0, 100, float.NaN))
             && DashWindow.Expand(new Rect(float.MaxValue / 2, 0, float.MaxValue / 2, 50)) == null,
-            "invalid inverse-transform results disable culling");
+            "invalid bounds are detected; expansion overflow disables the window");
 
         var stats = new TessellationStats();
         var node = new VecNode { Op = VecOp.Polyline, HasStroke = true,

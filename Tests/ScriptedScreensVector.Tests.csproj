@@ -58,6 +58,8 @@
 <Compile Include="..\TextOutline.cs" />
 <Compile Include="TextOutlineTests.cs" />
         <Compile Include="DashTests.cs" />
+        <Compile Include="RendererRegressionTests.cs" />
+        <Compile Include="..\MainThreadWork.cs" />
         <Compile Include="..\ColourFilter.cs" />
         <Compile Include="..\ConvexPartition.cs" />
         <Compile Include="ImageCacheStub.cs" />

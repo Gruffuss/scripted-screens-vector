@@ -208,6 +208,7 @@ internal static class Program
         ScaleChoiceTests.Run(run);
         TextOutlineTests.Run(run);
         DashTests.Run(run);
+        RendererRegressionTests.Run(run);
         EasingTests.Curves(run);
         EasingTests.Payload(run);
 
