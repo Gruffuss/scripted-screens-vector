@@ -88,6 +88,7 @@ internal static class SweepTests
         NumericMixIsReported(run);
         DataLiteralExpressionsAreReported(run);
         EndpointAttributesAreReported(run);
+        ParserReviewRegressions(run);
     }
 
     /// <summary>C21: a number in a slot that holds free text or an identifier.</summary>
@@ -591,6 +592,73 @@ internal static class SweepTests
                            + $"USE ref=line {endpoints}");
         run.Check("endpoints: USE and SYM parameter names stay silent",
             symbol.Problems.Count == 0 && symbol.Root[0].Children[0].Points.Length == 4, Said(symbol));
+    }
+
+    internal static void ParserReviewRegressions(TestRun run)
+    {
+        foreach (var nodes in new[] { Map(P("bar", Arr()), P("missing", Arr())), Arr(Arr()) })
+        {
+            var scene = Parse("SCENE\nR id=bar w=10 h=10");
+            var changed = SceneParser.PatchNodes(new[] { P("nodes", nodes) }, scene);
+            run.Check($"review: empty {nodes.Type} node patch is a silent no-op",
+                !changed && scene.Problems.Count == 0 && scene.Root[0].W.Evaluate(new EvalContext()) == 10f,
+                Said(scene));
+        }
+
+        var malformed = Parse("SCENE\nR id=bar w=10 h=10");
+        SceneParser.PatchNodes(new[] { P("nodes", Map(P("bar", Arr(Num(5))))) }, malformed);
+        run.Check("review: nonempty array is still not a patch map",
+            Says(malformed, "must be a map"), Said(malformed));
+
+        foreach (var (where, ease) in new[]
+        {
+            ("map value", Map(P("level", Str("=2")))),
+            ("nested duration", Map(P("level", Arr(Str("=2"), Str("linear"))))),
+            ("nested delay", Map(P("level", Arr(Num(0.5f), Str("linear"), Str("=2"))))),
+            ("numeric-keyed array", Arr(Arr(Str("=2"), Str("linear")))),
+        })
+        {
+            var scene = Parse("SCENE\nR w=10 h=10");
+            var changed = SceneParser.PatchNodes(new[] { P("ease", ease) }, scene);
+            run.Check($"review: computed ease {where} is reported",
+                changed && Says(scene, "ease \"=2\" is read as a plain number and is not evaluated; write a number"),
+                Said(scene));
+        }
+
+        var valid = Parse("SCENE\nR w=10 h=10");
+        var props = new[] { P("data", Map(P("level", Num(2)))),
+            P("ease", Map(P("level", Arr(Num(0.5f), Str("linear"), Num(0.1f))))) };
+        SceneParser.PatchNodes(props, valid);
+        var context = new EvalContext();
+        SceneParser.ReadData(props, context);
+        run.Check("review: literal ease duration, curve and delay stay silent",
+            valid.Problems.Count == 0 && context.Eased["level"].Seconds == 0.5f
+            && context.Eased["level"].Delay == 0.1f, Said(valid));
+
+        SceneParser.ReadData(new[] { P("data", Map(
+            P("words", Arr(Num(1), Str("true"), Str("false"))),
+            P("bools", Arr(Bool(true), Bool(false))))) }, context);
+        run.Check("review: numeric DATA arrays read boolean words and Lua booleans as 1/0",
+            context.Arrays["words"][0] == 1f && context.Arrays["words"][1] == 1f
+            && context.Arrays["words"][2] == 0f && context.Arrays["bools"][0] == 1f
+            && context.Arrays["bools"][1] == 0f,
+            $"words=[{string.Join(",", context.Arrays["words"])}], bools=[{string.Join(",", context.Arrays["bools"])}]");
+
+        foreach (var word in new[] { "True", "yes" })
+        {
+            var scene = Parse($"SCENE nofill={word}\nR w=10 h=10");
+            run.Check($"review: {word} diagnostic explains accepted boolean spelling",
+                Says(scene, "lowercase true/false are also accepted"), Said(scene));
+        }
+
+        foreach (var op in new[] { "LS", "SP", "P" })
+        {
+            var scene = Parse($"SCENE\n{op} x1=0 y1=0 x2=10 y2=10");
+            foreach (var key in new[] { "x1", "y1", "x2", "y2" })
+                run.Check($"review: {op} {key} diagnostic gives p guidance",
+                    Says(scene, $"unknown attribute \"{key}\";") && Says(scene, "p=[x1,y1,x2,y2,...]"),
+                    Said(scene));
+        }
     }
 
     /// <summary>S8: the ablation switches do not outlive the rebuild that set them.</summary>

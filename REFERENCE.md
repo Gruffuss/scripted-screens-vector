@@ -46,7 +46,8 @@ from the **element**, always, so a `scene=` on a `SCENE` line does not pair anyt
 | `ease` | map | per-name glide timing: `{ name = seconds }` or `{ name = { seconds, "curve", delay } }` |
 
 `keep`, `snap` and `ease` are literal-only: an `=` expression is reported on the paired scene
-and is not evaluated. `keep` and `snap` keep their defaults; an expression in `ease` sets no timing.
+and is not evaluated, including expressions inside easing maps and timing arrays. `keep` and
+`snap` keep their defaults; an expression used as an easing duration sets no timing.
 
 **Node patching.** Any node may carry an `id`, anywhere in the tree. The data element can then
 change that node's attributes without resending the scene:
@@ -73,7 +74,8 @@ host before the mod sees them, leaving an empty table and nothing to report. A `
 written as a plain LIST, with `table.insert` or `{ { w = 42 } }`, therefore arrives naming the
 nodes `1`, `2`, `3`: it reaches those ids if they exist and is **reported** as an unknown id if
 they do not. An entry whose value is not a patch map, such as `nodes = { bar = 5 }`, is
-reported. `Nil` entries stay silent because they can be holes left by the Lua bridge.
+reported. `Nil` entries stay silent because they can be holes left by the Lua bridge. Empty
+patch tables, which the bridge delivers as empty arrays, are silent no-ops too.
 
 Use it for a change no expression can express — a different op, a new gradient reference, a
 count. For anything that is only a *value*, prefer `data` and an expression: that path needs
@@ -542,9 +544,12 @@ brings, and a boolean used to bring nothing — so `data = { alarm = 1 }` follow
 clear the alarm did nothing at all. It now clears it. (`keep = true` was the same fault from the
 other side: it read as `0` and wiped the values it was asked to hold.)
 
-Within an array, a slot that is not a string reads as `""`, and a hole reads `0` while the other
-slots keep their values — `{1, nil, 3}` arrives as `[1, 0, 3]`. An array **of arrays**, or of
-booleans, is all zeros.
+Within a string array, a slot that is not a string reads as `""`. Within a numeric array, a
+hole reads `0` while the other slots keep their values — `{1, nil, 3}` arrives as `[1, 0, 3]`.
+An array **of arrays** is all zeros. An array of Lua booleans reads as `1` and `0`.
+From 0.11.116, lowercase `"true"` and `"false"` inside numeric DATA arrays also read as `1`
+and `0`: `{1, "true", "false"}` stores `[1,1,0]`. An array whose first entry is a string
+is still a string array.
 
 ### Which colour strings a data value may be
 
@@ -983,6 +988,8 @@ An `L` takes geometry only from `p=[x1,y1,x2,y2,...]`. SVG-style `x1`, `y1`, `x2
 attributes are reported with that guidance and do not supply points, even when `p` is also
 present. These attributes are reported on every op that does not read them: all four are
 valid on `GL`, and `y2` is also valid on `YS`. `USE` and `SYM` still allow them as parameter names.
+`SP` reports endpoint keys with the same `p=[...]` guidance. `LS` and `P` direct endpoint
+geometry to `L p=[...]`; `LS` itself samples `n`, `x` and `y`, while `P` takes its path from `d`.
 
 **An open `L`, `LS` or `SP` that has an `f` is filled anyway.** The fill is taken as though the
 shape were closed, joining the last point back to the first the way SVG's fill rule does, while
@@ -2340,10 +2347,12 @@ element by element, so one computed entry among six is reported as well. Where t
 value is one string, `m`, `slice`, `bw` and `uv` also keep their own length message, so one
 mistake there prints two lines; `sh` and `oc` are reported by their own check alone, as are
 `weight`, which is not one of its words, and the `size` inside `fl`, which is not a number.
-**From 0.11.116, a data element's `keep`, `snap` and `ease` report computed values too**, on
+**From 0.11.116, a data element's `keep`, `snap` and `ease` report computed values too**,
+including expressions in easing maps and nested timing arrays, on
 the paired scene, including when the payload arrives before the structure. Scene text also
 reads lowercase `true` and `false` as `1` and `0` in literal-only numeric slots and number
-lists. Other words, including `True` and `FALSE`, are reported and keep the slot's fallback.
+lists. Other words, including `True` and `FALSE`, are reported and keep the slot's fallback;
+their diagnostic states that lowercase `true` and `false` are accepted.
 Sent from a Lua table, a value that only
 looks like a number — the string `"3"` — is read as `3` by the keys above and not at all by
 these, and is not reported: it is a number, only spelled as a string.

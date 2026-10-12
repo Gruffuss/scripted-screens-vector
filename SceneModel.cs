@@ -794,7 +794,8 @@ internal static class SceneParser
 
         foreach (var entry in patch)
         {
-            if (string.IsNullOrEmpty(entry.Key) || entry.Value.Type == SS.UiValueType.Nil)
+            if (string.IsNullOrEmpty(entry.Key) || entry.Value.Type == SS.UiValueType.Nil
+                || entry.Value.Type == SS.UiValueType.Array && entry.Value.Array is { Length: 0 })
                 continue;
 
             if (entry.Value.Type != SS.UiValueType.Map || entry.Value.Map == null)
@@ -1525,20 +1526,37 @@ internal static class SceneParser
     /// An `=` is an expression and a `$` is a data name; both are dropped whole and the key
     /// keeps its default. `%param` is NOT reported: a symbol parameter is substituted before the
     /// node is parsed and keeps its type, so `RP n="%count"` under `USE count=5` really does
-    /// draw five. An array is scanned element by element as well, since a point list is the one
-    /// of these an author is most likely to try to compute.
+    /// draw five. Maps and nested arrays are scanned too, including easing durations and delays.
     /// </remarks>
     private static void CheckLiteral(SS.UiProp prop, VecScene scene, string? op, string? id)
     {
         var text = InvalidLiteralText(prop.Value);
 
-        if (text == null && prop.Value.Type == SS.UiValueType.Array && prop.Value.Array != null)
+        if (text == null && prop.Value.Type is SS.UiValueType.Array or SS.UiValueType.Map)
         {
-            foreach (var item in prop.Value.Array)
+            var pending = new Stack<SS.UiValue>();
+            pending.Push(prop.Value);
+            var easing = string.Equals(prop.Key, "ease", StringComparison.OrdinalIgnoreCase);
+            while (pending.Count > 0)
             {
-                text = InvalidLiteralText(item);
+                var value = pending.Pop();
+                text = InvalidLiteralText(value);
+                // Easing tuples contain literal curve names as well as numbers.
+                if (easing && text != null && text[0] != '=' && text[0] != '$')
+                    text = null;
                 if (text != null)
                     break;
+
+                if (value.Type == SS.UiValueType.Array && value.Array != null)
+                {
+                    for (var i = value.Array.Length - 1; i >= 0; i--)
+                        pending.Push(value.Array[i]);
+                }
+                else if (value.Type == SS.UiValueType.Map && value.Map != null)
+                {
+                    for (var i = value.Map.Length - 1; i >= 0; i--)
+                        pending.Push(value.Map[i].Value);
+                }
             }
         }
 
@@ -1547,7 +1565,9 @@ internal static class SceneParser
 
         scene.Problem($"{op ?? "node"}{(string.IsNullOrEmpty(id) ? "" : " \"" + id + "\"")}: "
                       + $"{prop.Key} \"{text}\" is read as a plain number and is not evaluated; "
-                      + "write a number");
+                      + "write a number"
+                      + (text[0] == '=' || text[0] == '$' ? string.Empty
+                          : "; lowercase true/false are also accepted"));
     }
 
     /// <summary>A computed value or word that cannot be read as a literal number.</summary>
@@ -1605,8 +1625,14 @@ internal static class SceneParser
             }
 
             scene.Problem($"{op ?? "node"}{(string.IsNullOrEmpty(id) ? "" : " \"" + id + "\"")}: unknown attribute \"{prop.Key}\""
-                          + (endpoint && string.Equals(op, "L", StringComparison.OrdinalIgnoreCase)
-                              ? "; the line takes p=[x1,y1,x2,y2,...]" : string.Empty));
+                          + (endpoint ? op?.ToUpperInvariant() switch
+                          {
+                              "L" => "; the line takes p=[x1,y1,x2,y2,...]",
+                              "SP" => "; the spline takes p=[x1,y1,x2,y2,...]",
+                              "LS" => "; the sampled line takes n, x and y; for endpoints use L p=[x1,y1,x2,y2,...]",
+                              "P" => "; the path takes d; for endpoints use L p=[x1,y1,x2,y2,...]",
+                              _ => string.Empty,
+                          } : string.Empty));
         }
     }
 
