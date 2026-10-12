@@ -92,6 +92,7 @@ Shader "ScriptedScreensVector/UIDither"
                 // VECTOR: a blur's coverage in x, 1 where a vertex has none of its own. It rides
                 // here because the canvas carries colour as Color32; a UV interpolates as float32.
                 float2 coverage : TEXCOORD1;
+                float4 storedColor : TEXCOORD2; // VECTOR: straight sRGB; w marks vector geometry
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -104,6 +105,7 @@ Shader "ScriptedScreensVector/UIDither"
                 half4 mask : TEXCOORD2;
                 float2 coverage : TEXCOORD3;   // VECTOR
                 float band : TEXCOORD4;       // VECTOR
+                float4 storedColor : TEXCOORD5; // VECTOR
                 UNITY_VERTEX_OUTPUT_STEREO
             };
 
@@ -121,6 +123,12 @@ Shader "ScriptedScreensVector/UIDither"
             float VectorNoise(float2 p)
             {
                 return frac(52.9829189 * frac(dot(p, float2(0.06711056, 0.00583715))));
+            }
+
+            // VECTOR: exact sRGB transfer curve; Canvas's colour channel has already lost precision.
+            float VectorSrgbToLinear(float c)
+            {
+                return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
             }
 
             float _VectorDither;
@@ -144,6 +152,7 @@ Shader "ScriptedScreensVector/UIDither"
                 OUT.mask = half4(v.vertex.xy * 2 - clampedRect.xy - clampedRect.zw,
                     0.25 / (0.25 * half2(_UIMaskSoftnessX, _UIMaskSoftnessY) + abs(pixelSize.xy)));
 
+                OUT.storedColor = v.storedColor; // VECTOR
                 OUT.coverage = v.coverage;     // VECTOR
                 OUT.band = 1.0 - v.texcoord.x; // VECTOR: white-texture band extent coverage
                 OUT.color = v.color * _Color;
@@ -152,7 +161,10 @@ Shader "ScriptedScreensVector/UIDither"
 
             fixed4 frag(v2f IN) : SV_Target
             {
-                half4 color = IN.color * (tex2D(_MainTex, IN.texcoord) + _TextureSampleAdd);
+                float3 rgb = IN.color.rgb;
+                if (IN.storedColor.w > 0.5) // VECTOR: pictures and other UI retain the existing path
+                    rgb = float3(VectorSrgbToLinear(IN.storedColor.r), VectorSrgbToLinear(IN.storedColor.g), VectorSrgbToLinear(IN.storedColor.b));
+                float4 color = float4(rgb, IN.color.a) * (tex2D(_MainTex, IN.texcoord) + _TextureSampleAdd);
 
                 // VECTOR: x is blur coverage or the legacy geometric fallback; y is
                 // perpendicular distance / feature size (negative for strokes). See EdgeRamp.Coverage.

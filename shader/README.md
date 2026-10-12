@@ -1,7 +1,8 @@
 # Building `vectorshaders.bundle`
 
 `VectorDither.shader` is Unity's `UI/Default` with a per-pixel dither added. Unity cannot compile
-shader source at runtime, so it ships as an AssetBundle beside the DLL.
+shader source at runtime, so it ships as an AssetBundle beside the DLL. Vector RGB also uses
+a float UV channel, interpolated in sRGB and converted to linear light per pixel.
 
 The mod build copies `shader/build/*.bundle` into the deployed mod folder. It does not build it:
 that needs the Unity editor.
@@ -86,3 +87,10 @@ The derivative ramp uses this wider band coverage; without edge-distance derivat
 shader clamps `TEXCOORD1.x` to recover the original geometric ramp. `_VectorEdgePx` defaults
 to 1.3. The mod requires both it and `_VectorEdgeFallback` before enabling pixel edges, so
 an older bundle uses the original emitter safely.
+
+`TEXCOORD2` carries straight stored sRGB `(r, g, b, 1)`, interpolated as float values.
+The fragment shader uses the exact piecewise sRGB-to-linear curve when the final component
+is greater than 0.5. Picture vertices set that component to zero and retain the original
+texture and vertex-colour path. Alpha, coverage, clipping, edge antialiasing and dither
+keep their existing maths. Canvas requests both additional UV channels, including captures;
+without the colour channel, the shader uses the ordinary vertex-colour fallback.

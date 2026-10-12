@@ -2,6 +2,23 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.118
+
+### Changed
+
+- Vector mesh gradients now interpolate the stored sRGB values between vertices, matching
+  browser colour ramps. A two-stop ramp's middle becomes darker; dashed and solid strokes
+  agree without extra intermediate stops or geometry.
+- A missing, older or unsupported shader bundle retains the previous vertex-colour path:
+  interpolation in linear light, with Canvas colour quantization. Pictures and text keep
+  their existing rendering paths; opacity still composites in linear light.
+
+### Fixed
+
+- Very dark colours, below roughly `#0A0A0A`, retain their colour instead of collapsing to
+  black. Stored RGB travels in a float UV channel, so `#050505` stays `#050505` and colours
+  keep float precision through Canvas, including screen captures.
+
 ## 0.11.117
 
 ### Changed

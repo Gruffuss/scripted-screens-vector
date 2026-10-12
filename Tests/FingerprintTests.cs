@@ -138,6 +138,8 @@ internal static class FingerprintTests
                     Tessellator.HitsFound = null;
                 }
 
+                run.Check($"sRGB channel: {window.Name} t={time} raw={raw} coverage={coverage} pixel={pixel}",
+                    SrgbGradientTests.Channel(mesh, Tessellator.ImagesFound), "stored RGB matches colours; image vertices opt out");
                 rows.Add(string.Format(CultureInfo.InvariantCulture,
                     "{0}|t={1}|verts={2}|tris={3}|shapes={4}|hits={5}|labels={6}|bounds={7}|problems={8}|mesh={9}",
                     window.Name, time, mesh.currentVertCount, mesh.TriangleCount, shapes,

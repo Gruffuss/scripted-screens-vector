@@ -1899,7 +1899,7 @@ internal static class Tessellator
 
             var origin = vh.currentVertCount;
             foreach (var point in shape)
-                vh.AddVert(frame.Matrix.MultiplyPoint3x4(point), colour, ImageUv(at, point, pieceCrop));
+                vh.AddVert(frame.Matrix.MultiplyPoint3x4(point), colour, ImageUv(at, point, pieceCrop), 1f, 0f, image: true);
 
             for (var i = 1; i < shape.Count - 1; i++)
                 vh.AddTriangle(origin, origin + i, origin + i + 1);
