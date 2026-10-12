@@ -2161,13 +2161,20 @@ Gradients are baked into vertex colours. A two-stop linear gradient is exact; mu
 radial are subdivided automatically, and radial fills as concentric bands so vertices land at
 even gradient parameters.
 
-**Between vertices the colour blends in linear light**, because the game renders in linear
-colour space; the stops themselves are exact. So the middle of a two-stop ramp is lighter than a
-browser's, which blends the stored sRGB values: `#5FD9A8` to `#2E8B6E` measures `(75, 183, 142)`
-at its midpoint in game, where CSS gives `(70, 178, 139)`. To follow a CSS ramp closely, add
-intermediate stops sampled the CSS way: a stop every eighth of the ramp takes that example to
-within a tenth of a level, and even black to white needs a stop every sixteenth to come within
-about one level (every eighth leaves ~5).
+**Vector mesh gradients blend the stored sRGB values between vertices**, the way a browser
+blends hex colours. The shader converts that interpolated colour to linear light per pixel
+with the exact piecewise sRGB transfer curve. `#5FD9A8` to `#2E8B6E` therefore gives about
+`(70, 178, 139)` at its midpoint, and a dashed stroke agrees with a solid one without adding
+intermediate stops or geometry. Stop sampling still uses premultiplied alpha: fading to
+transparent black and to the same hue at alpha zero gives the same ramp.
+
+RGB travels in a float UV channel because Canvas converts the ordinary vertex-colour channel
+to 8-bit linear values before the shader. The float channel preserves dark colours such as
+`#050505` and keeps flat colours to float precision, including captures. A missing, older or
+unsupported shader bundle uses the original vertex-colour path, with colour quantization and
+linear-light interpolation between vertices; its appearance can depend on tessellation density.
+Pictures retain their texture and vertex-colour path, and labels retain TextMeshPro's shaders.
+Opacity still composites in linear light, as described under **Opacity**.
 
 **A radial fill is the most expensive thing in the format**, so it is worth knowing what it
 costs. Band count follows the shape's on-screen radius, its stop count, and — since 0.10.3 —

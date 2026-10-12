@@ -58,6 +58,7 @@
         <Compile Include="..\ScaleMeasurement.cs" />
         <Compile Include="..\EdgeRamp.cs" />
         <Compile Include="PixelEdgeTests.cs" />
+        <Compile Include="SrgbGradientTests.cs" />
         <Compile Include="..\ScaleChoice.cs" />
         <Compile Include="ScaleChoiceTests.cs" />
         <Compile Include="..\TextOutline.cs" />

@@ -2410,7 +2410,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     }
 
     /// <summary>
-    /// Asks this graphic's canvas for the second UV, which the dither shader needs to draw anything.
+    /// Asks this graphic's canvas for the coverage and stored-colour UV channels, including captures.
     /// </summary>
     /// <remarks>
     /// **A canvas uploads only the vertex channels named in <c>additionalShaderChannels</c>**, and
@@ -2422,27 +2422,28 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// Until this existed the mod was free-riding on TextMeshPro, which turns the same channel on
     /// for whatever canvas its labels sit on. That is why a scene with any label captured
     /// correctly and a scene with none came back blank: ScriptedScreens' capture builds a fresh
-    /// Canvas of its own (`[ScriptedScreens-McpCaptureCanvas]`), and only a TMP label in the
+    /// Canvas of its own, and only a TMP label in the
     /// cloned tree was ever enabling the channel on it. Seven of the shipped examples have no
     /// text, and all seven captured blank.
     ///
     /// Cheap enough to do on every rebuild: one flag test, and the assignment only ever runs once
-    /// per canvas. Live consoles are unaffected -- their canvas already has the channel, which is
-    /// why they always drew correctly.
+    /// per canvas. Existing coverage stays enabled. TexCoord2 keeps stored sRGB out of Canvas's
+    /// quantized colour stream; without it the shader uses the original colour fallback.
     /// </remarks>
     private void EnsureCoverageChannel()
     {
         var target = canvas;
-        if (target == null || (target.additionalShaderChannels & AdditionalCanvasShaderChannels.TexCoord1) != 0)
+        const AdditionalCanvasShaderChannels required = AdditionalCanvasShaderChannels.TexCoord1 | AdditionalCanvasShaderChannels.TexCoord2;
+        if (target == null || (target.additionalShaderChannels & required) == required)
             return;
 
         var before = target.additionalShaderChannels;
-        target.additionalShaderChannels = before | AdditionalCanvasShaderChannels.TexCoord1;
+        target.additionalShaderChannels = before | required;
 
         if (VectorConfig.Diagnostics)
         {
             ScriptedScreensVectorPlugin.Log?.LogInfo(
-                $"vector: canvas \"{target.name}\" was missing TexCoord1 (had {before}); every vector pixel on it would have drawn at alpha 0.");
+                $"vector: canvas \"{target.name}\" was missing vector UV channels (had {before}); enabled coverage and stored colour.");
         }
     }
 
