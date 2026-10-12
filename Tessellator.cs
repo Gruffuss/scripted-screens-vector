@@ -713,7 +713,9 @@ internal static class Tessellator
     /// the object, so the clone ScriptedScreens photographs starts at full opacity: a pulsing
     /// disc was captured solid however faint it was on screen.
     /// </remarks>
+#pragma warning disable CS0649 // set by VectorGraphic's capture path, which the test suite does not compile
     [ThreadStatic] internal static bool BakeFades;
+#pragma warning restore CS0649
 
     /// <summary>Whether this group is faded by its renderer on this visit rather than rebuilt.</summary>
     private static bool Fades(VecNode node, EvalContext context)

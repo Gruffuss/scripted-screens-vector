@@ -454,7 +454,7 @@ internal static class NodeSpanTests
     {
         // `size` on a `T`, because it is read unconditionally: `sw` is only read when the node
         // has a stroke to apply it to, so an inherited `sw` on an unstroked shape proves nothing.
-        static float Size(VecNode node) => node.TextSize.Evaluate(new EvalContext());
+        static float Size(VecNode node) => node.TextSize?.Evaluate(new EvalContext()) ?? float.NaN;
 
         // A bare paint attribute on the root, which is the only form scene text has: `style`
         // is a map and the text format has no map syntax.
