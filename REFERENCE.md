@@ -979,6 +979,11 @@ subpath anywhere casts no shadow, is left sharp by a `blur` and answers no click
 automatically. An `L` is open: its stroke is an open run with a cap at each end, and nothing is
 drawn from its last point back to its first.
 
+An `L` takes geometry only from `p=[x1,y1,x2,y2,...]`. SVG-style `x1`, `y1`, `x2` and `y2`
+attributes are reported with that guidance and do not supply points, even when `p` is also
+present. These attributes are reported on every op that does not read them: all four are
+valid on `GL`, and `y2` is also valid on `YS`. `USE` and `SYM` still allow them as parameter names.
+
 **An open `L`, `LS` or `SP` that has an `f` is filled anyway.** The fill is taken as though the
 shape were closed, joining the last point back to the first the way SVG's fill rule does, while
 the stroke stays open — so three sides of a box with an `f` draw a filled square with one side

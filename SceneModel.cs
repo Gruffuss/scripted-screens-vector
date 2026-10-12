@@ -1441,14 +1441,14 @@ internal static class SceneParser
     /// typo, `fille` or `strke` -- which otherwise vanishes silently because unknown keys are
     /// ignored by design. It does NOT catch a real key on the wrong op, `rx` on a band say;
     /// that needs per-op sets and risks rejecting combinations that are merely unusual. The
-    /// exceptions are checked one key at a time instead, and against what the author wrote on
-    /// the node rather than the merged map: the enum words in `CheckWords`, and `o` in
-    /// `CheckGroupOpacity`.
+    /// exceptions are checked one key at a time instead. Author-intent checks use what the
+    /// author wrote on the node rather than the merged map: the enum words in `CheckWords`, and `o` in
+    /// `CheckGroupOpacity`. Endpoint coordinates are allowed only on the ops that read them.
     /// </remarks>
     private static readonly HashSet<string> KnownKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "op", "id", "c", "style", "click", "press", "xy", "hoverev", "drag", "drop", "blur", "lod",
-        "x", "y", "w", "h", "cx", "cy", "rx", "ry", "x1", "y1", "x2", "y2", "y2",
+        "x", "y", "w", "h", "cx", "cy", "rx", "ry",
         "n", "p", "d", "seg", "close", "t", "r", "s", "s_", "a", "o", "clip", "ref", "params", "ch",
         "f", "fo", "fo2", "fr", "fea", "fea_edge", "sh",
         "sw", "so", "cap", "join", "ml", "dash", "dofs",
@@ -1583,6 +1583,12 @@ internal static class SceneParser
             if (header ? SceneLiteralKeys.Contains(prop.Key) : LiteralKeys.Contains(prop.Key))
                 CheckLiteral(prop, scene, op, id);
 
+            var endpoint = prop.Key.ToUpperInvariant() is "X1" or "Y1" or "X2" or "Y2";
+            if (endpoint && (string.Equals(op, "GL", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(op, "YS", StringComparison.OrdinalIgnoreCase)
+                             && string.Equals(prop.Key, "y2", StringComparison.OrdinalIgnoreCase)))
+                continue;
+
             if (string.Equals(op, "FONT", StringComparison.OrdinalIgnoreCase)
                 ? string.Equals(prop.Key, "op", StringComparison.OrdinalIgnoreCase)
                   || string.Equals(prop.Key, "src", StringComparison.OrdinalIgnoreCase)
@@ -1598,7 +1604,9 @@ internal static class SceneParser
                 continue;
             }
 
-            scene.Problem($"{op ?? "node"}{(string.IsNullOrEmpty(id) ? "" : " \"" + id + "\"")}: unknown attribute \"{prop.Key}\"");
+            scene.Problem($"{op ?? "node"}{(string.IsNullOrEmpty(id) ? "" : " \"" + id + "\"")}: unknown attribute \"{prop.Key}\""
+                          + (endpoint && string.Equals(op, "L", StringComparison.OrdinalIgnoreCase)
+                              ? "; the line takes p=[x1,y1,x2,y2,...]" : string.Empty));
         }
     }
 

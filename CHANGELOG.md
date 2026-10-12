@@ -13,6 +13,10 @@ ScriptedScreens Vector, newest first.
 
 ### Fixed
 
+- SVG-style `x1`, `y1`, `x2` and `y2` on an `L` are now reported, with guidance to write
+  `p=[x1,y1,x2,y2,...]`; they still do not supply line geometry. These keys are also reported
+  on other ops that do not read them. All four remain valid on `GL`, and `y2` remains valid
+  on `YS`; arbitrary `USE` and `SYM` parameter names remain allowed.
 - A `nodes` entry holding a number or string instead of a patch map is now reported. `Nil`
   holes from sparse tables remain silent. New patch problems request a rebuild so the
   magenta border appears even when no geometry changed.

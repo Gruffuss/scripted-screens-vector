@@ -87,6 +87,7 @@ internal static class SweepTests
         BadNodePatchesAreReported(run);
         NumericMixIsReported(run);
         DataLiteralExpressionsAreReported(run);
+        EndpointAttributesAreReported(run);
     }
 
     /// <summary>C21: a number in a slot that holds free text or an identifier.</summary>
@@ -533,6 +534,63 @@ internal static class SweepTests
         run.Check("data literals: valid controls stay silent and work",
             !needsRebuild && valid.Problems.Count == 0 && data.KeepUnmentioned && data.Snapped.Contains("v")
             && data.Eased.Count == 0, Said(valid));
+    }
+
+    internal static void EndpointAttributesAreReported(TestRun run)
+    {
+        const string endpoints = "x1=0 y1=0 x2=100 y2=100";
+        var keys = new[] { "x1", "y1", "x2", "y2" };
+        var line = Parse($"SCENE\nL id=line {endpoints} sw=2");
+        foreach (var key in keys)
+            run.Check($"endpoints: L {key} reported with p guidance",
+                Says(line, $"unknown attribute \"{key}\"; the line takes p=[x1,y1,x2,y2,...]"), Said(line));
+        run.Check("endpoints: L does not adopt endpoint geometry", line.Root[0].Points.Length == 0, Said(line));
+
+        foreach (var op in new[] { "G", "RP", "SC", "R", "C", "Y", "P", "SP", "LS", "T", "IMG" })
+        {
+            var scene = Parse($"SCENE\n{op} {endpoints}");
+            foreach (var key in keys)
+                run.Check($"endpoints: {op} {key} reported",
+                    Says(scene, $"unknown attribute \"{key}\""), Said(scene));
+        }
+
+        var header = Parse($"SCENE {endpoints}\nR w=10 h=10");
+        foreach (var key in keys)
+            run.Check($"endpoints: SCENE {key} reported",
+                Says(header, $"unknown attribute \"{key}\""), Said(header));
+
+        var band = Parse($"SCENE\nYS n=2 x=0 y=0 {endpoints}");
+        foreach (var key in new[] { "x1", "y1", "x2" })
+            run.Check($"endpoints: YS {key} reported",
+                Says(band, $"unknown attribute \"{key}\""), Said(band));
+
+        const string stops = "stops=[[0,transparent],[1,transparent]]";
+        var gradient = Parse($"SCENE\nDEFS {{ GL id=g {endpoints} {stops} }}\nR w=10 h=10");
+        run.Check("endpoints: GL coordinates stay silent", gradient.Problems.Count == 0, Said(gradient));
+        var validBand = Parse("SCENE\nYS n=2 x=0 y=0 y2=100");
+        run.Check("endpoints: YS y2 stays silent and is read",
+            validBand.Problems.Count == 0 && validBand.Root[0].Y2.Evaluate(new EvalContext()) == 100f,
+            Said(validBand));
+        foreach (var op in new[] { "GR", "GC" })
+        {
+            var scene = Parse($"SCENE\nDEFS {{ {op} id=g {endpoints} {stops} }}\nR w=10 h=10");
+            foreach (var key in keys)
+                run.Check($"endpoints: {op} {key} reported",
+                    Says(scene, $"unknown attribute \"{key}\""), Said(scene));
+        }
+
+        var validLine = Parse("SCENE\nL id=line p=[0,0,100,100] sw=2");
+        run.Check("endpoints: L p stays silent", validLine.Problems.Count == 0
+            && validLine.Root[0].Points.Length == 4, Said(validLine));
+        var changed = SceneParser.PatchNodes(new[] { P("nodes", Map(P("line", Map(P("x1", Num(5)))))) }, validLine);
+        run.Check("endpoints: a patch reports unused coordinates with p guidance",
+            changed && Says(validLine, "unknown attribute \"x1\"; the line takes p=[x1,y1,x2,y2,...]")
+            && validLine.Root[0].Points[0] == 0f, Said(validLine));
+
+        var symbol = Parse($"SCENE\nDEFS {{ SYM id=line {endpoints} {{ L p=[%x1,%y1,%x2,%y2] }} }}\n"
+                           + $"USE ref=line {endpoints}");
+        run.Check("endpoints: USE and SYM parameter names stay silent",
+            symbol.Problems.Count == 0 && symbol.Root[0].Children[0].Points.Length == 4, Said(symbol));
     }
 
     /// <summary>S8: the ablation switches do not outlive the rebuild that set them.</summary>
