@@ -7,6 +7,7 @@ ScriptedScreens Vector, newest first.
 ### Tests
 
 - The tessellation regression corpus now runs in the suite.
+- Its managed colour parser now matches Unity's named colours, Lua fixtures contain expanded scene text, loaded images cover layout and UVs, and each row hashes mesh positions, colours, UVs and indices.
 
 ## 0.11.115
 

@@ -70,7 +70,7 @@ internal static class Program
 {
     private static int Main()
     {
-        Colours.Parser = HexColor.TryParse;
+        Colours.InstallParserForTests(HexColor.TryParse);
         // `--gif <in> <out>`: the decoder's first frame as "w h" then "r g b a" per pixel, to be
         // compared against an independent decoder.
         var args = Environment.GetCommandLineArgs();
@@ -93,6 +93,9 @@ internal static class Program
         Console.WriteLine();
 
         var run = new TestRun();
+        GateTests.Run(run);
+        if (Array.IndexOf(args, "--gate-checks") >= 0)
+            return run.Report();
         FingerprintTests.Run(run, Array.IndexOf(args, "--rebaseline") >= 0);
 
         TriangulatorTests.DuplicatedClosingVertex(run);

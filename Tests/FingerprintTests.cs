@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using UnityEngine;
 
 namespace ScriptedScreensVector.Tests;
@@ -11,9 +13,10 @@ internal static class FingerprintTests
 {
     internal static void Run(TestRun run, bool rebaseline)
     {
-        var folder = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../..", "gate"));
+        var folder = FindGateFolder(AppContext.BaseDirectory);
         var baseline = Path.Combine(folder, "fingerprint.txt");
         var scenes = Path.Combine(folder, "scenes");
+        PrepareImages(scenes);
         run.Check("fingerprint: nofill control differs only by the flag",
             File.ReadAllText(Path.Combine(scenes, "zzz-nofill.txt")).Replace(" nofill=1", "")
                 == File.ReadAllText(Path.Combine(scenes, "zzz-nofill-control.txt")),
@@ -107,9 +110,9 @@ internal static class FingerprintTests
                 }
 
                 rows.Add(string.Format(CultureInfo.InvariantCulture,
-                    "{0}|t={1}|verts={2}|tris={3}|shapes={4}|hits={5}|labels={6}|bounds={7}|problems={8}",
+                    "{0}|t={1}|verts={2}|tris={3}|shapes={4}|hits={5}|labels={6}|bounds={7}|problems={8}|mesh={9}",
                     window.Name, time, mesh.currentVertCount, mesh.TriangleCount, shapes,
-                    hits.Count, stats.Text.Count, Bounds(mesh), scene.Problems.Count));
+                    hits.Count, stats.Text.Count, Bounds(mesh), scene.Problems.Count, MeshChecksum(mesh)));
 
                 if (window.Visible != null)
                     run.Check($"fingerprint: {window.Name} bounded at t={time}",
@@ -129,6 +132,57 @@ internal static class FingerprintTests
             }
         }
         return rows;
+    }
+
+    internal static string FindGateFolder(string start)
+    {
+        for (var directory = new DirectoryInfo(start); directory != null; directory = directory.Parent)
+        {
+            var folder = Path.Combine(directory.FullName, "Tests", "gate");
+            if (Directory.Exists(folder))
+                return folder;
+        }
+        throw new DirectoryNotFoundException("Tests/gate was not found above the test runner.");
+    }
+
+    internal static string MeshChecksum(MeshBuilder mesh)
+    {
+        using var bytes = new MemoryStream();
+        using var writer = new BinaryWriter(bytes);
+        void Rounded(float value, double scale) => writer.Write(checked((long)Math.Round(value * scale, MidpointRounding.AwayFromZero)));
+        writer.Write(mesh.currentVertCount);
+        writer.Write(mesh.TriangleCount);
+        for (var i = 0; i < mesh.currentVertCount; i++)
+        {
+            var (p, uv) = mesh.Vertex(i);
+            var colour = mesh.Colour(i);
+            var coverage = mesh.CoverageUv(i);
+            Rounded(p.x, 1000d); Rounded(p.y, 1000d); Rounded(p.z, 1000d);
+            Rounded(colour.r, 255d); Rounded(colour.g, 255d); Rounded(colour.b, 255d); Rounded(colour.a, 255d);
+            Rounded(uv.x, 10000d); Rounded(uv.y, 10000d);
+            Rounded(coverage.x, 10000d); Rounded(coverage.y, 10000d);
+        }
+        for (var i = 0; i < mesh.TriangleCount * 3; i++)
+            writer.Write(mesh.Index(i));
+        return Convert.ToHexString(SHA256.HashData(bytes.ToArray()));
+    }
+
+    internal static void PrepareImages(string scenes)
+    {
+        // Fixed dimensions of the shipped thumbnail; no download or Unity texture is needed.
+        ImageCache.Loaded["PIC"] = (863, 471, null);
+        var handson = File.ReadAllText(Path.Combine(scenes, "InGameTest-handson.txt"));
+        foreach (Match match in Regex.Matches(handson, "src=\"(data:image/(gif|bmp);base64,[^\"]+)\""))
+        {
+            var url = match.Groups[1].Value;
+            var data = ImageDecode.DataUrl(url) ?? throw new InvalidDataException("Invalid fixture image data URL.");
+            int width, height;
+            if (match.Groups[2].Value == "gif")
+                ImageDecode.Gif(data, out width, out height);
+            else
+                ImageDecode.Bmp(data, out width, out height);
+            ImageCache.Loaded[url] = (width, height, null);
+        }
     }
 
     private static string Bounds(MeshBuilder mesh)

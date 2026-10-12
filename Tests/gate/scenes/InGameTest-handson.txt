@@ -1,6 +1,6 @@
-SCENE w=" .. SW .. " h=" .. SH .. " fit=stretch
-R x=0 y=0 w=" .. SW .. " h=" .. SH .. " f=#070D16
-G t=[" .. OFF .. ",0] {
+SCENE w=224 h=224 fit=stretch
+R x=0 y=0 w=224 h=224 f=#070D16
+G t=[12,0] {
  T x=0 y=2 w=110 h=6 text="1 SLIDER: PRESS ALONG IT (XY)" size=5 f=#5FD9A8
  R id=level press=1 xy=1 x=0 y=10 w=110 h=13 rx=3 f=#12202F
  R x=0 y=10 w="=110*$level" h=13 rx=3 f=#2E8B6E
@@ -37,8 +37,8 @@ G t=[" .. OFF .. ",0] {
  R x=106 y=112 w=24 h=24 f=#5FD9A800 fea=0 sh=[[0,0,10,0,"#5FD9A8FF"]]
  T x=146 y=96 w=54 h=6 text="10 GIF + BMP" size=5 f=#5FD9A8
  RP n=4 { R x="=146+i*7" y=106 w=3 h=34 f=#26384A }
- IMG x=146 y=106 w=24 h=24 src="' .. GIF .. '" smp=point
- IMG x=174 y=106 w=24 h=24 src="' .. BMP .. '" smp=point
+ IMG x=146 y=106 w=24 h=24 src="data:image/gif;base64,R0lGODlhBAAEAIEAAP8AAADIAABQ/////yH5BAEAAAMALAAAAAAEAAQAAAIKBJgQYEKJGyVuBQA7" smp=point
+ IMG x=174 y=106 w=24 h=24 src="data:image/bmp;base64,Qk1GAAAAAAAAADYAAAAoAAAAAgAAAAIAAAABABgAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAA/wAA////AAAAAP8A/wAAAA==" smp=point
  T x=0 y=146 w=200 h=6 text="9 ROUND ENDS, CLEAN EDGE" size=5 f=#5FD9A8
  R x=0 y=154 w=200 h=9 rx=20 f=#2E8B6E s=#EAF4F8 sw=0.8
  T x=0 y=170 w=200 h=6 text="LAST" size=5 f=#5FD9A8
