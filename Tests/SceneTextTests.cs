@@ -13,9 +13,7 @@ namespace ScriptedScreensVector.Tests;
 /// construction. Comparing rendered output would test the parser twice and the front end
 /// once.
 ///
-/// It also has to be this way round. <c>SceneParser</c> reaches
-/// <c>ColorUtility.TryParseHtmlString</c>, a native ECall that throws <c>SecurityException</c>
-/// outside the player, so a full text-to-scene comparison cannot run headless at all.
+/// Tessellated output is covered separately by the fingerprint corpus.
 /// </remarks>
 internal static class SceneTextTests
 {

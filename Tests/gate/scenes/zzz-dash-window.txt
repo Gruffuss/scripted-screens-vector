@@ -1,0 +1,2 @@
+SCENE w=200 h=200 fit=stretch
+L p=[0,100,1000000000,100] s="#5fd9a8" sw=4 dash=[10,5] fea=0

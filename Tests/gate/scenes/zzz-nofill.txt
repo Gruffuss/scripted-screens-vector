@@ -1,0 +1,9 @@
+SCENE w=200 h=200 fit=stretch nofill=1
+DEFS {
+ GR id=radial cx=45 cy=45 r=35 stops=[[0,"#ffffffff"],[1,"#5fd9a8ff"]]
+}
+R x=10 y=10 w=70 h=70 f=@radial fea=0
+G blur=5 {
+ R x=110 y=10 w=70 h=70 f="#7fb2f0" fea=0
+}
+R x=20 y=120 w=160 h=50 f="#f5d76e" s="#5fd9a8" sw=4 fea=0

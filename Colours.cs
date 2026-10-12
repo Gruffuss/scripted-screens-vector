@@ -26,6 +26,13 @@ namespace ScriptedScreensVector;
 /// </remarks>
 internal static class Colours
 {
+    internal delegate bool ColourParser(string text, out Color colour);
+    private static ColourParser Parser { get; set; } = ColorUtility.TryParseHtmlString;
+#if VECTOR_TESTS
+    // Installed once before parsing; the game has no installer.
+    internal static void InstallParserForTests(ColourParser parser) => Parser = parser ?? throw new ArgumentNullException(nameof(parser));
+#endif
+
     internal static bool TryParse(string? text, out Color colour)
     {
         colour = default;
@@ -46,6 +53,6 @@ internal static class Colours
         if (string.Equals(trimmed, "gray", StringComparison.OrdinalIgnoreCase))
             trimmed = "grey";
 
-        return ColorUtility.TryParseHtmlString(trimmed, out colour);
+        return Parser(trimmed, out colour);
     }
 }

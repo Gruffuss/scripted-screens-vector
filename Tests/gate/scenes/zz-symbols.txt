@@ -1,0 +1,15 @@
+SCENE w=200 h=200 fit=stretch
+DEFS {
+ SYM id=tile {
+  R x=0 y=0 w=30 h=20 rx=3 f=#2E8B6E fea=0
+  T x=2 y=5 w=26 h=8 text="t" size=5 f=#EAF4F8
+ }
+ SYM id=pair {
+  USE ref=tile x=0 y=0
+  USE ref=tile x=35 y=0
+ }
+}
+R x=0 y=0 w=200 h=200 f=#0B1622 fea=0
+USE ref=pair x=10 y=10
+USE ref=pair x=10 y=40
+USE ref=tile x=10 y=70

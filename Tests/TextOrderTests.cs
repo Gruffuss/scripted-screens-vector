@@ -245,12 +245,6 @@ internal static class TextOrderTests
     }
 
     /// <summary>Parses a one-shape scene and reports its draw-order flag, or null on failure.</summary>
-    /// <remarks>
-    /// The rect carries NO fill on purpose. `ParseFill` goes through
-    /// <c>ColorUtility.TryParseHtmlString</c>, which is a native ECall and throws
-    /// <c>SecurityException</c> outside the player — so a scene with `f=#fff` takes the whole
-    /// run down here while working perfectly in game. Nothing about this flag needs a colour.
-    /// </remarks>
     private static bool? Parse(string header)
     {
         var props = SceneText.ToProps(header + "\nR x=0 y=0 w=10 h=10", "s");

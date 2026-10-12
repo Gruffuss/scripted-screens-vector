@@ -15,11 +15,7 @@ namespace ScriptedScreensVector.Tests;
 /// which used to be dropped without a word, so a test that passes by accident would hide the
 /// same hole again.
 ///
-/// No `#rrggbb` anywhere in a parsed scene: `Colours.TryParse` goes through
-/// <c>ColorUtility.TryParseHtmlString</c>, a native ECall that throws outside the player.
-/// `transparent` is handled before that call and is the colour these tests use. The one case
-/// that NEEDS a hex literal -- a colour expression in a numeric slot -- lives in the offline
-/// probe, which swaps in a managed parser.
+/// These cases use `transparent`; the suite also installs a managed hex parser at startup.
 /// </remarks>
 internal static class SweepTests
 {

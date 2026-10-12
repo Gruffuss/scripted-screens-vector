@@ -1,0 +1,9 @@
+SCENE w=200 h=200 fit=stretch
+R x=0 y=0 w=200 h=200 f=#0B1622 fea=0
+SC id=list x=10 y=10 w=180 h=120 ch=400 {
+ RP n=16 {
+  R x=0 y="=i*24" w=170 h=20 rx=3 f=#16222E fea=0
+  T x=6 y="=i*24+5" w=150 h=9 text="row" size=6 f=#EAF4F8
+ }
+}
+T x=10 y=140 w=180 h=8 text="after the scroll" size=6 f=#8FA6B8

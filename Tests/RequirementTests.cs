@@ -179,8 +179,7 @@ internal static class RequirementTests
             parked.Scalars.Count == 1 && parked.Scalars.ContainsKey("z") && !parked.KeepUnmentioned && parked.Snapped.Count == 0,
             string.Join(",", parked.Scalars));
 
-        // An empty string is a value: it clears a label rather than being skipped. Only the empty
-        // one is testable here -- any other string goes through ColorUtility, a native call.
+        // An empty string is a value: it clears a label rather than being skipped.
         var empty = new EvalContext();
         SceneParser.ReadData(new[]
         {

@@ -50,6 +50,10 @@ ScriptedScreens Vector, newest first.
   thread's frame pump, with a short timeout reporting “game busy, try again”. The first request
   logs which path it took. Reports use a reusable snapshot of the last landed build's
   diagnostics, so animated surfaces keep their full report while the next build runs.
+### Tests
+
+- The tessellation regression corpus now runs in the suite.
+- Its managed colour parser now matches Unity's named colours, Lua fixtures contain expanded scene text, loaded images cover layout and UVs, and each row hashes mesh positions, colours, UVs and indices.
 
 ## 0.11.115
 

@@ -1,0 +1,15 @@
+SCENE w=200 h=200 fit=stretch
+DEFS {
+ GL id=toClear units=bbox x1=0 y1=0 x2=1 y2=0 stops=[[0,"#2FD98A"],[1,"transparent"]]
+}
+R x=0 y=0 w=200 h=200 f=#0B1622 fea=0
+T x=4 y=4 w=192 h=6 text="1 f=transparent  (invisible = Unity knows the name)" size=5 f=#EAF4F8
+R x=8 y=12 w=184 h=20 f=#EDF2F7 fea=0
+R x=8 y=12 w=184 h=20 f=transparent fea=0
+T x=4 y=38 w=192 h=6 text="2 gradient stop to transparent  (must fade, not end white)" size=5 f=#EAF4F8
+R x=8 y=46 w=184 h=20 f=@toClear fea=0
+T x=4 y=72 w=192 h=6 text="3 darkblue by name, then #00008B literal  (must match)" size=5 f=#EAF4F8
+R x=8 y=80 w=184 h=14 f=darkblue fea=0
+R x=8 y=96 w=184 h=14 f=#00008B fea=0
+T x=4 y=116 w=192 h=6 text="4 CONTROL  f=notacolour must be magenta" size=5 f=#EAF4F8
+R x=8 y=124 w=184 h=14 f=notacolour fea=0

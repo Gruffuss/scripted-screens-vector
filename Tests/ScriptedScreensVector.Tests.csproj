@@ -11,6 +11,7 @@
              warnings-as-errors on it would cost more than it earns. -->
         <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
         <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+        <DefineConstants>$(DefineConstants);VECTOR_TESTS</DefineConstants>
     </PropertyGroup>
 
     <!-- The real props file is gitignored (it holds machine paths), so a fresh CLONE or WORKTREE
@@ -85,6 +86,9 @@
         <Compile Include="TextOrderTests.cs" />
         <Compile Include="Benchmark.cs" />
         <Compile Include="Program.cs" />
+        <Compile Include="HexColor.cs" />
+        <Compile Include="FingerprintTests.cs" />
+        <Compile Include="GateTests.cs" />
     </ItemGroup>
 
     <ItemGroup>

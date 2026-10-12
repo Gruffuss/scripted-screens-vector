@@ -1,0 +1,14 @@
+SCENE w=200 h=200 fit=stretch
+DEFS {
+ GR id=soft cx=100 cy=100 r=90 stops=[[0,"#FFFFFFFF"],[1,"#FFFFFF00"]]
+ CP id=box { P d="M20 20 L180 20 L180 120 L110 120 L110 70 L20 70 Z" }
+}
+R x=0 y=0 w=200 h=200 f=#12202F fea=0
+G clip=box {
+ R x=0 y=0 w=200 h=200 f=#5FD9A8 fea=0
+ C cx=100 cy=70 rx=60 ry=40 f=#C98BE0
+}
+G mask=@soft {
+ R x=10 y=130 w=180 h=50 f=#7FB2F0 fea=0
+ T x=20 y=145 w=160 h=10 text="masked" size=8 f=#0B1622
+}

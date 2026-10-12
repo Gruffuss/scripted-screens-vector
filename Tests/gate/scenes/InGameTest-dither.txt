@@ -1,0 +1,11 @@
+SCENE w=200 h=100 fit=stretch
+DEFS {
+ CP id=window { R x=40 y=20 w=120 h=40 rx=6 }
+}
+R x=0 y=0 w=200 h=100 f=#101820 fea=0
+R x=40 y=20 w=120 h=40 rx=6 f=#00000000 fea=0 s=#8FA6B8 sw=0.6
+G clip=window {
+  R x=-400 y=30 w=1000 h=8 f=#FF3B30 fea=0
+  R x=90 y=-300 w=8 h=1000 f=#FF9500 fea=0
+}
+T x=20 y=70 w=160 h=10 text="both bars must stop at the outline" size=7 align=center f=#EAF4F8
