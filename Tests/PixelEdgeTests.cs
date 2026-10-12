@@ -88,6 +88,7 @@ internal static class PixelEdgeTests
             ("concave", "P d=\"M30 50 H360 V270 H200 V130 H160 V270 H30 Z\" f=#fff", 220f, false),
             ("stroke1", "L p=[30,120,360,240] sw=1 s=#fff", 1f, true),
             ("stroke03", "L p=[30,120,360,240] sw=0.3 s=#fff", 0.3f, true),
+            ("round caps", "L p=[30,120,360,240] sw=10 s=#fff cap=round", 10f, true),
             ("YS", "YS n=8 x=\"=30+i*45\" y=120 y2=240 f=#fff", 0f, false) };
         foreach (var (name, rig) in new[] { ("frontal", Rig(1f, 1f)), ("grazing", Rig(0.151f, 0.515f)), ("near", Rig(0.013f, 0.549f)) })
             foreach (var (shape, body, feature, stroke) in bodies)
@@ -133,7 +134,7 @@ internal static class PixelEdgeTests
             "R x=80 y=80 w=200 h=120 f=#fff fea=2 sh=[2,3,4,0,#000,inset]" })
             run.Check("P7 explicit/blur/shadow bytes: " + body, FingerprintTests.MeshChecksum(Emit(body, true), true)
                 == FingerprintTests.MeshChecksum(Emit(body, false), true), "exact float bytes");
-        foreach (var body in new[] { bodies[0].Item2, bodies[1].Item2, bodies[2].Item2, bodies[3].Item2, bodies[6].Item2 })
+        foreach (var body in new[] { bodies[0].Item2, bodies[1].Item2, bodies[2].Item2, bodies[3].Item2, bodies[7].Item2 })
         {
             var on = Emit(body, true); var off = Emit(body, false);
             run.Check("P7 uniform counts: " + body, on.currentVertCount == off.currentVertCount && on.TriangleCount == off.TriangleCount,
@@ -152,6 +153,7 @@ internal static class PixelEdgeTests
             if (holes.CoverageUv(i).y > 0f && p.x > 120 && p.x < 260 && p.y > 180 && p.y < 270) holeRing = true;
         }
         run.Check("hole boundaries feather inward", holeRing, "encoded band inside empty hole");
+        Band(run, "hole boundary", holes, Rig(1f, 1f), 0f, false);
         foreach (var cap in new[] { "butt", "square", "round" })
         {
             var mesh = Emit("L p=[100,200,300,200] sw=10 s=#fff cap=" + cap, pixel);
@@ -208,6 +210,18 @@ internal static class PixelEdgeTests
             finite &= float.IsFinite(p.x) && float.IsFinite(p.y) && float.IsFinite(near.CoverageUv(i).y);
         }
         run.Check("P8 near-plane mesh finite", finite && near.currentVertCount > 0, "one corner behind; uniform fallback");
+        var uniform = Emit(bodies[0].Item2, pixel);
+        var behindProjection = Rig(-0.1f, 0.549f);
+        var fallbackVertices = 0; var sameFallback = true;
+        // A shared rectangle fan has four inner vertices followed by its four outer vertices.
+        for (var i = 4; i < near.currentVertCount; i++)
+            if (behindProjection.Depth(near.Vertex(i - 4).Position) <= behindProjection.Near)
+            {
+                sameFallback &= near.Vertex(i).Position == uniform.Vertex(i).Position;
+                fallbackVertices++;
+            }
+        run.Check("P8 behind vertices use uniform band extent", sameFallback && fallbackVertices == 2,
+            $"{fallbackVertices} behind vertices match the uniform mesh exactly");
     }
 
     internal static void Run(TestRun run)
