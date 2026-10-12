@@ -55,6 +55,11 @@ public sealed class ScriptedScreensVectorPlugin : ModBehaviour
             VectorConfig.Load(Config);
             // Coverage may only ride in a UV if the shader that reads it actually loaded.
             Tessellator.CoverageInUv = DitherMaterial.HasShader;
+            Tessellator.PixelEdgesAvailable = DitherMaterial.HasEdgeRamp;
+            Log.LogInfo("edge ramp: " + (Tessellator.PixelEdgesAvailable && Tessellator.CoverageInUv && VectorConfig.PixelEdges
+                ? "on (per-pixel automatic edges)"
+                : !DitherMaterial.HasShader ? "off (shader unavailable)"
+                : !Tessellator.PixelEdgesAvailable ? "off (stale shader bundle)" : "off (Renderer.PixelEdges disabled)"));
 
             FrameMonitor.Install();
             VectorStatsTool.TryRegister();

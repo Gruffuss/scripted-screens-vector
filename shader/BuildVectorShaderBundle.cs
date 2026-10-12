@@ -63,6 +63,7 @@ internal static class BuildVectorShaderBundle
 
         Debug.Log($"Built {BundleName} ({new FileInfo(built).Length} bytes) in {output}. "
                   + "Copy it to the mod's shader/build/ folder.");
+        Verify();
     }
 
     /// Loads the bundle back and reports what is actually in it. Worth its own menu item: if
@@ -105,10 +106,11 @@ internal static class BuildVectorShaderBundle
 
             var clip = keywords.Contains("UNITY_UI_CLIP_RECT");
             var dither = shader.FindPropertyIndex("_VectorDither") >= 0;
+            var edge = shader.FindPropertyIndex("_VectorEdgePx") >= 0;
             var clipRect = shader.FindPropertyIndex("_ClipRect") >= 0;
 
-            Debug.Log($"VERIFY UNITY_UI_CLIP_RECT={clip} _VectorDither={dither}");
-            ok = shader.isSupported && clip && dither;
+            Debug.Log($"VERIFY UNITY_UI_CLIP_RECT={clip} _VectorDither={dither} _VectorEdgePx={edge}");
+            ok = shader.isSupported && clip && dither && edge;
 
             // _ClipRect is set per renderer rather than declared as a Property, so its absence
             // from the property list is expected and is not a failure.
@@ -119,7 +121,7 @@ internal static class BuildVectorShaderBundle
 
         if (!ok)
         {
-            Debug.LogError("VERIFY FAILED: the bundle is missing the shader, the clip variant or the dither property.");
+            Debug.LogError("VERIFY FAILED: the bundle is missing the shader, the clip variant, the dither property or the edge property.");
             if (Application.isBatchMode)
                 EditorApplication.Exit(1);
         }

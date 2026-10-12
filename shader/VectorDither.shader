@@ -38,6 +38,8 @@ Shader "ScriptedScreensVector/UIDither"
         // VECTOR: dither amplitude in 255ths, set from the mod's config so it can be tuned in
         // game. 0 turns the shader back into plain UI/Default.
         _VectorDither ("Dither (255ths)", Float) = 1
+        // VECTOR: automatic edge feather in screen pixels.
+        _VectorEdgePx ("Edge feather (px)", Float) = 1.3
     }
 
     SubShader
@@ -73,7 +75,7 @@ Shader "ScriptedScreensVector/UIDither"
         CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #pragma target 2.0
+            #pragma target 3.0
 
             #include "UnityCG.cginc"
             #include "UnityUI.cginc"
@@ -120,6 +122,7 @@ Shader "ScriptedScreensVector/UIDither"
             }
 
             float _VectorDither;
+            float _VectorEdgePx;
 
             v2f vert(appdata_t v)
             {
@@ -148,8 +151,23 @@ Shader "ScriptedScreensVector/UIDither"
             {
                 half4 color = IN.color * (tex2D(_MainTex, IN.texcoord) + _TextureSampleAdd);
 
-                // VECTOR: the float ramp, before anything else touches alpha.
-                color.a *= IN.coverage.x;
+                // VECTOR: x is blur coverage or the band's soft geometric fallback; y is
+                // perpendicular distance / feature size (negative for strokes). See EdgeRamp.Coverage.
+                // Take derivatives before branching; length keeps diagonals the same width.
+                float edgeY = IN.coverage.y;
+                float edgeG = length(float2(ddx(edgeY), ddy(edgeY)));
+                float cover = IN.coverage.x;
+                if (edgeG > 1e-20)
+                {
+                    float featurePx = 1.0 / edgeG;
+                    float distPx = abs(edgeY) / edgeG;
+                    float k = _VectorEdgePx;
+                    float t = saturate((featurePx / k - 1.0) * 0.5);
+                    float kEff = edgeY < 0.0 ? min(k, featurePx) : k * t * t * (3.0 - 2.0 * t);
+                    float ramp = kEff > 0.0 ? saturate(1.0 - distPx / kEff) : step(distPx, 0.0);
+                    cover = min(cover, ramp);
+                }
+                color.a *= cover;
 
                 #ifdef UNITY_UI_CLIP_RECT
                 half2 m = saturate((_ClipRect.zw - _ClipRect.xy - abs(IN.mask.xy)) * IN.mask.zw);

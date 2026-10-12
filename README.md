@@ -1,4 +1,4 @@
-﻿# ScriptedScreens Vector
+# ScriptedScreens Vector
 
 A `vector` element type for ScriptedScreens surfaces. It draws resolution-independent
 artwork as a real mesh instead of a pixel canvas, and **animates it on the client** from
@@ -923,6 +923,7 @@ StationeersLaunchPad's settings UI.
 | Section | Key | Meaning |
 |---------|-----|---------|
 | Renderer | `Enabled` | master switch; off for clean A/B measurements |
+| Renderer | `PixelEdges` | on by default: automatic edge AA targets 1.3 px across the console, including grazing views and uneven transforms; off restores the geometric feather; changes at the next rebuild |
 | Renderer | `SmoothData` | ease `$name` values between payloads |
 | Renderer | `CullOffScreen` | skip rebuilds for consoles not in view |
 | Renderer | `PauseWithGame` | freeze animation when the game is paused |
@@ -932,6 +933,12 @@ StationeersLaunchPad's settings UI.
 | Diagnostics | `Enabled` | the logging above; off by default |
 
 ---
+
+Automatic edge AA also covers path holes and stroke ends. Explicit `fea` and `fea_edge` stay
+in scene units, strokes clamp their feather to their width, and blur, shadows and dither keep
+their existing behavior. Pixel edges require the current shader bundle; missing, stale or
+unsupported bundles fall back to geometric feathering. `vector_stats` and Diagnostics report
+the corner depth ratio, scale spread and the reason when the scalar screen size is unknown.
 
 ## Requirements
 

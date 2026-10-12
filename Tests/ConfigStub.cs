@@ -1,4 +1,4 @@
-﻿namespace ScriptedScreensVector;
+namespace ScriptedScreensVector;
 
 /// <summary>
 /// The renderer's config, as it behaves with nothing bound.
@@ -24,6 +24,8 @@ internal static class VectorConfig
     internal static float BlurDensity => 1f;
 
     internal static bool BlurLod => true;
+
+    internal static bool PixelEdges => true;
 
     internal static bool CurveLodEnabled => true;
 

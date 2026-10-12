@@ -1,6 +1,30 @@
-﻿# Changelog
+# Changelog
 
 ScriptedScreens Vector, newest first.
+
+## 0.11.117
+
+### Fixed
+
+- Automatic edge antialiasing is measured per pixel across a foreshortened console, including
+  grazing views, views from above or below, uneven group scales and non-uniform root fits.
+- Automatic path fills feather their hole boundaries inward. Automatic stroke feathers also
+  cover round caps, butt ends and square ends.
+- Feathering documentation now states that stroke feathers are clamped to the stroke width,
+  as they have been since 0.11.110.
+- Diagnostics explain an unknown scalar screen size and report corner depth ratio and scale
+  spread even for ordinary grazing views. Visible vertices can use the real projection when
+  a bottom corner crosses the near plane and the scalar measurement declines.
+
+### Changed
+
+- `Renderer.PixelEdges` is on by default and takes effect at the next rebuild. Off, or a
+  missing, stale or unsupported shader bundle, uses the previous geometric feather.
+- Sharp rectangle sides now get the documented 1.3 px automatic ramp rather than about
+  0.92 px. Explicit feathers, shadows, blur and dither keep their previous behavior.
+- The shader bundle uses shader target 3.0 for screen derivatives. Automatic bands carry a
+  distance-to-edge coordinate and a soft geometric fallback, with camera drift rebuilding
+  their extent when needed.
 
 ## 0.11.116
 

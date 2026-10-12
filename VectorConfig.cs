@@ -1,4 +1,4 @@
-﻿using BepInEx.Configuration;
+using BepInEx.Configuration;
 
 namespace ScriptedScreensVector;
 
@@ -69,6 +69,9 @@ internal static class VectorConfig
     /// is left, and it costs vertices in proportion.
     /// </summary>
     internal static float BlurDensity => System.Math.Min(16f, System.Math.Max(0.25f, _blurDensity?.Value ?? 1f));
+
+    private static ConfigEntry<bool>? _pixelEdges;
+    internal static bool PixelEdges => _pixelEdges?.Value ?? true;
 
     /// <summary>
     /// Whether a blur's detail follows how large it is on screen. On is the normal behaviour:
@@ -159,6 +162,12 @@ internal static class VectorConfig
             "more when you walk up to them. On is normal. Turning it off builds every blur at " +
             "full detail regardless of distance: it costs vertices on far consoles and is " +
             "mainly useful for telling a distance artefact apart from a geometry one.");
+
+        _pixelEdges = _file.Bind(
+            "Renderer", "PixelEdges", true,
+            "Compute automatic edge antialiasing per pixel (1.3 px), including at grazing angles " +
+            "and under uneven scales. Off uses the geometric feather. Explicit feathers stay in " +
+            "scene units. Takes effect on the next rebuild; requires the current shader bundle.");
 
         _smoothData = _file.Bind(
             "Renderer", "SmoothData", true,

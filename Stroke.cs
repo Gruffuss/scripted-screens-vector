@@ -62,7 +62,7 @@ internal static class Stroke
         float miterLimit,
         float feather,
         Matrix4x4 matrix,
-        int maxVertices)
+        int maxVertices, EdgeRamp pixel = default, ClipRegion? clip = null)
     {
         var path = Clean(points, closed);
         if (path.Count < 2 || width <= 0f)
@@ -109,7 +109,7 @@ internal static class Stroke
             vh.AddTriangle(a, b + 1, b);
         }
 
-        if (feather > 0f)
+        if (feather > 0f && !pixel.Enabled)
         {
             FeatherSide(vh, left, count, path, closed, feather, paint, matrix, maxVertices, outward: true);
             FeatherSide(vh, right, count, path, closed, feather, paint, matrix, maxVertices, outward: false);
@@ -119,6 +119,29 @@ internal static class Stroke
         {
             RoundCap(vh, path[0], path[1], half, paint, matrix, maxVertices);
             RoundCap(vh, path[^1], path[^2], half, paint, matrix, maxVertices);
+        }
+
+        if (pixel.Enabled)
+        {
+            var outline = _pixelOutline ??= new List<Vector2>();
+            outline.Clear();
+            if (closed)
+            {
+                for (var i = 0; i < count; i++) outline.Add(left[i]);
+                var leftInward = Triangulator.SignedArea(path) > 0f;
+                PixelRing(vh, outline, paint, width, matrix, maxVertices, pixel, leftInward, clip);
+                outline.Clear();
+                for (var i = 0; i < count; i++) outline.Add(right[i]);
+                PixelRing(vh, outline, paint, width, matrix, maxVertices, pixel, !leftInward, clip);
+            }
+            else
+            {
+                for (var i = 0; i < count; i++) outline.Add(left[i]);
+                if (cap == CapStyle.Round) CapOutline(outline, path[^1], path[^2], half);
+                for (var i = count - 1; i >= 0; i--) outline.Add(right[i]);
+                if (cap == CapStyle.Round) CapOutline(outline, path[0], path[1], half);
+                PixelRing(vh, outline, paint, width, matrix, maxVertices, pixel, false, clip);
+            }
         }
     }
 
@@ -462,6 +485,27 @@ internal static class Stroke
             vh.AddTriangle(a, b + 1, b);
         }
     }
+
+    private static void PixelRing(MeshBuilder vh, List<Vector2> outline, Paint paint, float width,
+        Matrix4x4 matrix, int maxVertices, EdgeRamp pixel, bool inward, ClipRegion? clip)
+    {
+        if (vh.currentVertCount + outline.Count * 2 > maxVertices) return;
+        Tessellator.FeatherRing(vh, outline, paint, 0f, matrix, clip, -1, pixel, -width, inward);
+    }
+
+    private static void CapOutline(List<Vector2> outline, Vector2 end, Vector2 inward, float radius)
+    {
+        var direction = (end - inward).normalized;
+        var start = Mathf.Atan2(direction.y, direction.x) - Mathf.PI * 0.5f;
+        // The left side reaches the cap's +90 end; walk back through the fan to the right.
+        for (var i = RoundCapSegments - 1; i > 0; i--)
+        {
+            var angle = start + Mathf.PI * i / RoundCapSegments;
+            outline.Add(end + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius);
+        }
+    }
+
+    [ThreadStatic] private static List<Vector2>? _pixelOutline;
 
     private static void RoundCap(MeshBuilder vh, Vector2 end, Vector2 inward, float radius, Paint paint, Matrix4x4 matrix, int maxVertices)
     {

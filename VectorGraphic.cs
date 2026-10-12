@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -155,8 +155,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                     $"{mainThread:F2}% of a frame on the main thread, " +
                     $"{workerText}, {graphic._peakVertices} verts, " +
                     $"{graphic._lastShapeCount} shapes, " +
-                    (graphic._screenPixels < 0f ? "size UNKNOWN" : $"{graphic._screenPixels:F0} px") +
+                    (graphic._screenPixels < 0f ? $"size UNKNOWN ({graphic._scaleUnknownReason})" : $"{graphic._screenPixels:F0} px") +
                     $", job still running at Update on {graphic._lateAtUpdate} frame(s), landed in LateUpdate {graphic._rescuedLate}, received {graphic._payloads} data payload(s) and {graphic._structures} structure(s)");
+
+                ScriptedScreensVectorPlugin.Log?.LogInfo(graphic.DescribeProjection());
 
                 // Where the time actually went, biggest first. Six inferences about this
                 // have been wrong; this is measured per node type.
@@ -1099,6 +1101,56 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         _needsRebuild = true;
     }
 
+    private readonly float[] _builtCornerScale = new float[4];
+    private readonly float[] _nowCornerScale = new float[4];
+    private bool _builtPixelEdges;
+    private string _scaleUnknownReason = "not measured";
+
+    private static Vector2 Corner(Rect rect, int i) => new Vector2((i & 1) == 0 ? rect.xMin : rect.xMax,
+        (i & 2) == 0 ? rect.yMin : rect.yMax);
+
+    private SurfaceProjection Projection()
+    {
+        var target = canvas;
+        if (target == null || target.renderMode == RenderMode.ScreenSpaceOverlay) return default;
+        var camera = target.worldCamera != null ? target.worldCamera : ResolveCamera();
+        if (camera == null) return default;
+        var m = camera.projectionMatrix * camera.worldToCameraMatrix * rectTransform.localToWorldMatrix;
+        var hw = 0.5f * camera.pixelWidth; var hh = 0.5f * camera.pixelHeight;
+        return new SurfaceProjection(
+            new Vector3(hw * (m.m00 + m.m30), hw * (m.m01 + m.m31), hw * (m.m03 + m.m33)),
+            new Vector3(hh * (m.m10 + m.m30), hh * (m.m11 + m.m31), hh * (m.m13 + m.m33)),
+            new Vector3(m.m30, m.m31, m.m33), camera.orthographic ? 0f : camera.nearClipPlane);
+    }
+
+    private bool ExtentDrifted()
+    {
+        if (!_builtPixelEdges) return false;
+        var projection = Projection();
+        for (var i = 0; i < 4; i++) _nowCornerScale[i] = projection.SigmaMin(Corner(rectTransform.rect, i));
+        return SurfaceProjection.Drifted(_builtCornerScale, _nowCornerScale, Tessellator.EdgeDriftLimit);
+    }
+
+    private string DescribeProjection()
+    {
+        var projection = Projection();
+        if (!projection.Valid) return "projection: uniform fallback";
+        var minZ = float.MaxValue; var maxZ = float.MinValue;
+        var minScale = float.MaxValue; var maxScale = 0f;
+        for (var i = 0; i < 4; i++)
+        {
+            var corner = Corner(rectTransform.rect, i);
+            var z = projection.Depth(corner); var scale = projection.SigmaMin(corner);
+            minZ = Mathf.Min(minZ, z); maxZ = Mathf.Max(maxZ, z);
+            minScale = Mathf.Min(minScale, scale); maxScale = Mathf.Max(maxScale, scale);
+        }
+        return $"projection: corner depth {minZ:0.000}..{maxZ:0.000}, ratio "
+            + (minZ > 0f ? $"{maxZ / minZ:0.00}x" : "crosses camera plane")
+            + $", sigma_min {minScale:0.000}..{maxScale:0.000} px/unit, spread "
+            + (minScale > 0f ? $"{maxScale / minScale:0.00}x" : "near-plane fallback")
+            + $", edge ramp {(_builtPixelEdges ? "on" : "off")}";
+    }
+
     /// <summary>True when the surface has changed on-screen size enough to be worth rebuilding.</summary>
     /// <remarks>
     /// Buckets are multiplicative, roughly 15% apart, for the same reason the path flattener
@@ -1191,7 +1243,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         try
         {
             visible = VisibleRect();
-            Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats, visible);
+            Tessellator.Emit(_builder, _scene, _context, rect, 1f, true, _stats, visible, pixelEdges: VectorConfig.PixelEdges);
         }
         catch (Exception e)
         {
@@ -1516,7 +1568,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // all, which is the normal case when this is read from an editor rather than in front
         // of the screen. Saying so beats a bare "unknown" that reads like a fault.
         var size = _screenPixels < 0f
-            ? "size unknown (nothing has been drawn in view yet)"
+            ? $"size unknown ({_scaleUnknownReason})"
             : VectorStatsTool.N(_screenPixels, 0) + " px at the last rebuild";
         // A scene whose only motion is a renderer fade animates without redrawing, so reporting
         // the redraw gate alone said `animated False` about a dot that was visibly pulsing.
@@ -1528,6 +1580,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         into.AppendLine($"  on screen {size}, animated {(_scene.UsesTime && _diagnostics.DrewTime) || fading}{why}"
                         + $", scroll-driven {_scene.UsesScroll}");
+
+        into.AppendLine("  " + DescribeProjection());
 
         if (_diagnostics.Starved != null)
             into.AppendLine($"  TOO LARGE at this size: {_diagnostics.Starved} was dropped");
@@ -1935,12 +1989,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     private float ScreenPixelsPerCanvasUnit()
     {
         var rect = rectTransform.rect;
-        if (rect.width <= 0f)
-            return -1f;
+        if (rect.width <= 0f) { _scaleUnknownReason = "empty rect"; return -1f; }
 
         var target = canvas;
-        if (target == null)
-            return -1f;
+        if (target == null) { _scaleUnknownReason = "no canvas"; return -1f; }
 
         if (target.renderMode == RenderMode.ScreenSpaceOverlay)
         {
@@ -1950,8 +2002,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         }
 
         var camera = target.worldCamera != null ? target.worldCamera : ResolveCamera();
-        if (camera == null)
-            return -1f;
+        if (camera == null) { _scaleUnknownReason = "no camera"; return -1f; }
 
         var left = rectTransform.TransformPoint(new Vector3(rect.xMin, rect.yMin, 0f));
         var right = rectTransform.TransformPoint(new Vector3(rect.xMax, rect.yMin, 0f));
@@ -1971,7 +2022,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // at 10.34 ms), because every px-driven density term saturated at once.
         var near = Mathf.Max(0.01f, camera.nearClipPlane);
         if (a.z <= near || b.z <= near)
+        {
+            _scaleUnknownReason = $"bottom corner at near plane: z {a.z:0.000}/{b.z:0.000}, near {near:0.000}";
             return -1f;
+        }
 
         var pixels = Vector2.Distance(new Vector2(a.x, a.y), new Vector2(b.x, b.y));
 
@@ -1981,8 +2035,11 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // that: unknown scale falls back to 1, which collapses a sigma-5 blur from 96 rings to
         // about 8 (`Clamp(CeilToInt(reach * 1 * 1 / 2), 4, 96)`). Traded correct output for a cost
         // that was a self-correcting transient, which is the wrong way round.
-        if (pixels <= 0.01f || pixels > 100000f)
+        if (float.IsNaN(pixels) || float.IsInfinity(pixels) || pixels <= 0.01f || pixels > 100000f)
+        {
+            _scaleUnknownReason = $"projected span {pixels:0.00}px outside scalar range";
             return -1f;
+        }
 
         // DIAGNOSTIC ONLY -- deliberately changes nothing. A span wider than four screens means
         // the quad is strongly foreshortened, where a single scalar px-per-unit is a poor model:
@@ -2007,6 +2064,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             }
         }
 
+        _scaleUnknownReason = string.Empty;
         return pixels / rect.width;
     }
 
@@ -2169,7 +2227,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         // Walking toward a console changes how much detail its geometry should have. Nothing
         // else notices for a static scene, so the size bucket is what asks for the rebuild.
-        if (VectorConfig.RendererEnabled && _scene != null && !animated && ScaleChanged())
+        if (VectorConfig.RendererEnabled && _scene != null && !animated && (ScaleChanged() || ExtentDrifted()))
             _needsRebuild = true;
 
         if (_imagesWaitingOn >= 0 && ImageCache.Version != _imagesWaitingOn)
@@ -2495,6 +2553,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // then is a far better estimate than 1 -- it is at worst slightly stale, where 1 is
         // categorically wrong. 1 survives only as the first-ever value, before anything is known.
         var scale = ScaleChoice.Choose(known, screenScale, _lastKnownScale);
+        var projection = Projection();
+        var pixelEdges = Tessellator.PixelEdgesAvailable && Tessellator.CoverageInUv && VectorConfig.PixelEdges;
+        _builtPixelEdges = pixelEdges;
+        for (var i = 0; i < 4; i++) _builtCornerScale[i] = pixelEdges ? projection.SigmaMin(Corner(rect, i)) : 0f;
         var visible = DashWindow.Expand(VisibleRect());
         _jobDashWindow = visible;
 
@@ -2510,7 +2572,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             // surface with it -- whatever was built before the throw is still drawn.
             try
             {
-                Tessellator.Emit(builder, scene, context, rect, scale, known, stats, visible);
+                Tessellator.Emit(builder, scene, context, rect, scale, known, stats, visible, projection, pixelEdges);
 
                 // Off-thread on purpose: this is a rect test per label per later shape, and it
                 // has to happen before Slices() is asked how the mesh divides.
