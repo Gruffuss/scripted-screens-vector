@@ -1964,9 +1964,17 @@ feathered. On a band `fea` therefore does nothing except supply the default for 
 `fea = 6` and `fea_edge = 6` draw the same band, and `fea = 6` with `fea_edge = 0` draws a hard
 one.
 
-The default resolves to roughly **1.3 screen pixels**, not a fixed number of scene units,
-because the same scene draws at very different sizes. `0` gives deliberately hard edges; a
-large value gives a glow on a shape big enough to hold it.
+The default targets **1.3 screen pixels** outward from each edge. With `Renderer.PixelEdges`
+on (the default), the fragment shader measures the ramp per pixel, so it keeps that width
+across a foreshortened console and under uneven root fits, group `s` and group `m` transforms.
+Sharp polygon sides also get 1.3 px; the older geometric ramp gave rectangles about 0.92 px,
+regular hexagons about 1.13 px and triangles about 0.65 px.
+Automatic path holes feather into the hole, and automatic strokes feather their round, butt
+and square ends as well as their sides.
+
+`0` gives deliberately hard edges; a large explicit value gives a glow on a shape big enough
+to hold it. Explicit `fea`, `fea_edge` and stroke feathers remain in scene units and keep their
+existing geometry. Explicit stroke feathers apply to the sides; their ends stay hard.
 
 **A filled shape's feather is reduced by the shape's own size.** The width actually used is the
 width asked for, scaled by how the shorter side of the shape's bounding box compares with it:
@@ -1974,22 +1982,26 @@ the full width at three times the feather and above, **half** at twice, and **no
 times or below. So `fea = 2` softens a rule 6 units tall by the full 2, one 4 units tall by 1,
 and one 2 units tall not at all. **Nothing reports it.**
 
-With an explicit `fea` both quantities are in scene units, so that ratio is fixed. **With the
-default it is not**: the automatic width is about 1.3 *screen* pixels converted back to local
-units, so it moves with the camera and with every enclosing group's scale — a shape gets the full
-feather at roughly 3.9 screen pixels across its shorter side, half at 2.6, none at 1.3 or below.
-The lever is a smaller `fea`; the hard cutoff this replaced popped on and off as the camera moved,
-which was worse.
+With an explicit `fea`, both quantities are in scene units, so that ratio is fixed. With the
+automatic ramp, the feature size is measured per pixel across the edge: full feather at 3.9 px,
+half at 2.6 px, none at 1.3 px or below. Rings can therefore appear where a small shape is big
+enough near the camera even when it is smaller at the far end.
 
-**An uneven `m` or `s` breaks the pixel figure outright.** The automatic width is one number of
-local units, taken from the group's single scale (`sx`, or `sqrt(|ad − bc|)` for an `m`), and is
-then stretched with the shape like any other geometry, so it is 1.3 pixels only where the two axes
-agree. Under `m = {3, 0, 0, 1, 0, 0}` a line's ramp reaches 0.75 screen pixels past each side of a
-horizontal run and 2.25 past each side of a vertical one.
+**A stroke's feather is clamped to the stroke's width**, including an explicit feather. In pixel
+mode the automatic rule is `min(1.3 px, projected stroke width)`, so a sub-pixel line keeps a
+soft edge without a ramp wider than itself. A `YS`'s `fea_edge` has no size falloff; use it for
+a thin soft-edged band.
 
-**The ring around a filled contour is the only thing this touches.** A stroke's feather and a
-`YS`'s `fea_edge` take the width asked for whatever the shape's size, so a thin soft-edged band is
-written as a `YS` rather than as a feathered `R`.
+`Renderer.PixelEdges = false` uses the previous geometric feather, sized from one screen scale
+per console; its apparent width varies with viewing angle and uneven transforms. A missing,
+stale or unsupported shader bundle also uses that fallback. A setting change takes effect at
+the next rebuild. The pixel ramp sits inside a wider geometric band, which is rebuilt when
+camera motion consumes its margin, including changes in compression direction and near-plane
+validity. If the band becomes too narrow, its band coverage keeps the edge soft. If batching
+loses the edge-distance UV, a separate geometric fallback retains the stroke-width clamp
+and filled-shape size falloff. Nearly singular projections cap band displacement at four
+surface widths or heights.
+Shadows, blur, explicit feathers and dither retain their existing data and behavior.
 
 `fea_edge` lets a liquid or gas surface carry a wide soft ramp while the walls beside it stay
 crisp.

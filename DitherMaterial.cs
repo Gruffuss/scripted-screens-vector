@@ -13,7 +13,7 @@ namespace ScriptedScreensVector;
 /// other. Clipping needs nothing from us: a <c>RectMask2D</c> clips through
 /// <c>CanvasRenderer.EnableRectClipping</c>, which feeds <c>_ClipRect</c> and switches the
 /// <c>UNITY_UI_CLIP_RECT</c> variant on per renderer -- the shader only has to declare both,
-/// which is exactly why it is a verbatim copy of UI-Default with four lines added.
+/// which is exactly why it is a copy of UI-Default with the VECTOR additions.
 /// </remarks>
 internal static class DitherMaterial
 {
@@ -21,6 +21,9 @@ internal static class DitherMaterial
     private const string ShaderName = "ScriptedScreensVector/UIDither";
 
     private static readonly int DitherId = Shader.PropertyToID("_VectorDither");
+    private static readonly int EdgeId = Shader.PropertyToID("_VectorEdgePx");
+    private static bool _hasEdgeRamp;
+    internal static bool HasEdgeRamp { get { Load(); return _hasEdgeRamp; } }
 
     private static bool _tried;
     private static Material? _material;
@@ -52,7 +55,10 @@ internal static class DitherMaterial
     internal static void Refresh()
     {
         if (Shared != null)
+        {
             _material!.SetFloat(DitherId, VectorConfig.Dither);
+            if (_hasEdgeRamp) _material.SetFloat(EdgeId, Tessellator.AutoFeatherPixels);
+        }
     }
 
     private static void Load()
@@ -118,6 +124,9 @@ internal static class DitherMaterial
 
             _material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
             _material.SetFloat(DitherId, VectorConfig.Dither);
+            _hasEdgeRamp = shader.FindPropertyIndex("_VectorEdgePx") >= 0
+                && shader.FindPropertyIndex("_VectorEdgeFallback") >= 0;
+            if (_hasEdgeRamp) _material.SetFloat(EdgeId, Tessellator.AutoFeatherPixels);
             ScriptedScreensVectorPlugin.Log?.LogInfo(
                 $"Dither shader loaded; gradients dither at {VectorConfig.Dither:0.##}/255.");
 

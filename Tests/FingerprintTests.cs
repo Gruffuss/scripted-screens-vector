@@ -22,6 +22,28 @@ internal static class FingerprintTests
                 == File.ReadAllText(Path.Combine(scenes, "zzz-nofill-control.txt")),
             "same geometry and paints");
         var actual = Fingerprint(scenes, run);
+        var raw = Fingerprint(scenes, run, raw: true);
+        var rawBaseline = Path.Combine(folder, "fingerprint-off-bytes.txt");
+        run.Check("P7: PixelEdges off exact bytes (all 78 rows)",
+            File.Exists(rawBaseline) && string.Join("\n", raw) == File.ReadAllText(rawBaseline).Replace("\r", "").TrimEnd('\n'),
+            "positions, colours, uv0, uv1 and indices: immutable unrounded SHA256");
+        var uvOff = Fingerprint(scenes, run, raw: true, coverage: true);
+        var uvBaseline = Path.Combine(folder, "fingerprint-off-uv-bytes.txt");
+        run.Check("P7: PixelEdges off exact bytes with shader (all 78 rows)",
+            File.Exists(uvBaseline) && string.Join("\n", uvOff) == File.ReadAllText(uvBaseline).Replace("\r", "").TrimEnd('\n'),
+            "original emitter with CoverageInUv enabled");
+        var pixel = Fingerprint(scenes, run, pixel: true);
+        var pixelBaseline = Path.Combine(folder, "fingerprint-pixel.txt");
+        if (rebaseline && !run.HasFailures)
+            File.WriteAllText(pixelBaseline, string.Join("\n", pixel) + "\n", new UTF8Encoding(false));
+        else if (File.Exists(pixelBaseline))
+        {
+            var wanted = File.ReadAllLines(pixelBaseline);
+            for (var i = 0; i < Math.Max(wanted.Length, pixel.Count); i++)
+                run.Check($"pixel fingerprint line {i + 1}", i < wanted.Length && i < pixel.Count && wanted[i] == pixel[i],
+                    i < pixel.Count ? pixel[i] : "missing row");
+        }
+        else run.Fail("pixel fingerprint missing: rebaseline after reviewing the changed rows");
         if (rebaseline)
         {
             if (run.HasFailures)
@@ -44,7 +66,7 @@ internal static class FingerprintTests
         }
     }
 
-    private static List<string> Fingerprint(string folder, TestRun run)
+    private static List<string> Fingerprint(string folder, TestRun run, bool raw = false, bool pixel = false, bool coverage = false)
     {
         var rows = new List<string>();
         var files = new List<string>(Directory.GetFiles(folder, "*.txt"));
@@ -95,8 +117,15 @@ internal static class FingerprintTests
                 int shapes;
                 try
                 {
-                    shapes = Tessellator.Emit(mesh, scene, context, target,
-                        2f, true, stats, window.Visible);
+                    var savedCoverage = Tessellator.CoverageInUv;
+                    var available = Tessellator.PixelEdgesAvailable;
+                    try
+                    {
+                        if (pixel || coverage) Tessellator.CoverageInUv = Tessellator.PixelEdgesAvailable = true;
+                        shapes = Tessellator.Emit(mesh, scene, context, target,
+                            2f, true, stats, window.Visible, pixelEdges: pixel);
+                    }
+                    finally { Tessellator.CoverageInUv = savedCoverage; Tessellator.PixelEdgesAvailable = available; }
                 }
                 catch (Exception e)
                 {
@@ -112,17 +141,17 @@ internal static class FingerprintTests
                 rows.Add(string.Format(CultureInfo.InvariantCulture,
                     "{0}|t={1}|verts={2}|tris={3}|shapes={4}|hits={5}|labels={6}|bounds={7}|problems={8}|mesh={9}",
                     window.Name, time, mesh.currentVertCount, mesh.TriangleCount, shapes,
-                    hits.Count, stats.Text.Count, Bounds(mesh), scene.Problems.Count, MeshChecksum(mesh)));
+                    hits.Count, stats.Text.Count, Bounds(mesh), scene.Problems.Count, MeshChecksum(mesh, raw)));
 
                 if (window.Visible != null)
                     run.Check($"fingerprint: {window.Name} bounded at t={time}",
                         mesh.currentVertCount > 0 && mesh.currentVertCount <= 1024 && stats.CulledDashes,
                         $"{mesh.currentVertCount} vertices; culled={stats.CulledDashes}");
-                if (name == "zzz-nofill")
+                if (!pixel && name == "zzz-nofill")
                     run.Check($"fingerprint: nofill removes all three fills at t={time}",
                         mesh.ShapeCount == 2 && mesh.ShapeStart(1) == 0 && mesh.currentVertCount == 8,
                         $"first fill boundary={mesh.ShapeStart(1)}; total={mesh.currentVertCount} vertices (stroke only)");
-                if (name == "zzz-nofill-control")
+                if (!pixel && name == "zzz-nofill-control")
                     run.Check($"fingerprint: fills draw without nofill at t={time}",
                         mesh.ShapeCount == 3 && mesh.ShapeStart(1) > 0
                         && mesh.ShapeStart(2) > mesh.ShapeStart(1)
@@ -145,11 +174,15 @@ internal static class FingerprintTests
         throw new DirectoryNotFoundException("Tests/gate was not found above the test runner.");
     }
 
-    internal static string MeshChecksum(MeshBuilder mesh)
+    internal static string MeshChecksum(MeshBuilder mesh, bool raw = false)
     {
         using var bytes = new MemoryStream();
         using var writer = new BinaryWriter(bytes);
-        void Rounded(float value, double scale) => writer.Write(checked((long)Math.Round(value * scale, MidpointRounding.AwayFromZero)));
+        void Rounded(float value, double scale)
+        {
+            if (raw) writer.Write(value);
+            else writer.Write(checked((long)Math.Round(value * scale, MidpointRounding.AwayFromZero)));
+        }
         writer.Write(mesh.currentVertCount);
         writer.Write(mesh.TriangleCount);
         for (var i = 0; i < mesh.currentVertCount; i++)

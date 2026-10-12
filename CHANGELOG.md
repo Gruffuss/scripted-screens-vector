@@ -8,6 +8,13 @@ ScriptedScreens Vector, newest first.
 
 - `vector_stats` now names the hierarchy that holds each scene and says when it is inactive,
   so a scene still listed after its element was cleared shows what is keeping it.
+- `Renderer.PixelEdges` is on by default and takes effect at the next rebuild. Off, or a
+  missing, stale or unsupported shader bundle, uses the previous geometric feather.
+- Sharp rectangle sides now get the documented 1.3 px automatic ramp rather than about
+  0.92 px. Explicit feathers, shadows, blur and dither keep their previous behavior.
+- The shader bundle uses shader target 3.0 for screen derivatives. Automatic bands carry a
+  distance-to-edge coordinate and a soft geometric fallback, with camera drift rebuilding
+  their extent when needed.
 
 ### Fixed
 
@@ -18,6 +25,29 @@ ScriptedScreens Vector, newest first.
   the array as unresolved data in `vector_stats`. This clears once the data covers the index
   and does not create a permanent scene problem. Declaring `missing` suppresses the report.
   String slots still use the missing text, and numeric slots still read `0`.
+- Automatic edge antialiasing is measured per pixel across a foreshortened console, including
+  grazing views, views from above or below, uneven group scales and non-uniform root fits.
+- Automatic path fills feather their hole boundaries inward. Automatic stroke feathers also
+  cover round caps, butt ends and square ends.
+- Feathering documentation now states that stroke feathers are clamped to the stroke width,
+  as they have been since 0.11.110.
+- Diagnostics explain an unknown scalar screen size and report corner depth ratio and scale
+  spread even for ordinary grazing views. Visible vertices can use the real projection when
+  a bottom corner crosses the near plane and the scalar measurement declines.
+- Automatic hole antialiasing bands now stay inside their clip, including crossing and
+  disjoint holes in the same path.
+- Screen-scale rejection stores raw measurements without allocating diagnostic strings per
+  frame. With pixel edges off, dispatch skips the per-vertex projection snapshot.
+- Automatic edge bands rebuild when compression turns toward another edge direction or a
+  corner crosses the near plane, while stable projections stay in their drift tolerance.
+- Non-finite scalar screen spans are rejected, including NaN, so an invalid camera projection
+  cannot enter the scale buckets. This validation also applies with pixel edges off.
+- If the edge-distance UV is lost during batching, automatic bands retain the geometric
+  stroke-width clamp and filled-shape size falloff instead of fading across their full extent.
+- Nearly singular projections cannot extend a band more than four surface widths or heights.
+  Inward rings keep their direction at spikes, and disabled pixel rings emit no triangles.
+- The automatic 1.3 px ramp also corrects polygon sides: regular hexagons previously got
+  about 1.13 px and triangles about 0.65 px, alongside rectangles at about 0.92 px.
 
 ## 0.11.116
 

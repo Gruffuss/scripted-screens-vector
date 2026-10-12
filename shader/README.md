@@ -8,7 +8,8 @@ that needs the Unity editor.
 
 ## Steps
 
-1. Open a Unity **2022.3** project. Any 2022.3 patch works -- the engine version stamped in a
+1. Open a Unity **2022.3** project. Use **2022.3.62f3** for the current game. Other 2022.3 patches
+   can load -- the engine version stamped in a
    bundle only has to be the same major.minor as the player, and mods in the wild ship bundles
    built with 2022.3.7f1 that a 2022.3.62f3 game loads. Unity 6 does **not** work: it writes a
    newer serialized-file version, and that is exactly the case where `LoadFromFile` returns null
@@ -33,14 +34,20 @@ and you ship the previous variant set -- which looks exactly like the dither not
 ## Building it headless
 
 ```
-"C:/Program Files/Unity/Hub/Editor/<version>/Editor/Unity.exe" -batchmode -quit -nographics   -projectPath <project> -executeMethod BuildVectorShaderBundle.Build -logFile -
+"C:/Program Files/Unity/Hub/Editor/<version>/Editor/Unity.exe" -batchmode -quit   -projectPath <project> -executeMethod BuildVectorShaderBundle.Build -logFile -
 ```
 
-A minimal empty project is enough and is the right place for it: a mod project with an exporter
+A minimal empty project with the built-in `com.unity.modules.assetbundle` module enabled is
+enough and is the right place for it: a mod project with an exporter
 package wired in may assign asset bundle names across all assets and sweep the shader into its
 own bundle.
 
 ## Verifying it
+
+The build also loads the result back and must print `VERIFY OK`. It checks shader support,
+`UNITY_UI_CLIP_RECT`, `_VectorDither` and `_VectorEdgePx`. Run without `-nographics` so support
+can be checked on a graphics device. The separate **Verify shader bundle** menu item performs
+the same check on an existing bundle. Check the build exit code as well as the log.
 
 The engine version is plain text in the first couple of hundred bytes of the bundle, so the
 version can be checked without launching anything:
@@ -69,5 +76,13 @@ Then run `InGameTest-dither.lua`. It has two halves and both matter:
 
 ## Changing the shader
 
-Keep the copy of `UI-Default` verbatim. Only the four blocks marked `VECTOR` are ours. If a future
-Unity version changes `UI-Default`, re-copy it and re-apply those four.
+Keep the copy of `UI-Default` verbatim. Only the five blocks marked `VECTOR` are ours, plus
+the coverage UV wiring and the target 3.0 line. If a future Unity version changes `UI-Default`,
+re-copy it and re-apply those additions. The automatic edge ramp uses derivatives of `TEXCOORD1.y`;
+`TEXCOORD1.x` remains float coverage and encodes the original geometric feather's stroke-width
+clamp and filled-shape size falloff. Automatic bands use the white texture, so their
+`TEXCOORD0.x` can carry a separate band coordinate (0 at the edge, 1 at the outer vertex).
+The derivative ramp uses this wider band coverage; without edge-distance derivatives, the
+shader clamps `TEXCOORD1.x` to recover the original geometric ramp. `_VectorEdgePx` defaults
+to 1.3. The mod requires both it and `_VectorEdgeFallback` before enabling pixel edges, so
+an older bundle uses the original emitter safely.

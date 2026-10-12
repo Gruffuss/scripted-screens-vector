@@ -53,7 +53,9 @@ internal static class Tessellator
     /// Auto-feather target, in screen pixels. Slightly over one pixel: enough to cover the
     /// hard step between covered and uncovered pixels, small enough not to look soft.
     /// </summary>
-    private const float AutoFeatherPixels = 1.3f;
+    internal const float AutoFeatherPixels = 1.3f;
+    internal const float EdgeBandSafety = 2f;
+    internal const float EdgeDriftLimit = 1.5f;
 
     /// <summary>Parameter span a triangle may cover before a gradient needs it subdivided.</summary>
     private const float GradientTolerance = 0.06f;
@@ -299,7 +301,7 @@ internal static class Tessellator
     /// a worker filled them in — it would see its own empty copy. They are copied out here,
     /// on the thread that produced them, while the job still owns the stats object.
     /// </remarks>
-    internal static int Emit(MeshBuilder vh, VecScene scene, EvalContext context, Rect target, float screenPixelsPerUnit, bool screenSizeKnown, TessellationStats stats, Rect? visible = null)
+    internal static int Emit(MeshBuilder vh, VecScene scene, EvalContext context, Rect target, float screenPixelsPerUnit, bool screenSizeKnown, TessellationStats stats, Rect? visible = null, SurfaceProjection projection = default, bool pixelEdges = false)
     {
         // Belt as well as braces for the state a throw could strand. The three places that
         // save and restore now do it in a `finally`, but `_repeatPiece` is [ThreadStatic] and
@@ -314,6 +316,8 @@ internal static class Tessellator
         int shapes;
         try
         {
+            _pixelEdges = pixelEdges && PixelEdgesAvailable && CoverageInUv;
+            _projection = projection;
             shapes = EmitCore(vh, scene, context, target, screenPixelsPerUnit, screenSizeKnown);
         }
         finally
@@ -328,6 +332,8 @@ internal static class Tessellator
             NoFeather = false;
             NoEval = false;
             _visible = null;
+            _pixelEdges = false;
+            _projection = default;
         }
 
         System.Array.Copy(OpMilliseconds, stats.OpMilliseconds, stats.OpMilliseconds.Length);
@@ -380,6 +386,7 @@ internal static class Tessellator
         // Canvas units per scene unit comes from the viewbox; screen pixels per canvas unit
         // comes from the camera. Only the product is a real on-screen size.
         ScreenScale = Mathf.Max(0.0001f, screenPixelsPerUnit);
+        _surfaceSize = Mathf.Max(Mathf.Abs(target.width), Mathf.Abs(target.height));
 
         // Spans belong to one rebuild. Without this they accumulate every frame an editor
         // redraws, which is a leak that only shows up in the tool that asked for them.
@@ -436,7 +443,7 @@ internal static class Tessellator
             Matrix = viewbox,
             Opacity = 1f,
             Clip = null,
-            Scale = Mathf.Abs(scale.x),
+            Scale = Mathf.Abs(scale.x), // Legacy density; pixel edges use the full viewbox matrix.
             SceneToLocal = Matrix4x4.identity,
         });
 
@@ -658,7 +665,7 @@ internal static class Tessellator
         if (parent == null)
             return own;
 
-        // ponytail: a concave parent is not intersected; the label keeps its own outline.
+        // A concave parent is not intersected; the label keeps its own outline.
         var region = Tessellator.IsConvex(parent) ? ClipRegion.FromPolygon(parent) : null;
         return region == null ? own : new List<Vector2>(region.ClipPolygon(own));
     }
@@ -694,6 +701,13 @@ internal static class Tessellator
     /// half is whatever the game draws into, which the startup log now records.
     /// </summary>
     internal static bool CoverageInUv;
+    internal static bool PixelEdgesAvailable;
+    [ThreadStatic] private static bool _pixelEdges;
+    [ThreadStatic] private static SurfaceProjection _projection;
+    [ThreadStatic] private static float _surfaceSize;
+    [ThreadStatic] private static List<Vector2>? _ringOuter;
+    [ThreadStatic] private static List<float>? _ringEdge;
+    [ThreadStatic] private static List<float>? _edgeExtents;
 
     /// A renderer fade is <c>CanvasRenderer.SetAlpha</c>, which is live state and not part of
     /// the object, so the clone ScriptedScreens photographs starts at full opacity: a pulsing
@@ -1071,7 +1085,7 @@ internal static class Tessellator
                     Clip = clip,
                     Pieces = pieces,
                     CanvasClip = canvasClip,
-                    Scale = parent.Scale * Mathf.Abs(sx) * matrixScale,
+                    Scale = parent.Scale * Mathf.Abs(sx) * matrixScale, // Legacy density; pixel edges use the full group matrix.
                     SceneToLocal = sceneToLocal,
                 });
 
@@ -2499,7 +2513,7 @@ internal static class Tessellator
         var paint = ResolvePaint(scene, node, context, frame, stroke: false,
             opacityOverride: ramped ? 1f : -1f);
 
-        var edgeFeather = EdgeFeatherWidth(node, context, frame.Scale);
+        var edgeFeather = EdgeFeatherWidth(node, context, frame.Scale, out var edgeAuto);
         context.PopRepeat();
 
         // A bounding-box gradient spans the whole band, not each quad of it.
@@ -2537,7 +2551,7 @@ internal static class Tessellator
             // full opacity for a ramped band, so passing it straight through would halo the
             // gas surface at brightness 1 exactly where the ramp says zero.
             FeatherEdge(vh, top, bottom, paint, edgeFeather, frame.Matrix, frame.Clip,
-                ramped ? opacityY : 1f);
+                ramped ? opacityY : 1f, edgeAuto && _pixelEdges ? new EdgeRamp(_projection, frame.Matrix, ScreenScale, _surfaceSize) : default);
             BandFeatherMs += Elapsed(featherMark);
         }
     }
@@ -2989,7 +3003,7 @@ internal static class Tessellator
                     if (!Triangulator.Triangulate(outer, holes, out var whole, out var wholeIndices))
                         return;
 
-                    // ponytail: unshared vertices per clipped triangle; fine for the rare crossing hole.
+                    // A crossing hole needs independent vertices for each clipped triangle.
                     soupVertices = new List<Vector2>();
                     soupIndices = new List<int>();
                     var triangle = new List<Vector2>(3);
@@ -3079,7 +3093,23 @@ internal static class Tessellator
         // One call, not two: `FeatherWidth` evaluates the node's `fea` expression, so asking it
         // twice in one line did that work twice and left the falloff free to disagree with the
         // width it scales.
-        var width = FeatherWidth(node, context, frame.Scale);
+        var width = FeatherWidth(node, context, frame.Scale, out var auto);
+        if (auto && _pixelEdges)
+        {
+            var mark = Stopwatch.GetTimestamp();
+            var pixel = new EdgeRamp(_projection, frame.Matrix, ScreenScale, _surfaceSize);
+            if (!pixel.Enabled) return;
+            FeatherRing(vh, contour, paint, width * FeatherFalloff(contour, width), frame.Matrix, frame.Clip, shared, pixel, FeatureSize(contour));
+            if (holes != null)
+                foreach (var hole in holes)
+                {
+                    var ring = frame.Clip == null ? hole : frame.Clip.ClipPolygon(hole);
+                    if (ring.Count >= 3)
+                        FeatherRing(vh, ring, paint, width * FeatherFalloff(hole, width), frame.Matrix, frame.Clip, -1, pixel, FeatureSize(hole), inward: true);
+                }
+            RingFeatherMs += Elapsed(mark);
+            return;
+        }
         var feather = width * FeatherFalloff(contour, width);
         if (feather > 0.0001f)
         {
@@ -3087,6 +3117,26 @@ internal static class Tessellator
             FeatherRing(vh, contour, paint, feather, frame.Matrix, frame.Clip, shared);
             RingFeatherMs += Elapsed(ringMark);
         }
+    }
+
+    private static void SampledNormals(List<Vector2> edge, int i, out Vector2 na, out Vector2 nb)
+    {
+        na = EdgeNormal(edge[Mathf.Max(0, i - 1)], edge[i]);
+        nb = EdgeNormal(edge[i], edge[Mathf.Min(edge.Count - 1, i + 1)]);
+        if (na.sqrMagnitude < 0.0001f) na = nb;
+        if (nb.sqrMagnitude < 0.0001f) nb = na;
+    }
+
+    private static Vector2 EdgeNormal(Vector2 a, Vector2 b)
+    {
+        var edge = (b - a).normalized;
+        return new Vector2(edge.y, -edge.x);
+    }
+
+    private static float FeatureSize(List<Vector2> outline)
+    {
+        var bounds = Stroke.Bounds(outline);
+        return Mathf.Min(bounds.width, bounds.height);
     }
 
     /// <summary>
@@ -3818,7 +3868,7 @@ internal static class Tessellator
     /// has no way to say so. Comparing the count before and after catches the one case the
     /// helper below cannot: a stroke that stopped halfway along its own path.
     /// </remarks>
-    private static void StrokeWithBudget(MeshBuilder vh, List<Vector2> points, bool closed, float width, Paint paint, VecNode node, float feather, Matrix4x4 matrix, Rect? pathBounds)
+    private static void StrokeWithBudget(MeshBuilder vh, List<Vector2> points, bool closed, float width, Paint paint, VecNode node, float feather, Matrix4x4 matrix, Rect? pathBounds, EdgeRamp pixel, ClipRegion? clip)
     {
         var before = vh.currentVertCount;
 
@@ -3835,7 +3885,7 @@ internal static class Tessellator
             paint = paint.WithBounds(bounds.min, bounds.size);
         }
 
-        Stroke.Emit(vh, points, closed, width, paint, node.Cap, node.Join, node.MiterLimit, feather, matrix, MaxVertices);
+        Stroke.Emit(vh, points, closed, width, paint, node.Cap, node.Join, node.MiterLimit, feather, matrix, MaxVertices, pixel, clip);
 
         if (vh.currentVertCount >= MaxVertices && vh.currentVertCount > before)
             _starved ??= "a stroke";
@@ -4357,7 +4407,9 @@ internal static class Tessellator
         // Clamping to the width does neither: the line draws about a pixel wide at partial
         // alpha, which is what a browser does with a hairline. It also holds at every distance,
         // since both the feather and this bound are in scene units.
-        var feather = Mathf.Min(FeatherWidth(node, context, frame.Scale), width);
+        var requested = FeatherWidth(node, context, frame.Scale, out var auto);
+        var pixel = auto && _pixelEdges ? new EdgeRamp(_projection, frame.Matrix, ScreenScale, _surfaceSize) : default;
+        var feather = pixel.Enabled ? requested : Mathf.Min(requested, width);
 
         // An undashed stroke is one run -- the outline itself -- so it is drawn straight
         // rather than through a list built to hold it. The list was the last per-shape
@@ -4367,7 +4419,7 @@ internal static class Tessellator
         {
             var strokeBounds = frame.Clip != null && paint.Gradient is { BoundingBox: true } && points.Count > 0
                 ? Stroke.Bounds(points) : (Rect?)null;
-            StrokeRun(vh, points, closed, width, paint, node, feather, frame, strokeBounds);
+            StrokeRun(vh, points, closed, width, paint, node, feather, frame, strokeBounds, pixel);
             return;
         }
 
@@ -4399,7 +4451,7 @@ internal static class Tessellator
         }
 
         foreach (var run in Stroke.Dash(Loop(points, closed), node.DashPattern, node.DashOffset.Evaluate(context), window))
-            StrokeRun(vh, run, false, width, paint, node, feather, frame, pathBounds);
+            StrokeRun(vh, run, false, width, paint, node, feather, frame, pathBounds, pixel);
     }
 
     /// <summary>
@@ -4410,18 +4462,18 @@ internal static class Tessellator
     /// frame and the paint allocates a display class per call, which is what replaced the
     /// list this was written to remove. Measured, both times.
     /// </remarks>
-    private static void StrokeRun(MeshBuilder vh, List<Vector2> run, bool runClosed, float width, Paint paint, VecNode node, float feather, Frame frame, Rect? pathBounds = null)
+    private static void StrokeRun(MeshBuilder vh, List<Vector2> run, bool runClosed, float width, Paint paint, VecNode node, float feather, Frame frame, Rect? pathBounds = null, EdgeRamp pixel = default)
     {
         // A clipped stroke is cut into the pieces that fall inside, rather than being
         // redirected along the boundary the way a filled contour is.
         if (frame.Clip == null)
         {
-            StrokeWithBudget(vh, run, runClosed, width, paint, node, feather, frame.Matrix, pathBounds);
+            StrokeWithBudget(vh, run, runClosed, width, paint, node, feather, frame.Matrix, pathBounds, pixel, frame.Clip);
             return;
         }
 
         foreach (var piece in frame.Clip.ClipPolyline(Loop(run, runClosed)))
-            StrokeWithBudget(vh, piece, closed: false, width, paint, node, feather, frame.Matrix, pathBounds);
+            StrokeWithBudget(vh, piece, closed: false, width, paint, node, feather, frame.Matrix, pathBounds, pixel, frame.Clip);
     }
 
     private static Paint ResolvePaint(VecScene scene, VecNode node, EvalContext context, Frame frame, bool stroke, float opacityOverride = -1f)
@@ -4492,7 +4544,7 @@ internal static class Tessellator
         return new Paint(stroke ? node.StrokeColour : node.Fill, null, opacity);
     }
 
-    private static void FeatherEdge(MeshBuilder vh, List<Vector2> edge, List<Vector2> away, Paint paint, float width, Matrix4x4 matrix, ClipRegion? clip, float opacityScale = 1f)
+    private static void FeatherEdge(MeshBuilder vh, List<Vector2> edge, List<Vector2> away, Paint paint, float width, Matrix4x4 matrix, ClipRegion? clip, float opacityScale = 1f, EdgeRamp pixel = default)
     {
         // A ramp that starts transparent has nothing to feather: the edge is already
         // invisible, and a halo there would be brighter than the shape it borders.
@@ -4502,6 +4554,22 @@ internal static class Tessellator
         if (Starved(vh, edge.Count * 2, "an edge feather"))
             return;
 
+        var feature = 0f;
+        if (pixel.Enabled)
+        {
+            var extents = _edgeExtents ??= new List<float>();
+            extents.Clear();
+            for (var i = 0; i < edge.Count; i++)
+            {
+                SampledNormals(edge, i, out var na, out var nb);
+                var direction = (edge[i] - away[i]).normalized;
+                if (direction.sqrMagnitude < 0.0001f) direction = Vector2.up;
+                var extent = pixel.Width(matrix.MultiplyPoint3x4(edge[i]), direction, na, nb);
+                extents.Add(extent);
+                feature = Mathf.Max(feature, extent);
+            }
+            feature *= 1e4f;
+        }
         var origin = vh.currentVertCount;
 
         for (var i = 0; i < edge.Count; i++)
@@ -4514,7 +4582,8 @@ internal static class Tessellator
             var faded = solid;
             faded.a = 0;
 
-            var outer = edge[i] + outward * width;
+            var extent = pixel.Enabled ? _edgeExtents![i] : width;
+            var outer = edge[i] + outward * extent;
 
             // Clipped rather than skipped. This whole strip used to be dropped whenever a
             // clip was present, which is why a gas fade inside a tank had no ramp at all.
@@ -4522,7 +4591,16 @@ internal static class Tessellator
                 outer = clip.ClampInside(edge[i], outer);
 
             vh.AddVert(matrix.MultiplyPoint3x4(edge[i]), solid, Vector2.zero);
-            vh.AddVert(matrix.MultiplyPoint3x4(outer), faded, Vector2.zero);
+            if (pixel.Enabled)
+            {
+                // shortcut: YS offsets vertically; the averaged segment normal is approximate on steep waves, upgrade to segment strips if needed.
+                SampledNormals(edge, i, out var na, out var nb);
+                var h = Mathf.Abs(Vector2.Dot(outer - edge[i], (na + nb).normalized));
+                var fallback = 1f - (outer - edge[i]).magnitude / Mathf.Max(1e-6f, width);
+                vh.AddVert(matrix.MultiplyPoint3x4(outer), solid, new Vector2(1f, 0f), fallback, feature > 0f ? h / feature : 0f);
+            }
+            else
+                vh.AddVert(matrix.MultiplyPoint3x4(outer), faded, Vector2.zero);
         }
 
         for (var i = 0; i < edge.Count - 1; i++)
@@ -4559,19 +4637,51 @@ internal static class Tessellator
     /// known index. <paramref name="sharedBase"/> is -1 for those and the ring emits both edges
     /// as before.
     /// </remarks>
-    private static void FeatherRing(MeshBuilder vh, List<Vector2> outline, Paint paint, float width, Matrix4x4 matrix, ClipRegion? clip, int sharedBase = -1)
+    internal static void FeatherRing(MeshBuilder vh, List<Vector2> outline, Paint paint, float width, Matrix4x4 matrix, ClipRegion? clip, int sharedBase = -1, EdgeRamp pixel = default, float feature = 0f, bool inward = false)
     {
         var count = outline.Count;
         var share = sharedBase >= 0;
 
-        if (count < 3 || Starved(vh, share ? count : count * 2, "a feather ring"))
+        if (count < 3 || (!pixel.Enabled && feature != 0f) || (pixel.Enabled && feature == 0f)
+            || Starved(vh, share ? count : count * 2, "a feather ring"))
             return;
 
         var winding = Mathf.Sign(Triangulator.SignedArea(outline));
+        if (pixel.Enabled)
+        {
+            var outers = _ringOuter ??= new List<Vector2>();
+            var edges = _ringEdge ??= new List<float>();
+            outers.Clear(); edges.Clear();
+            var minLength = float.MaxValue;
+            for (var i = 0; i < count; i++)
+            {
+                var at = outline[i];
+                var na = EdgeNormal(outline[(i - 1 + count) % count], at) * winding;
+                var nb = EdgeNormal(at, outline[(i + 1) % count]) * winding;
+                var dir = (na + nb).normalized * (inward ? -1f : 1f);
+                if (dir.sqrMagnitude < 0.0001f) dir = na * (inward ? -1f : 1f);
+                var canvas = (Vector2)matrix.MultiplyPoint3x4(at);
+                minLength = Mathf.Min(minLength, Mathf.Min(pixel.Length(canvas, na), pixel.Length(canvas, nb)));
+                var outer = at + dir * pixel.Width(canvas, dir, na, nb);
+                if (clip != null) outer = clip.ClampInside(at, outer);
+                outers.Add(outer);
+                edges.Add(Mathf.Abs(Vector2.Dot(outer - at, nb)) / Mathf.Abs(feature));
+            }
+            if (feature > 0f && feature / minLength <= AutoFeatherPixels) return;
+        }
         var origin = vh.currentVertCount;
 
         for (var i = 0; i < count; i++)
         {
+            if (pixel.Enabled)
+            {
+                var colour = paint.At(outline[i]);
+                if (!share) vh.AddVert(matrix.MultiplyPoint3x4(outline[i]), colour, Vector2.zero);
+                var edge = feature < 0f ? -_ringEdge![i] : _ringEdge![i];
+                var fallback = 1f - (_ringOuter![i] - outline[i]).magnitude / Mathf.Max(1e-6f, width);
+                vh.AddVert(matrix.MultiplyPoint3x4(_ringOuter[i]), colour, new Vector2(1f, 0f), fallback, edge);
+                continue;
+            }
             var previous = outline[(i - 1 + count) % count];
             var next = outline[(i + 1) % count];
 
@@ -4633,18 +4743,20 @@ internal static class Tessellator
     /// Separate because a soft liquid or gas surface wants a wide ramp on the surface itself
     /// while the tank walls stay crisp. Without it that shape needs a stack of faked strips.
     /// </remarks>
-    private static float EdgeFeatherWidth(VecNode node, EvalContext context, float frameScale)
+    private static float EdgeFeatherWidth(VecNode node, EvalContext context, float frameScale, out bool auto)
     {
         if (node.EdgeFeather == null)
-            return FeatherWidth(node, context, frameScale);
+            return FeatherWidth(node, context, frameScale, out auto);
 
         var requested = node.EdgeFeather.Evaluate(context);
-        return requested >= 0f ? requested : FeatherWidth(node, context, frameScale);
+        auto = requested < 0f;
+        return requested >= 0f ? requested : FeatherWidth(node, context, frameScale, out auto);
     }
 
-    private static float FeatherWidth(VecNode node, EvalContext context, float frameScale)
+    private static float FeatherWidth(VecNode node, EvalContext context, float frameScale, out bool auto)
     {
         var requested = node.Feather.Evaluate(context);
+        auto = requested < 0f;
         if (requested >= 0f)
             return requested;
 
