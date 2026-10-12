@@ -4,7 +4,7 @@
 switch to it when it arrives, by any route. Seen on a console. REFERENCE.md, under `FONT`, has
 the behaviour, the states `vector_stats` reports and the limits.
 
-## Gradients blend two ways, and the darkest colours draw black (fix in progress, 0.11.118)
+## CLOSED: gradients blended two ways, and the darkest colours drew black (fixed in 0.11.118)
 
 A gradient's colour at a vertex is the browser's (stored sRGB values, premultiplied), but
 between vertices the game blends in linear light, so the result depends on how densely a
@@ -13,6 +13,9 @@ The console canvas also converts vertex colour to linear and rounds it to 8 bits
 shader runs, so every colour darker than about `#0A0A0A` draws as black. The fix carries the
 stored colour at full precision in a spare vertex channel and blends it browser-style per
 pixel, the browser default for hex colours. Opacity over a background keeps the game's blend.
+Seen on a console: the two-stop ramp's middle reads (70.6, 177.9, 138.9) against a browser's
+(70, 178, 139), dashed and solid strokes agree within 0.2 levels, and `#050505`, `#0A0A0A`
+and `#141414` read 5, 10 and 20 (`InGameTest-0.11.118.lua`).
 
 ## The work budget's figure is measured on .NET 8, not on Mono
 
