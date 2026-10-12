@@ -21,7 +21,7 @@
 -- down. Crop first, then fit the crop. A sprite sheet is a `uv` per icon.
 --
 -- `tile = [w, h]` repeats one picture of that size across the box instead of stretching one
--- copy -- a texture, a hatch, a scanline. `slice = [l, t, r, b]` with `bw = [...]` is CSS
+-- copy -- a texture, a hatch, a scanline. `slice = [t, r, b, l]` (CSS order) with `bw = [...]` is CSS
 -- nine-slice: the corners keep their size, the edges stretch, so one small PNG makes a panel
 -- border at any size. `smp = point` turns off smoothing, for pixel art that should stay crisp.
 --
