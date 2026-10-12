@@ -42,7 +42,7 @@ internal static class TextOrder
             var placement = placements[i];
             var cutBefore = -1;
 
-            // ponytail: linear scan of the shapes after this label. Worst case is
+            // A linear scan of the shapes after this label. Worst case is
             // labels x shapes -- 100 labels over 800 shapes is ~80,000 rect tests, well
             // under a millisecond and off the frame. If a page ever carries thousands of
             // both, put a uniform grid over the shape bounds and query that instead.

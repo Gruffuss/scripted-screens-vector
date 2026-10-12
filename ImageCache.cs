@@ -13,7 +13,7 @@ namespace ScriptedScreensVector;
 /// drawn for an image until its texture is here, and <see cref="Version"/> moving on is what
 /// tells a surface to rebuild.
 ///
-/// ponytail: textures live for the session; evict by last use if many large images appear.
+/// Textures live for the session; evict by last use if many large images appear.
 /// </remarks>
 internal static class ImageCache
 {

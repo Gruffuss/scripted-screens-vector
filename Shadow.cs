@@ -612,7 +612,7 @@ internal static class Shadow
     /// would turn inside out, so rings stop at the outline's inradius and the core takes the
     /// rest.
     ///
-    /// ponytail: one unshared vertex set per clipped triangle, roughly 3x an outset shadow's
+    /// One unshared vertex set per clipped triangle, roughly 3x an outset shadow's
     /// vertices; share vertices across unclipped triangles if inset shadows get common.
     /// </remarks>
     internal static void EmitInset(MeshBuilder vh, List<Vector2> outline, VecShadow shadow, Matrix4x4 matrix, float screenScale, ClipRegion? clip)

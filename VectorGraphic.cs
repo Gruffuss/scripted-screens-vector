@@ -2233,7 +2233,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // this page's own FONT link -- the game's fonts load for minutes after start -- leaves the
         // label in the game's face until the page is pushed again. Read only while a label is
         // waiting: the count also moves for faces no page asked for.
-        // ponytail: a graphic whose scene changed keeps its old warning, so it may refresh on a
+        // A graphic whose scene changed keeps its old warning, so it may refresh on a
         // few registrations it no longer needs; those are rare, and clearing warnings per scene
         // would re-log them every tick on a page that re-applies its structure each tick.
         if (_text != null && _text.HasUnresolvedFonts)

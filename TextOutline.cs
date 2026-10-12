@@ -29,7 +29,7 @@ internal static class TextOutline
     /// How far outside the glyph edge, in atlas pixels, TMP draws an outline of
     /// <c>_OutlineWidth</c> <paramref name="width"/>. It reaches as far inside as well.
     /// </summary>
-    // ponytail: assumes the material has TMP's ratios on (no RATIOS_OFF keyword). Both font
+    // Assumes the material has TMP's ratios on (no RATIOS_OFF keyword). Both font
     // sources in use measured that way; a font with ratios off would need ratio 1 here.
     internal static float Outward(float width, float gradientScale, float other)
         => width * (gradientScale - 1f) / Math.Max(1f, other + width);
