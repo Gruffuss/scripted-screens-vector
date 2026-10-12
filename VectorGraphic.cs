@@ -1491,7 +1491,11 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// <summary>Writes one surface's state into the vector_stats report.</summary>
     internal void Describe(System.Text.StringBuilder into)
     {
-        into.AppendLine($"scene \"{_sceneId}\"");
+        // Which hierarchy holds this graphic and whether it is active: a scene that outlives its
+        // element (seen 2026-10-12: scenes stayed listed after `ui:clear()`) then shows what is
+        // keeping it, instead of looking like a live console.
+        into.AppendLine($"scene \"{_sceneId}\" (under \"{transform.root.name}\""
+                        + (isActiveAndEnabled ? ")" : ", inactive)"));
 
         if (_scene == null)
         {

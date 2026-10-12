@@ -4,6 +4,11 @@ ScriptedScreens Vector, newest first.
 
 ## 0.11.117
 
+### Changed
+
+- `vector_stats` now names the hierarchy that holds each scene and says when it is inactive,
+  so a scene still listed after its element was cleared shows what is keeping it.
+
 ### Fixed
 
 - Every bad entry in an `ease` map is now reported by name. The literal check previously

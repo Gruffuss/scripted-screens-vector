@@ -1,5 +1,6 @@
 -- 0.11.84: a colour expression with ONE non-colour branch must be REPORTED and drawn magenta,
--- not drawn white in silence. And the two new recursion caps must refuse, not crash.
+-- not drawn white in silence. And 400-deep expressions must evaluate, not crash (the depth caps
+-- this page first tested were removed in 0.11.86: deep input is now evaluated, not refused).
 local ui = ss.ui.surface("main")
 ss.ui.activate("main")
 local size = ui:size()
@@ -19,10 +20,10 @@ local s = table.concat({
   'R x=8 y=41 w=60 h=16 f="=if(1,#5FD9A8,5)" fea=0',
   'T x=4 y=61 w=192 h=7 text="3 mix with a number end: MAGENTA + reported"',
   'R x=8 y=70 w=60 h=16 f="=mix(#5FD9A8,1,0.5)" fea=0',
-  'T x=4 y=90 w=192 h=7 text="4,5 deep call and deep index: no bar, game alive"',
+  'T x=4 y=90 w=192 h=7 text="4 deep call: a 1-wide bar; 5 deep index, a unset: no bar"',
   'R x=8 y=99 w="' .. deepcall .. '" h=12 f=#F5D76E fea=0',
   'R x=8 y=115 w="' .. deepindex .. '" h=12 f=#F5D76E fea=0',
-  'T x=4 y=132 w=192 h=7 text="vector_stats: 4 problems, none fatal"',
+  'T x=4 y=132 w=192 h=7 text="vector_stats: 2 problems, rows 2 and 3"',
 }, "\n")
 
 ui:element({ id = "mc", type = "vector",
