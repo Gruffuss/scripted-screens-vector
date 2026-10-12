@@ -1249,10 +1249,13 @@ placeholder instead.
 to its format item — is ordinary text and is reported.** An empty spec, `{$v:}`, is the default
 format.
 
-From 0.11.117, a text binding or placeholder with an index outside its array is reported as
-`array "arr": index 2 is outside bounds (length 2, 0-based)`. This applies to string and numeric
-arrays, even with `missing` declared. Its displayed fallback is unchanged: missing text for a
-string slot, `0` for a numeric slot. Numeric expressions retain their silent out-of-range `0`.
+From 0.11.117, a text binding or placeholder with an index outside its array lists the array
+under `UNRESOLVED DATA NAMES` in `vector_stats`, unless `missing` is declared. This applies to
+string and numeric arrays. It is a data-time report, cleared on a rebuild once the array covers
+the index, rather than a permanent scene problem. Declaring `missing` makes short arrays silent:
+a fixed ten-row list can intentionally show `--` for its last three rows while holding seven
+names. Displayed fallbacks are unchanged: missing text for a string slot, `0` for a numeric slot.
+Numeric expressions retain their silent out-of-range `0`.
 
 **`unit` only follows text that came from data.** It is added after a bound string, after a bound
 number and its `fmt` — `fmt = "%.1f kPa"` with `unit = " U"` draws `12.3 kPa U` — and after the

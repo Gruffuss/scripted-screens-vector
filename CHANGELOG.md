@@ -9,8 +9,9 @@ ScriptedScreens Vector, newest first.
 - Every bad entry in an `ease` map is now reported by name. The literal check previously
   stopped at the first bad value; identical expressions in different entries are now distinct
   problems too.
-- An out-of-range index in a text array binding or placeholder is now reported, including
-  when `missing` is declared. The report names the array, the rounded index and its length.
+- Without `missing`, an out-of-range index in a text array binding or placeholder now lists
+  the array as unresolved data in `vector_stats`. This clears once the data covers the index
+  and does not create a permanent scene problem. Declaring `missing` suppresses the report.
   String slots still use the missing text, and numeric slots still read `0`.
 
 ## 0.11.116

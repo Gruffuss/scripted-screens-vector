@@ -683,19 +683,36 @@ internal static class SweepTests
         foreach (var strings in new[] { true, false })
         foreach (var placeholder in new[] { true, false })
         foreach (var index in new[] { "-1", "2" })
+        foreach (var missingDeclared in new[] { true, false })
         {
             var binding = $"$arr[{index}]";
             var text = placeholder ? "{" + binding + "}" : binding;
-            var scene = Parse($"SCENE\nR w=10 h=10\nT w=90 h=12 text=\"{text}\" missing=\"\"");
+            var missing = missingDeclared ? " missing=\"--\"" : string.Empty;
+            var scene = Parse($"SCENE\nR w=10 h=10\nT w=90 h=12 text=\"{text}\"{missing}");
             var context = new EvalContext();
             if (strings)
                 context.StringArrays["arr"] = new[] { "first", "last" };
             else
                 context.Arrays["arr"] = new[] { 10f, 20f };
-            Tessellator.Emit(new MeshBuilder(), scene, context, new Rect(0, 0, 100, 100),
-                1f, true, new TessellationStats());
-            run.Check($"text bounds: {(strings ? "string" : "number")} {text} reported despite missing text override",
-                Says(scene, $"array \"arr\": index {index} is outside bounds (length 2, 0-based)"), Said(scene));
+            var stats = new TessellationStats();
+            Tessellator.Emit(new MeshBuilder(), scene, context, new Rect(0, 0, 100, 100), 1f, true, stats);
+            run.Check($"text bounds: {(strings ? "string" : "number")} {text} {(missingDeclared ? "with missing stays silent" : "uses unresolved-data channel")}",
+                scene.Problems.Count == 0 && stats.Missing.Count == (missingDeclared ? 0 : 1)
+                && (missingDeclared || stats.Missing.Contains("arr")) && context.Missing.Count == 0,
+                $"{Said(scene)}, unresolved=[{string.Join(",", stats.Missing)}]");
+
+            if (index == "2" && !missingDeclared)
+            {
+                if (strings)
+                    context.StringArrays["arr"] = new[] { "first", "last", "covered" };
+                else
+                    context.Arrays["arr"] = new[] { 10f, 20f, 30f };
+                Tessellator.Emit(new MeshBuilder(), scene, context, new Rect(0, 0, 100, 100), 1f, true, stats);
+                run.Check($"text bounds: {(strings ? "string" : "number")} {text} clears once data covers index",
+                    scene.Problems.Count == 0 && stats.Missing.Count == 0 && stats.Text.Count == 1
+                    && stats.Text[0].Text == (strings ? "covered" : "30"),
+                    $"{Said(scene)}, unresolved=[{string.Join(",", stats.Missing)}]");
+            }
         }
 
         foreach (var strings in new[] { true, false })
