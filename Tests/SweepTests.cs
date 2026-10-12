@@ -85,6 +85,8 @@ internal static class SweepTests
         DataLiteralExpressionsAreReported(run);
         EndpointAttributesAreReported(run);
         ParserReviewRegressions(run);
+        EveryBadEasingEntryIsReported(run);
+        TextArrayBoundsAreReported(run);
     }
 
     /// <summary>C21: a number in a slot that holds free text or an identifier.</summary>
@@ -654,6 +656,80 @@ internal static class SweepTests
                 run.Check($"review: {op} {key} diagnostic gives p guidance",
                     Says(scene, $"unknown attribute \"{key}\";") && Says(scene, "p=[x1,y1,x2,y2,...]"),
                     Said(scene));
+        }
+    }
+
+    internal static void EveryBadEasingEntryIsReported(TestRun run)
+    {
+        foreach (var (where, ease, first, second) in new[]
+        {
+            ("different expressions", Map(P("e1", Str("=1")),
+                P("e2", Arr(Str("=0.5"), Str("linear")))), "e1", "e2"),
+            ("identical expressions", Map(P("e1", Str("=1")),
+                P("e2", Arr(Str("=1"), Str("linear")))), "e1", "e2"),
+            ("sparse numeric names", Arr(Str("=1"), default, Arr(Str("=0.5"), Str("linear"))), "1", "3"),
+        })
+        {
+            var scene = Parse("SCENE\nR w=10 h=10");
+            SceneParser.PatchNodes(new[] { P("ease", ease) }, scene);
+            run.Check($"easing entries: {where} each reported by name",
+                scene.Problems.Count == 2 && Says(scene, $"data \"{first}\": ease")
+                && Says(scene, $"data \"{second}\": ease"), Said(scene));
+        }
+    }
+
+    internal static void TextArrayBoundsAreReported(TestRun run)
+    {
+        foreach (var strings in new[] { true, false })
+        foreach (var placeholder in new[] { true, false })
+        foreach (var index in new[] { "-1", "2" })
+        foreach (var missingDeclared in new[] { true, false })
+        {
+            var binding = $"$arr[{index}]";
+            var text = placeholder ? "{" + binding + "}" : binding;
+            var missing = missingDeclared ? " missing=\"--\"" : string.Empty;
+            var scene = Parse($"SCENE\nR w=10 h=10\nT w=90 h=12 text=\"{text}\"{missing}");
+            var context = new EvalContext();
+            if (strings)
+                context.StringArrays["arr"] = new[] { "first", "last" };
+            else
+                context.Arrays["arr"] = new[] { 10f, 20f };
+            var stats = new TessellationStats();
+            Tessellator.Emit(new MeshBuilder(), scene, context, new Rect(0, 0, 100, 100), 1f, true, stats);
+            run.Check($"text bounds: {(strings ? "string" : "number")} {text} {(missingDeclared ? "with missing stays silent" : "uses unresolved-data channel")}",
+                scene.Problems.Count == 0 && stats.Missing.Count == (missingDeclared ? 0 : 1)
+                && (missingDeclared || stats.Missing.Contains("arr")) && context.Missing.Count == 0,
+                $"{Said(scene)}, unresolved=[{string.Join(",", stats.Missing)}]");
+
+            if (index == "2" && !missingDeclared)
+            {
+                if (strings)
+                    context.StringArrays["arr"] = new[] { "first", "last", "covered" };
+                else
+                    context.Arrays["arr"] = new[] { 10f, 20f, 30f };
+                Tessellator.Emit(new MeshBuilder(), scene, context, new Rect(0, 0, 100, 100), 1f, true, stats);
+                run.Check($"text bounds: {(strings ? "string" : "number")} {text} clears once data covers index",
+                    scene.Problems.Count == 0 && stats.Missing.Count == 0 && stats.Text.Count == 1
+                    && stats.Text[0].Text == (strings ? "covered" : "30"),
+                    $"{Said(scene)}, unresolved=[{string.Join(",", stats.Missing)}]");
+            }
+        }
+
+        foreach (var strings in new[] { true, false })
+        foreach (var placeholder in new[] { true, false })
+        {
+            var text = placeholder ? "{$arr[1]}" : "$arr[1]";
+            var scene = Parse($"SCENE\nT w=90 h=12 text=\"{text}\"");
+            var context = new EvalContext();
+            if (strings)
+                context.StringArrays["arr"] = new[] { "first", "last" };
+            else
+                context.Arrays["arr"] = new[] { 10f, 20f };
+            var stats = new TessellationStats();
+            Tessellator.Emit(new MeshBuilder(), scene, context, new Rect(0, 0, 100, 100), 1f, true, stats);
+            run.Check($"text bounds: {(strings ? "string" : "number")} {text} last slot stays silent",
+                scene.Problems.Count == 0 && stats.Missing.Count == 0 && stats.Text.Count == 1
+                && stats.Text[0].Text == (strings ? "last" : "20"), Said(scene));
         }
     }
 
