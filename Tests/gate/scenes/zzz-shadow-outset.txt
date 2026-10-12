@@ -1,0 +1,2 @@
+SCENE w=200 h=200 fit=stretch
+R x=40 y=50 w=100 h=70 rx=12 f="#28465a" s="#5fd9a8" sw=8 sh=[4,6,10,3,"#00000080"] fea=0

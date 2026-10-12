@@ -2,6 +2,12 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.116
+
+### Tests
+
+- The tessellation regression corpus now runs in the suite.
+
 ## 0.11.115
 
 ### Fixed

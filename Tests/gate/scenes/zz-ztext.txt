@@ -1,0 +1,9 @@
+SCENE w=200 h=200 fit=stretch ztext=1
+R x=0 y=0 w=200 h=200 f=#0B1622 fea=0
+T x=10 y=20 w=180 h=12 text="under" size=10 f=#EAF4F8
+R x=20 y=18 w=60 h=20 f=#7FB2F0 fea=0
+T x=10 y=50 w=180 h=12 text="over" size=10 f=#F5D76E
+G o=0.5 {
+ R x=20 y=48 w=60 h=20 f=#C98BE0 fea=0
+ T x=90 y=50 w=100 h=12 text="in a group" size=8 f=#5FD9A8
+}

@@ -81,6 +81,8 @@
         <Compile Include="TextOrderTests.cs" />
         <Compile Include="Benchmark.cs" />
         <Compile Include="Program.cs" />
+        <Compile Include="HexColor.cs" />
+        <Compile Include="FingerprintTests.cs" />
     </ItemGroup>
 
     <ItemGroup>

@@ -1,0 +1,14 @@
+SCENE w=200 h=200 fit=stretch
+R x=0 y=0 w=200 h=200 f=#0B1622 fea=0
+T x=4 y=4 w=192 h=6 text="1 f=notacolour must be MAGENTA and reported" size=5 f=#EAF4F8
+R x=8 y=12 w=40 h=14 f=notacolour fea=0
+T x=4 y=32 w=192 h=6 text="2 all four GREY; the fifth magenta" size=5 f=#EAF4F8
+R x=8 y=40 w=30 h=14 f=grey fea=0
+R x=42 y=40 w=30 h=14 f=gray fea=0
+R x=76 y=40 w=30 h=14 f=" #808080 " fea=0
+R x=110 y=40 w=30 h=14 f=" GRAY " fea=0
+R x=144 y=40 w=30 h=14 f=FFFFFF fea=0
+T x=4 y=60 w=192 h=6 text="3 rx=[0,24,24,24]: top-left sharp, three round" size=5 f=#EAF4F8
+R x=8 y=68 w=80 h=50 rx=[0,24,24,24] f=#5FD9A8 fea=0
+T x=4 y=124 w=192 h=6 text="4 malformed path: draws, then reports" size=5 f=#EAF4F8
+P d="M10 140 L60 140 L60 170 Z 5" f=#F5D76E fea=0

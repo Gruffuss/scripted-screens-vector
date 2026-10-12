@@ -22,11 +22,7 @@ internal static class GradientTests
     /// Parses #rrggbb without <c>ColorUtility</c>.
     /// </summary>
     /// <remarks>
-    /// <c>ColorUtility.TryParseHtmlString</c> is a native ECall and throws
-    /// <c>SecurityException</c> outside the Unity player, unlike <c>Vector2</c> and
-    /// <c>Mathf</c> which are ordinary managed code. Only the hex parsing is unavailable, so
-    /// the tests do it themselves and exercise the interpolation, which is the part with
-    /// logic worth testing.
+    /// Keep expected colours independent of the parser installed by the suite.
     /// </remarks>
     private static Color Hex(string hex)
     {

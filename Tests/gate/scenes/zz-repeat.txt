@@ -1,0 +1,13 @@
+SCENE w=200 h=200 fit=stretch
+R x=0 y=0 w=200 h=200 f=#0B1622 fea=0
+RP n=12 {
+ R x="=10+i*15" y=20 w=10 h="=20+i*4" f=#5FD9A8 fea=0
+}
+RP n=4 {
+ G t=["=i*45",100] {
+  C cx=20 cy=20 rx=14 ry=14 f=#F5D76E
+  RP n=3 {
+   R x="=i*6" y=40 w=4 h=10 f=#C98BE0
+  }
+ }
+}

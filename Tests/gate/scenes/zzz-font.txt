@@ -1,0 +1,3 @@
+SCENE w=200 h=200 fit=stretch
+DEFS { FONT src="https://fonts.googleapis.com/css2?family=Inter" }
+T x=20 y=40 w=160 h=30 text="Inter declaration" font=Inter size=14 f="#5fd9a8"

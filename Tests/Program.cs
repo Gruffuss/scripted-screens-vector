@@ -7,6 +7,7 @@ namespace ScriptedScreensVector.Tests;
 internal sealed class TestRun
 {
     private readonly List<string> _failures = new();
+    internal bool HasFailures => _failures.Count > 0;
 
     internal bool Check(string name, double actual, double expected, double tolerance, int warnings, int triangles)
     {
@@ -69,6 +70,7 @@ internal static class Program
 {
     private static int Main()
     {
+        Colours.Parser = HexColor.TryParse;
         // `--gif <in> <out>`: the decoder's first frame as "w h" then "r g b a" per pixel, to be
         // compared against an independent decoder.
         var args = Environment.GetCommandLineArgs();
@@ -91,6 +93,7 @@ internal static class Program
         Console.WriteLine();
 
         var run = new TestRun();
+        FingerprintTests.Run(run, Array.IndexOf(args, "--rebaseline") >= 0);
 
         TriangulatorTests.DuplicatedClosingVertex(run);
         TriangulatorTests.ConcaveStar(run);

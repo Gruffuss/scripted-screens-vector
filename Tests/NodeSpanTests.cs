@@ -747,8 +747,7 @@ internal static class NodeSpanTests
                            + " IMG id=b x=40 y=0 w=20 h=20 src=test:span\n"
                            + "}\n";
 
-        // IMG rather than a filled R: ColorUtility.TryParseHtmlString is a native ECall and
-        // throws headless, so no scene parsed in this suite may carry a colour literal.
+        // Loaded pictures give each child a known geometry span.
         ImageCache.Loaded["test:span"] = (8, 8, null);
 
         // Off by default: nothing is recorded, and that is what the game relies on.

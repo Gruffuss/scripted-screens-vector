@@ -26,6 +26,10 @@ namespace ScriptedScreensVector;
 /// </remarks>
 internal static class Colours
 {
+    internal delegate bool ColourParser(string text, out Color colour);
+    // Installed once at test startup; parsing and hook changes stay on the main thread.
+    internal static ColourParser Parser = ColorUtility.TryParseHtmlString;
+
     internal static bool TryParse(string? text, out Color colour)
     {
         colour = default;
@@ -46,6 +50,6 @@ internal static class Colours
         if (string.Equals(trimmed, "gray", StringComparison.OrdinalIgnoreCase))
             trimmed = "grey";
 
-        return ColorUtility.TryParseHtmlString(trimmed, out colour);
+        return Parser(trimmed, out colour);
     }
 }
