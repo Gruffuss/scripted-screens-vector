@@ -11,10 +11,15 @@ and review both `gate/fingerprint.txt` and `gate/fingerprint-pixel.txt` before c
 The two `fingerprint-off-*-bytes.txt` files are immutable baselines from the original emitter:
 one with stock coverage, one with shader UV coverage. They hash every float bit and index,
 without rounding. Every one of their 78 rows must still match with pixel edges off.
-The pixel fingerprint also uses unrounded hashes, with shader coverage enabled.
+The pixel fingerprint uses the same quantization as the main gate, with shader coverage enabled.
 
-Pixel mode changes 21 rows relative to the original shader-coverage baseline. Each row below
-covers all three times (`0`, `1.5`, `7.25`); rows not listed are byte-identical.
+Pixel mode changes vertex data in 21 rows relative to the original shader-coverage emitter.
+Each row below covers all three times (`0`, `1.5`, `7.25`). The review fixes change those
+same 21 rows' automatic-band UVs to preserve the original geometric ramp when the edge-distance
+channel is lost, and to carry independent band coverage. Counts and bounds do not change in
+this fix round. The pixel hashes now use quantized values instead of raw float bits:
+75 hashes move, including 54 rows where quantization is the only change. The three empty-mesh
+`zzz-font` rows retain the same hash. The two OFF baselines remain unrounded and immutable.
 
 | Scene | Changed fields | Reason |
 |---|---|---|

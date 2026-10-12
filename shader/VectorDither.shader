@@ -40,6 +40,7 @@ Shader "ScriptedScreensVector/UIDither"
         _VectorDither ("Dither (255ths)", Float) = 1
         // VECTOR: automatic edge feather in screen pixels.
         _VectorEdgePx ("Edge feather (px)", Float) = 1.3
+        [HideInInspector] _VectorEdgeFallback ("Edge fallback encoding", Float) = 1
     }
 
     SubShader
@@ -102,6 +103,7 @@ Shader "ScriptedScreensVector/UIDither"
                 float4 worldPosition : TEXCOORD1;
                 half4 mask : TEXCOORD2;
                 float2 coverage : TEXCOORD3;   // VECTOR
+                float band : TEXCOORD4;       // VECTOR
                 UNITY_VERTEX_OUTPUT_STEREO
             };
 
@@ -143,6 +145,7 @@ Shader "ScriptedScreensVector/UIDither"
                     0.25 / (0.25 * half2(_UIMaskSoftnessX, _UIMaskSoftnessY) + abs(pixelSize.xy)));
 
                 OUT.coverage = v.coverage;     // VECTOR
+                OUT.band = 1.0 - v.texcoord.x; // VECTOR: white-texture band extent coverage
                 OUT.color = v.color * _Color;
                 return OUT;
             }
@@ -151,12 +154,12 @@ Shader "ScriptedScreensVector/UIDither"
             {
                 half4 color = IN.color * (tex2D(_MainTex, IN.texcoord) + _TextureSampleAdd);
 
-                // VECTOR: x is blur coverage or the band's soft geometric fallback; y is
+                // VECTOR: x is blur coverage or the legacy geometric fallback; y is
                 // perpendicular distance / feature size (negative for strokes). See EdgeRamp.Coverage.
                 // Take derivatives before branching; length keeps diagonals the same width.
                 float edgeY = IN.coverage.y;
                 float edgeG = length(float2(ddx(edgeY), ddy(edgeY)));
-                float cover = IN.coverage.x;
+                float cover = saturate(IN.coverage.x);
                 if (edgeG > 1e-20)
                 {
                     float featurePx = 1.0 / edgeG;
@@ -165,7 +168,7 @@ Shader "ScriptedScreensVector/UIDither"
                     float t = saturate((featurePx / k - 1.0) * 0.5);
                     float kEff = edgeY < 0.0 ? min(k, featurePx) : k * t * t * (3.0 - 2.0 * t);
                     float ramp = kEff > 0.0 ? saturate(1.0 - distPx / kEff) : step(distPx, 0.0);
-                    cover = min(cover, ramp);
+                    cover = min(saturate(IN.band), ramp);
                 }
                 color.a *= cover;
 

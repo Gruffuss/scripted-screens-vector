@@ -32,7 +32,7 @@ internal static class FingerprintTests
         run.Check("P7: PixelEdges off exact bytes with shader (all 78 rows)",
             File.Exists(uvBaseline) && string.Join("\n", uvOff) == File.ReadAllText(uvBaseline).Replace("\r", "").TrimEnd('\n'),
             "original emitter with CoverageInUv enabled");
-        var pixel = Fingerprint(scenes, run, raw: true, pixel: true);
+        var pixel = Fingerprint(scenes, run, pixel: true);
         var pixelBaseline = Path.Combine(folder, "fingerprint-pixel.txt");
         if (rebaseline && !run.HasFailures)
             File.WriteAllText(pixelBaseline, string.Join("\n", pixel) + "\n", new UTF8Encoding(false));

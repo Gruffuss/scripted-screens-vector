@@ -107,10 +107,11 @@ internal static class BuildVectorShaderBundle
             var clip = keywords.Contains("UNITY_UI_CLIP_RECT");
             var dither = shader.FindPropertyIndex("_VectorDither") >= 0;
             var edge = shader.FindPropertyIndex("_VectorEdgePx") >= 0;
+            var fallback = shader.FindPropertyIndex("_VectorEdgeFallback") >= 0;
             var clipRect = shader.FindPropertyIndex("_ClipRect") >= 0;
 
-            Debug.Log($"VERIFY UNITY_UI_CLIP_RECT={clip} _VectorDither={dither} _VectorEdgePx={edge}");
-            ok = shader.isSupported && clip && dither && edge;
+            Debug.Log($"VERIFY UNITY_UI_CLIP_RECT={clip} _VectorDither={dither} _VectorEdgePx={edge} _VectorEdgeFallback={fallback}");
+            ok = shader.isSupported && clip && dither && edge && fallback;
 
             // _ClipRect is set per renderer rather than declared as a Property, so its absence
             // from the property list is expected and is not a failure.
@@ -121,7 +122,7 @@ internal static class BuildVectorShaderBundle
 
         if (!ok)
         {
-            Debug.LogError("VERIFY FAILED: the bundle is missing the shader, the clip variant, the dither property or the edge property.");
+            Debug.LogError("VERIFY FAILED: the bundle is missing the shader, the clip variant, the dither property or an edge encoding property.");
             if (Application.isBatchMode)
                 EditorApplication.Exit(1);
         }

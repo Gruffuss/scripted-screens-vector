@@ -1,4 +1,4 @@
-# ScriptedScreens Vector
+﻿# ScriptedScreens Vector
 
 A `vector` element type for ScriptedScreens surfaces. It draws resolution-independent
 artwork as a real mesh instead of a pixel canvas, and **animates it on the client** from
@@ -923,7 +923,7 @@ StationeersLaunchPad's settings UI.
 | Section | Key | Meaning |
 |---------|-----|---------|
 | Renderer | `Enabled` | master switch; off for clean A/B measurements |
-| Renderer | `PixelEdges` | on by default: automatic edge AA targets 1.3 px across the console, including grazing views and uneven transforms; off restores the geometric feather; changes at the next rebuild |
+| Renderer | `PixelEdges` | on by default: automatic edge AA targets 1.3 px across the console, including grazing views and uneven transforms; a lost edge-distance UV keeps the geometric stroke clamp and fill falloff; off restores the geometric feather; changes at the next rebuild |
 | Renderer | `SmoothData` | ease `$name` values between payloads |
 | Renderer | `CullOffScreen` | skip rebuilds for consoles not in view |
 | Renderer | `PauseWithGame` | freeze animation when the game is paused |

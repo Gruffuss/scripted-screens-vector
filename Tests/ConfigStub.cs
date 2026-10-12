@@ -1,4 +1,4 @@
-namespace ScriptedScreensVector;
+﻿namespace ScriptedScreensVector;
 
 /// <summary>
 /// The renderer's config, as it behaves with nothing bound.

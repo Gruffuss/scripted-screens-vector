@@ -67,7 +67,7 @@ internal static class PixelEdgeTests
                 if (h < 1e-6f) continue;
                 minPixels = Math.Min(minPixels, LineDistance(projection.Project(p), projection.Project(a), projection.Project(b)));
                 var uv = mesh.CoverageUv(o);
-                encoding &= mesh.CoverageUv(inside[0]) == new Vector2(1f, 0f) && uv.x == 0f
+                encoding &= mesh.CoverageUv(inside[0]) == new Vector2(1f, 0f) && uv.x < 1f && mesh.Vertex(o).Uv.x == 1f
                     && (stroke ? uv.y < 0f : uv.y > 0f) && mesh.Colour(o) == mesh.Colour(inside[0]);
                 if (feature > 0f) encoding &= Math.Abs(Math.Abs(uv.y) * feature - h) < 1e-4f * Math.Max(h, 1e-3f);
                 checkedVertices++;
@@ -75,7 +75,7 @@ internal static class PixelEdgeTests
         }
         run.Check("P2 band contains ramp: " + name, checkedVertices > 0 && minPixels >= 1.3f - 0.01f,
             $"{checkedVertices} vertices; minimum {minPixels:F4}px");
-        run.Check("P4 encoding: " + name, checkedVertices > 0 && encoding, "signed perpendicular distance; solid colour; x=0");
+        run.Check("P4 encoding: " + name, checkedVertices > 0 && encoding, "signed perpendicular distance; solid colour; separate band and legacy coverage");
     }
 
     private static void Meshes(TestRun run)
@@ -119,10 +119,16 @@ internal static class PixelEdgeTests
                 else
                 {
                     var gradient = grazing.InverseTransposeLength(pa, new Vector2(label / h, 0f), 2f);
-                    // Independently sample the reference ramp every .01 screen pixel.
+                    var reach = LineDistance(grazing.Project(outer), grazing.Project(pa), grazing.Project(pc));
+                    // Sample only the rasterized band: a truncated mesh cannot draw the nominal ramp.
                     for (var distance = 0.01f; distance <= 2f; distance += 0.01f)
-                        if (EdgeRamp.Coverage(distance * gradient, gradient, 1f, 1.3f) <= 1e-5f)
+                    {
+                        var fraction = distance / reach;
+                        var xCoverage = 1f + fraction * (mesh.CoverageUv(b).x - 1f);
+                        var bandCoverage = 1f - fraction * mesh.Vertex(b).Uv.x;
+                        if (distance >= reach || EdgeRamp.Coverage(distance * gradient, gradient, xCoverage, 1.3f, bandCoverage) <= 1e-5f)
                         { rampWidth = distance; break; }
+                    }
                 }
                 break;
             }
@@ -224,6 +230,80 @@ internal static class PixelEdgeTests
             $"{fallbackVertices} behind vertices match the uniform mesh exactly");
     }
 
+    private static void ReviewFallback(TestRun run)
+    {
+        foreach (var (name, body) in new[] {
+            ("thin stroke", "L p=[50,200,200,200,350,200] sw=0.3 s=#fff"),
+            ("stroke width clamp", "L p=[50,200,200,200,350,200] sw=1 s=#fff"),
+            ("half fill falloff", "R x=100 y=100 w=200 h=2.6 f=#fff"),
+            ("full fill falloff", "R x=100 y=100 w=200 h=3.9 f=#fff"),
+            ("YS", "YS n=3 x=\"=50+i*150\" y=200 y2=300 f=#fff") })
+        {
+            var old = Emit(body, false, scale: 1f); var mesh = Emit(body, true, scale: 1f);
+            var correct = true; var samples = 0;
+            for (var i = 0; i < mesh.currentVertCount; i++)
+            {
+                if (mesh.CoverageUv(i).y == 0f) continue;
+                var outer = (Vector2)mesh.Vertex(i).Position;
+                var nearest = -1; var distance = float.MaxValue;
+                for (var j = 0; j < mesh.currentVertCount; j++)
+                    if (mesh.CoverageUv(j).y == 0f)
+                    {
+                        var d = ((Vector2)mesh.Vertex(j).Position - outer).sqrMagnitude;
+                        if (d < distance) { distance = d; nearest = j; }
+                    }
+                var inner = (Vector2)mesh.Vertex(nearest).Position;
+                var direction = (outer - inner).normalized;
+                var oldReach = 0f;
+                for (var j = 0; j < old.currentVertCount; j++)
+                {
+                    if (old.Colour(j).a != 0f) continue;
+                    var offset = (Vector2)old.Vertex(j).Position - inner;
+                    if (offset.magnitude > 0f && Vector2.Dot(offset.normalized, direction) > 0.999f)
+                        oldReach = oldReach == 0f ? offset.magnitude : Math.Min(oldReach, offset.magnitude);
+                }
+                if (oldReach == 0f) continue; // New stroke-end rings have no legacy side to compare.
+                foreach (var fraction in new[] { 0.25f, 0.5f, 1f, 1.5f })
+                {
+                    var t = oldReach * fraction / (outer - inner).magnitude;
+                    var x = 1f + t * (mesh.CoverageUv(i).x - 1f);
+                    var lostY = EdgeRamp.Coverage(0f, 0f, x, 1.3f);
+                    correct &= Math.Abs(lostY - Math.Max(0f, 1f - fraction)) < 0.002f;
+                    samples++;
+                }
+            }
+            run.Check("review: lost y keeps geometric " + name, correct && samples >= 4, $"{samples} samples against original mesh");
+        }
+        var largeProjection = new SurfaceProjection(new Vector3(10f, 0f, 0f), new Vector3(0f, 10f, 0f), new Vector3(0f, 0f, 1f), 0f);
+        var tinyFill = Emit("R x=100 y=100 w=0.5 h=20 f=#fff", true, largeProjection, scale: 1f);
+        var hardFallback = true; var hardSamples = 0;
+        for (var i = 0; i < tinyFill.currentVertCount; i++)
+            if (tinyFill.CoverageUv(i).y != 0f)
+            {
+                hardFallback &= EdgeRamp.Coverage(0f, 0f, 1f + 0.01f * (tinyFill.CoverageUv(i).x - 1f), 1.3f) == 0f;
+                hardSamples++;
+            }
+        run.Check("review: lost y retains zero fill falloff", hardFallback && hardSamples > 0, "hard legacy edge inside a visible pixel band");
+        var nearlySingular = new SurfaceProjection(new Vector3(1f, 0f, 0f), new Vector3(0f, 1e-9f, 0f), new Vector3(0f, 0f, 1f), 0f);
+        var huge = Emit("R x=100 y=100 w=200 h=200 f=#fff", true, nearlySingular);
+        var bounded = true;
+        for (var i = 0; i < huge.currentVertCount; i++)
+        {
+            var p = huge.Vertex(i).Position;
+            bounded &= float.IsFinite(p.x) && float.IsFinite(p.y) && Math.Abs(p.x) <= 2000f && Math.Abs(p.y) <= 2000f;
+        }
+        run.Check("review: nearly singular bands have bounded extent", bounded, "at most four surface widths of displacement");
+        var spike = new List<Vector2> { new Vector2(0f, 0f), new Vector2(10f, 0f), new Vector2(0f, 0f), new Vector2(0f, 10f), new Vector2(-10f, 10f) };
+        var ring = new MeshBuilder();
+        Tessellator.FeatherRing(ring, spike, new Paint(Color.white, null, 1f), 0.65f, Matrix4x4.identity, null,
+            pixel: new EdgeRamp(default, Matrix4x4.identity, 2f, 400f), feature: 20f, inward: true);
+        run.Check("review: spike keeps inward direction", ring.currentVertCount > 3 && ring.Vertex(3).Position.y > 0f, "opposed normals use the inward sign");
+        var disabled = new MeshBuilder();
+        Tessellator.FeatherRing(disabled, spike, new Paint(Color.white, null, 1f), 0f, Matrix4x4.identity, null,
+            pixel: default, feature: 20f);
+        run.Check("review: disabled pixel descriptor skips ring", disabled.currentVertCount == 0, "no zero-width triangles");
+    }
+
     private static void ReviewProjection(TestRun run)
     {
         var m = Matrix4x4.identity;
@@ -269,6 +349,7 @@ internal static class PixelEdgeTests
     internal static void Run(TestRun run)
     {
         ReviewProjection(run);
+        ReviewFallback(run);
         foreach (var (name, projection) in new[] { ("frontal", Rig(1f, 1f)), ("grazing", Rig(0.151f, 0.515f)), ("near", Rig(0.013f, 0.549f)) })
         {
             var error = 0f;
@@ -317,8 +398,8 @@ internal static class PixelEdgeTests
         }
         run.Check("P5: stroke width clamp", Math.Abs(EdgeRamp.Coverage(-0.24f / 0.48f, 1f / 0.48f, 1f, 1.3f) - 0.5f) < 1e-5f, "0.48px stroke");
         run.Check("P5: linear 1.3px ramp", Math.Abs(EdgeRamp.Coverage(0.65f / 100f, 1f / 100f, 1f, 1.3f) - 0.5f) < 1e-5f, "halfway");
-        run.Check("P5: narrow stale band", EdgeRamp.Coverage(0.1f, 1f / 100f, 0.2f, 1.3f) == 0f
-            && EdgeRamp.Coverage(0.001f, 1f / 100f, 0.2f, 1.3f) == 0.2f, "min with x");
+        run.Check("P5: narrow stale band", EdgeRamp.Coverage(0.1f, 1f / 100f, 0.2f, 1.3f, 0.2f) == 0f
+            && EdgeRamp.Coverage(0.001f, 1f / 100f, 0.2f, 1.3f, 0.2f) == 0.2f, "min with separate band coverage");
         run.Check("P5: lost uv y fallback", EdgeRamp.Coverage(0f, 0f, 0.4f, 1.3f) == 0.4f, "geometric coverage");
         var behind = Rig(-0.02f, 0.515f);
         behind.Jacobian(Vector2.zero, out _, out _, out _, out _, out var visible);

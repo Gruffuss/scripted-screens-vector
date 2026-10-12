@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using UnityEngine;
 
 namespace ScriptedScreensVector;
@@ -124,7 +124,8 @@ internal static class DitherMaterial
 
             _material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
             _material.SetFloat(DitherId, VectorConfig.Dither);
-            _hasEdgeRamp = shader.FindPropertyIndex("_VectorEdgePx") >= 0;
+            _hasEdgeRamp = shader.FindPropertyIndex("_VectorEdgePx") >= 0
+                && shader.FindPropertyIndex("_VectorEdgeFallback") >= 0;
             if (_hasEdgeRamp) _material.SetFloat(EdgeId, Tessellator.AutoFeatherPixels);
             ScriptedScreensVectorPlugin.Log?.LogInfo(
                 $"Dither shader loaded; gradients dither at {VectorConfig.Dither:0.##}/255.");

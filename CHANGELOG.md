@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 ScriptedScreens Vector, newest first.
 
@@ -38,6 +38,12 @@ ScriptedScreens Vector, newest first.
   corner crosses the near plane, while stable projections stay in their drift tolerance.
 - Non-finite scalar screen spans are rejected, including NaN, so an invalid camera projection
   cannot enter the scale buckets. This validation also applies with pixel edges off.
+- If the edge-distance UV is lost during batching, automatic bands retain the geometric
+  stroke-width clamp and filled-shape size falloff instead of fading across their full extent.
+- Nearly singular projections cannot extend a band more than four surface widths or heights.
+  Inward rings keep their direction at spikes, and disabled pixel rings emit no triangles.
+- The automatic 1.3 px ramp also corrects polygon sides: regular hexagons previously got
+  about 1.13 px and triangles about 0.65 px, alongside rectangles at about 0.92 px.
 
 ### Changed
 

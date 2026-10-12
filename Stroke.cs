@@ -129,10 +129,10 @@ internal static class Stroke
             {
                 for (var i = 0; i < count; i++) outline.Add(left[i]);
                 var leftInward = Triangulator.SignedArea(path) > 0f;
-                PixelRing(vh, outline, paint, width, matrix, maxVertices, pixel, leftInward, clip);
+                PixelRing(vh, outline, paint, width, Mathf.Min(feather, width), matrix, maxVertices, pixel, leftInward, clip);
                 outline.Clear();
                 for (var i = 0; i < count; i++) outline.Add(right[i]);
-                PixelRing(vh, outline, paint, width, matrix, maxVertices, pixel, !leftInward, clip);
+                PixelRing(vh, outline, paint, width, Mathf.Min(feather, width), matrix, maxVertices, pixel, !leftInward, clip);
             }
             else
             {
@@ -140,7 +140,7 @@ internal static class Stroke
                 if (cap == CapStyle.Round) CapOutline(outline, path[^1], path[^2], half);
                 for (var i = count - 1; i >= 0; i--) outline.Add(right[i]);
                 if (cap == CapStyle.Round) CapOutline(outline, path[0], path[1], half);
-                PixelRing(vh, outline, paint, width, matrix, maxVertices, pixel, false, clip);
+                PixelRing(vh, outline, paint, width, Mathf.Min(feather, width), matrix, maxVertices, pixel, false, clip);
             }
         }
     }
@@ -486,11 +486,11 @@ internal static class Stroke
         }
     }
 
-    private static void PixelRing(MeshBuilder vh, List<Vector2> outline, Paint paint, float width,
+    private static void PixelRing(MeshBuilder vh, List<Vector2> outline, Paint paint, float width, float feather,
         Matrix4x4 matrix, int maxVertices, EdgeRamp pixel, bool inward, ClipRegion? clip)
     {
         if (vh.currentVertCount + outline.Count * 2 > maxVertices) return;
-        Tessellator.FeatherRing(vh, outline, paint, 0f, matrix, clip, -1, pixel, -width, inward);
+        Tessellator.FeatherRing(vh, outline, paint, feather, matrix, clip, -1, pixel, -width, inward);
     }
 
     private static void CapOutline(List<Vector2> outline, Vector2 end, Vector2 inward, float radius)

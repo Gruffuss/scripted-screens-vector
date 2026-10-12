@@ -1,4 +1,4 @@
-# Vector layer — reference
+﻿# Vector layer — reference
 
 Every node, attribute and function the renderer accepts. Checked against the parser, not
 against the design document — where the two disagreed, the code won.
@@ -1958,7 +1958,8 @@ one.
 The default targets **1.3 screen pixels** outward from each edge. With `Renderer.PixelEdges`
 on (the default), the fragment shader measures the ramp per pixel, so it keeps that width
 across a foreshortened console and under uneven root fits, group `s` and group `m` transforms.
-Sharp rectangle sides also get 1.3 px; the older geometric ramp gave them about 0.92 px.
+Sharp polygon sides also get 1.3 px; the older geometric ramp gave rectangles about 0.92 px,
+regular hexagons about 1.13 px and triangles about 0.65 px.
 Automatic path holes feather into the hole, and automatic strokes feather their round, butt
 and square ends as well as their sides.
 
@@ -1986,8 +1987,11 @@ a thin soft-edged band.
 per console; its apparent width varies with viewing angle and uneven transforms. A missing,
 stale or unsupported shader bundle also uses that fallback. A setting change takes effect at
 the next rebuild. The pixel ramp sits inside a wider geometric band, which is rebuilt when
-camera motion consumes its margin. If the band becomes too narrow, its geometric coverage
-keeps the edge soft; if the edge-distance UV is lost, that coverage is the fallback too.
+camera motion consumes its margin, including changes in compression direction and near-plane
+validity. If the band becomes too narrow, its band coverage keeps the edge soft. If batching
+loses the edge-distance UV, a separate geometric fallback retains the stroke-width clamp
+and filled-shape size falloff. Nearly singular projections cap band displacement at four
+surface widths or heights.
 Shadows, blur, explicit feathers and dither retain their existing data and behavior.
 
 `fea_edge` lets a liquid or gas surface carry a wide soft ramp while the walls beside it stay

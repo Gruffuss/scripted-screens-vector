@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Diagnostics;
@@ -386,6 +386,7 @@ internal static class Tessellator
         // Canvas units per scene unit comes from the viewbox; screen pixels per canvas unit
         // comes from the camera. Only the product is a real on-screen size.
         ScreenScale = Mathf.Max(0.0001f, screenPixelsPerUnit);
+        _surfaceSize = Mathf.Max(Mathf.Abs(target.width), Mathf.Abs(target.height));
 
         // Spans belong to one rebuild. Without this they accumulate every frame an editor
         // redraws, which is a leak that only shows up in the tool that asked for them.
@@ -664,7 +665,7 @@ internal static class Tessellator
         if (parent == null)
             return own;
 
-        // ponytail: a concave parent is not intersected; the label keeps its own outline.
+        // A concave parent is not intersected; the label keeps its own outline.
         var region = Tessellator.IsConvex(parent) ? ClipRegion.FromPolygon(parent) : null;
         return region == null ? own : new List<Vector2>(region.ClipPolygon(own));
     }
@@ -703,6 +704,7 @@ internal static class Tessellator
     internal static bool PixelEdgesAvailable;
     [ThreadStatic] private static bool _pixelEdges;
     [ThreadStatic] private static SurfaceProjection _projection;
+    [ThreadStatic] private static float _surfaceSize;
     [ThreadStatic] private static List<Vector2>? _ringOuter;
     [ThreadStatic] private static List<float>? _ringEdge;
     [ThreadStatic] private static List<float>? _edgeExtents;
@@ -2549,7 +2551,7 @@ internal static class Tessellator
             // full opacity for a ramped band, so passing it straight through would halo the
             // gas surface at brightness 1 exactly where the ramp says zero.
             FeatherEdge(vh, top, bottom, paint, edgeFeather, frame.Matrix, frame.Clip,
-                ramped ? opacityY : 1f, edgeAuto && _pixelEdges ? new EdgeRamp(_projection, frame.Matrix, ScreenScale) : default);
+                ramped ? opacityY : 1f, edgeAuto && _pixelEdges ? new EdgeRamp(_projection, frame.Matrix, ScreenScale, _surfaceSize) : default);
             BandFeatherMs += Elapsed(featherMark);
         }
     }
@@ -3001,7 +3003,7 @@ internal static class Tessellator
                     if (!Triangulator.Triangulate(outer, holes, out var whole, out var wholeIndices))
                         return;
 
-                    // ponytail: unshared vertices per clipped triangle; fine for the rare crossing hole.
+                    // A crossing hole needs independent vertices for each clipped triangle.
                     soupVertices = new List<Vector2>();
                     soupIndices = new List<int>();
                     var triangle = new List<Vector2>(3);
@@ -3095,14 +3097,15 @@ internal static class Tessellator
         if (auto && _pixelEdges)
         {
             var mark = Stopwatch.GetTimestamp();
-            var pixel = new EdgeRamp(_projection, frame.Matrix, ScreenScale);
-            FeatherRing(vh, contour, paint, 0f, frame.Matrix, frame.Clip, shared, pixel, FeatureSize(contour));
+            var pixel = new EdgeRamp(_projection, frame.Matrix, ScreenScale, _surfaceSize);
+            if (!pixel.Enabled) return;
+            FeatherRing(vh, contour, paint, width * FeatherFalloff(contour, width), frame.Matrix, frame.Clip, shared, pixel, FeatureSize(contour));
             if (holes != null)
                 foreach (var hole in holes)
                 {
                     var ring = frame.Clip == null ? hole : frame.Clip.ClipPolygon(hole);
                     if (ring.Count >= 3)
-                        FeatherRing(vh, ring, paint, 0f, frame.Matrix, frame.Clip, -1, pixel, FeatureSize(hole), inward: true);
+                        FeatherRing(vh, ring, paint, width * FeatherFalloff(hole, width), frame.Matrix, frame.Clip, -1, pixel, FeatureSize(hole), inward: true);
                 }
             RingFeatherMs += Elapsed(mark);
             return;
@@ -4398,7 +4401,7 @@ internal static class Tessellator
         // alpha, which is what a browser does with a hairline. It also holds at every distance,
         // since both the feather and this bound are in scene units.
         var requested = FeatherWidth(node, context, frame.Scale, out var auto);
-        var pixel = auto && _pixelEdges ? new EdgeRamp(_projection, frame.Matrix, ScreenScale) : default;
+        var pixel = auto && _pixelEdges ? new EdgeRamp(_projection, frame.Matrix, ScreenScale, _surfaceSize) : default;
         var feather = pixel.Enabled ? requested : Mathf.Min(requested, width);
 
         // An undashed stroke is one run -- the outline itself -- so it is drawn straight
@@ -4586,7 +4589,8 @@ internal static class Tessellator
                 // shortcut: YS offsets vertically; the averaged segment normal is approximate on steep waves, upgrade to segment strips if needed.
                 SampledNormals(edge, i, out var na, out var nb);
                 var h = Mathf.Abs(Vector2.Dot(outer - edge[i], (na + nb).normalized));
-                vh.AddVert(matrix.MultiplyPoint3x4(outer), solid, Vector2.zero, 0f, feature > 0f ? h / feature : 0f);
+                var fallback = 1f - (outer - edge[i]).magnitude / Mathf.Max(1e-6f, width);
+                vh.AddVert(matrix.MultiplyPoint3x4(outer), solid, new Vector2(1f, 0f), fallback, feature > 0f ? h / feature : 0f);
             }
             else
                 vh.AddVert(matrix.MultiplyPoint3x4(outer), faded, Vector2.zero);
@@ -4631,7 +4635,8 @@ internal static class Tessellator
         var count = outline.Count;
         var share = sharedBase >= 0;
 
-        if (count < 3 || (pixel.Enabled && feature == 0f) || Starved(vh, share ? count : count * 2, "a feather ring"))
+        if (count < 3 || (!pixel.Enabled && feature != 0f) || (pixel.Enabled && feature == 0f)
+            || Starved(vh, share ? count : count * 2, "a feather ring"))
             return;
 
         var winding = Mathf.Sign(Triangulator.SignedArea(outline));
@@ -4647,7 +4652,7 @@ internal static class Tessellator
                 var na = EdgeNormal(outline[(i - 1 + count) % count], at) * winding;
                 var nb = EdgeNormal(at, outline[(i + 1) % count]) * winding;
                 var dir = (na + nb).normalized * (inward ? -1f : 1f);
-                if (dir.sqrMagnitude < 0.0001f) dir = na;
+                if (dir.sqrMagnitude < 0.0001f) dir = na * (inward ? -1f : 1f);
                 var canvas = (Vector2)matrix.MultiplyPoint3x4(at);
                 minLength = Mathf.Min(minLength, Mathf.Min(pixel.Length(canvas, na), pixel.Length(canvas, nb)));
                 var outer = at + dir * pixel.Width(canvas, dir, na, nb);
@@ -4666,7 +4671,8 @@ internal static class Tessellator
                 var colour = paint.At(outline[i]);
                 if (!share) vh.AddVert(matrix.MultiplyPoint3x4(outline[i]), colour, Vector2.zero);
                 var edge = feature < 0f ? -_ringEdge![i] : _ringEdge![i];
-                vh.AddVert(matrix.MultiplyPoint3x4(_ringOuter![i]), colour, Vector2.zero, 0f, edge);
+                var fallback = 1f - (_ringOuter![i] - outline[i]).magnitude / Mathf.Max(1e-6f, width);
+                vh.AddVert(matrix.MultiplyPoint3x4(_ringOuter[i]), colour, new Vector2(1f, 0f), fallback, edge);
                 continue;
             }
             var previous = outline[(i - 1 + count) % count];

@@ -79,5 +79,10 @@ Then run `InGameTest-dither.lua`. It has two halves and both matter:
 Keep the copy of `UI-Default` verbatim. Only the five blocks marked `VECTOR` are ours, plus
 the coverage UV wiring and the target 3.0 line. If a future Unity version changes `UI-Default`,
 re-copy it and re-apply those additions. The automatic edge ramp uses derivatives of `TEXCOORD1.y`;
-`TEXCOORD1.x` remains the float coverage and geometric fallback. `_VectorEdgePx` defaults to
-1.3, and the mod checks for it before enabling pixel edges, so a stale bundle is safe.
+`TEXCOORD1.x` remains float coverage and encodes the original geometric feather's stroke-width
+clamp and filled-shape size falloff. Automatic bands use the white texture, so their
+`TEXCOORD0.x` can carry a separate band coordinate (0 at the edge, 1 at the outer vertex).
+The derivative ramp uses this wider band coverage; without edge-distance derivatives, the
+shader clamps `TEXCOORD1.x` to recover the original geometric ramp. `_VectorEdgePx` defaults
+to 1.3. The mod requires both it and `_VectorEdgeFallback` before enabling pixel edges, so
+an older bundle uses the original emitter safely.
