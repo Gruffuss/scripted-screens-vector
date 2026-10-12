@@ -449,6 +449,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// </remarks>
     private float _lastKnownScale = -1f;
     private readonly TessellationStats _stats = new();
+    private readonly BuildDiagnostics _diagnostics = new();
 
     private readonly EvalContext _context = new();
     private readonly Stopwatch _stopwatch = new();
@@ -486,13 +487,12 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     private float _lastRebuild;
 
     /// <summary>Shortest gap between payloads worth blending across.</summary>
-    private const float MinBlendSeconds = 0.05f;
-
-    /// <summary>Longest. Beyond this a scene is effectively static and should just snap.</summary>
-    private const float MaxBlendSeconds = 1.5f;
+    private const float MinBlendSeconds = DataCadence.MinInterval;
 
     private float _dataArrived;
     private float _dataInterval = MinBlendSeconds;
+    private DataCadence _payloadCadence;
+    private float _pendingDataInterval;
 
     private string _sceneId = "?";
     private int _rebuilds;
@@ -1255,6 +1255,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             if (_scene != null && _scene.TextInOrder)
                 OrderTextWithSlices();
         }
+        _diagnostics.Capture(_stats, _scene!.Problems, _builder.Dropped, _text?.Warnings);
     }
 
     /// <summary>Hands slices 1..n to child graphics, creating and retiring them as needed.</summary>
@@ -1492,13 +1493,6 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     {
         into.AppendLine($"scene \"{_sceneId}\"");
 
-        // The worker owns the scene diagnostics, text warnings and mesh until it finishes.
-        if (_job is { IsCompleted: false })
-        {
-            into.AppendLine("  rebuild in progress; game busy, try again");
-            return;
-        }
-
         if (_scene == null)
         {
             into.AppendLine("  no scene parsed");
@@ -1527,37 +1521,37 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // A scene whose only motion is a renderer fade animates without redrawing, so reporting
         // the redraw gate alone said `animated False` about a dot that was visibly pulsing.
         var fading = _fades.Count > 0;
-        var why = _stats.DrewTime ? string.Empty
+        var why = _diagnostics.DrewTime ? string.Empty
             : fading ? $" (a fade in {_fades.Count} group(s), which its renderer does without redraws)"
             : _scene.UsesTime ? " (its `t` is all under hidden groups)"
             : string.Empty;
 
-        into.AppendLine($"  on screen {size}, animated {(_scene.UsesTime && _stats.DrewTime) || fading}{why}"
+        into.AppendLine($"  on screen {size}, animated {(_scene.UsesTime && _diagnostics.DrewTime) || fading}{why}"
                         + $", scroll-driven {_scene.UsesScroll}");
 
-        if (_stats.Starved != null)
-            into.AppendLine($"  TOO LARGE at this size: {_stats.Starved} was dropped");
+        if (_diagnostics.Starved != null)
+            into.AppendLine($"  TOO LARGE at this size: {_diagnostics.Starved} was dropped");
 
         var fontProblem = DescribePageFonts(into);
-        if (_scene.Problems.Count > 0)
+        if (_diagnostics.Problems.Count > 0)
         {
             into.AppendLine("  PROBLEMS");
-            foreach (var problem in _scene.Problems)
+            foreach (var problem in _diagnostics.Problems)
                 into.AppendLine($"    {problem}");
         }
 
-        if (_stats.Missing.Count > 0)
+        if (_diagnostics.Missing.Count > 0)
         {
             into.AppendLine("  UNRESOLVED DATA NAMES (a colour draws magenta; a label with no `missing` draws \"--\")");
-            foreach (var name in _stats.Missing)
+            foreach (var name in _diagnostics.Missing)
                 into.AppendLine($"    ${name}");
         }
 
-        var dropped = _builder.Dropped;
+        var dropped = _diagnostics.Dropped;
         if (dropped != null)
             into.AppendLine($"  DROPPED: {dropped} -- everything in it is missing from the console");
 
-        var textWarnings = _text?.Warnings;
+        var textWarnings = _diagnostics.TextWarnings;
         if (textWarnings is { Count: > 0 })
         {
             into.AppendLine("  TEXT");
@@ -1567,7 +1561,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
 
         // Every section above counts. This line used to consider only two of them, so a
         // dropped shape or a shrunk text shadow still read as "no problems".
-        if (_scene.Problems.Count == 0 && _stats.Missing.Count == 0 && _stats.Starved == null
+        if (_diagnostics.Problems.Count == 0 && _diagnostics.Missing.Count == 0 && _diagnostics.Starved == null
             && dropped == null && textWarnings is not { Count: > 0 } && !fontProblem)
             into.AppendLine("  no problems");
     }
@@ -1667,8 +1661,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     internal bool SetData(EvalContext source)
     {
         _payloads++;
+        var interval = _payloadCadence.Arrive(Now());
         if (_job != null)
         {
+            _pendingDataInterval = interval;
             // One payload may arrive while another is still parked. A full payload replaces
             // it; a `keep = 1` patch is folded in, since replacing it lost what the earlier
             // patch carried.
@@ -1682,7 +1678,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
             return false;
         }
 
-        ApplyData(source);
+        ApplyData(source, interval);
         return false;
     }
 
@@ -1703,7 +1699,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         return false;
     }
 
-    private void ApplyData(EvalContext source)
+    private void ApplyData(EvalContext source, float interval)
     {
         // `keep = 1` means a payload is a PATCH: names it does not mention hold their last
         // value. Without it a payload is the whole truth and anything absent is gone, which
@@ -1744,7 +1740,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                 ? Mathf.Clamp01((now - _dataArrived) / _dataInterval)
                 : 1f);
 
-            _dataInterval = Mathf.Clamp(now - _dataArrived, MinBlendSeconds, MaxBlendSeconds);
+            _dataInterval = interval;
             _dataArrived = now;
 
             // Hand the old arrays over rather than copying them: ReadData allocates fresh ones
@@ -2169,7 +2165,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // `t` counts only where the last rebuild reached it: an animation under a hidden group
         // draws nothing. Hiding and showing come from data or structure, both of which rebuild
         // and so re-decide this.
-        var animated = _scene != null && ((_scene.UsesTime && _stats.DrewTime) || blending || scrolled);
+        var animated = _scene != null && ((_scene.UsesTime && _diagnostics.DrewTime) || blending || scrolled);
 
         // Walking toward a console changes how much detail its geometry should have. Nothing
         // else notices for a static scene, so the size bucket is what asks for the rebuild.
@@ -2244,7 +2240,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         {
             var data = _pendingData;
             _pendingData = null;
-            ApplyData(data);
+            ApplyData(data, _pendingDataInterval);
         }
     }
 
@@ -2744,6 +2740,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         _uploadMs += _stopwatch.Elapsed.TotalMilliseconds;
         _peakVertices = Mathf.Max(_peakVertices, _builder.currentVertCount);
         _screenPixels = _jobScreenPixels;
+        _diagnostics.Capture(_stats, _scene!.Problems, _builder.Dropped, _text?.Warnings);
     }
 
     /// <inheritdoc />

@@ -50,7 +50,7 @@ internal static class VectorElementPatch
     /// A `nodes` patch whose structure has not arrived yet, kept beside its data in
     /// <see cref="PendingData"/> and applied when the graphic appears.
     /// </summary>
-    private static readonly Dictionary<string, SS.UiProp[]> PendingPatches = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, (SS.UiProp[] Props, SS.UiProp[] Last)> PendingPatches = new(StringComparer.Ordinal);
 
     private static void Postfix(Motherboard? board, CartridgeIntegratedCircuitLua? cartridge,
         ProgrammableVisorGlasses? visor, SS.BoardState state, string surface, SS.UiElement element)
@@ -255,7 +255,7 @@ internal static class VectorElementPatch
         // patch rewrites the node a later datum fills.
         if (PendingPatches.TryGetValue(key, out var patch))
         {
-            graphic.PatchScene(patch);
+            graphic.PatchScene(patch.Props);
             PendingPatches.Remove(key);
         }
 
@@ -313,9 +313,10 @@ internal static class VectorElementPatch
             // below was written to avoid, in the branch directly above it. Two patches in one
             // tick is ordinary: the host appends one op per upsert and never coalesces them,
             // and it flushes at the end of every Execute whether or not a commit was called.
-            PendingPatches[key] = PendingPatches.TryGetValue(key, out var queued)
-                ? MergeProps(queued, element.Props)
-                : element.Props;
+            if (!PendingPatches.TryGetValue(key, out var queued))
+                PendingPatches[key] = (element.Props, element.Props);
+            else if (!UiProps.Equal(queued.Last, element.Props))
+                PendingPatches[key] = (MergeProps(queued.Props, element.Props), element.Props);
         }
 
         // A payload carrying NO `data` prop must not touch evaluator data at all. `ReadData`

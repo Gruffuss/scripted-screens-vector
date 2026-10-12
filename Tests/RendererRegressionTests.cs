@@ -14,6 +14,7 @@ internal static class RendererRegressionTests
         CollapsedDashes(run);
         Payloads(run);
         StatsDispatch(run);
+        FixRound(run);
     }
 
     private static void GradientBounds(TestRun run)
@@ -30,7 +31,7 @@ internal static class RendererRegressionTests
         scene.Root.Add(node);
         foreach (var (label, window) in new[] { ("whole", (Rect?)null),
             ("window-cut", (Rect?)new Rect(25, 45, 20, 10)),
-            ("clipped", (Rect?)null) })
+            ("clipped", (Rect?)null), ("undashed-clipped", (Rect?)null) })
         {
             if (label == "clipped")
             {
@@ -41,6 +42,8 @@ internal static class RendererRegressionTests
                 scene.Clips["crop"] = new System.Collections.Generic.List<Vector2>
                     { new(25, 0), new(75, 0), new(75, 100), new(25, 100) };
             }
+            if (label == "undashed-clipped")
+                node.DashPattern = Array.Empty<float>();
             var builder = new MeshBuilder();
             Tessellator.Emit(builder, scene, new EvalContext(), new Rect(0, 0, 100, 100), 1, true,
                 new TessellationStats(), window);
@@ -105,10 +108,8 @@ internal static class RendererRegressionTests
         }
         var current = Values();
         var source = Values();
-        source.Eased["number"] = (2, Easing.Linear, 0);
-        source.Snapped.Add("numbers");
         run.Check("renderer data: identical full payload preserves blending", current.CompareData(source, false) == (false, false),
-            "all six value types; fresh arrays; timing declarations do not restart unchanged values");
+            "all six value types; fresh arrays; no timing declarations");
         source = new EvalContext { KeepUnmentioned = true };
         source.Strings["text"] = "same";
         var samePatch = current.CompareData(source, false) == (false, false);
@@ -191,5 +192,108 @@ internal static class RendererRegressionTests
         run.Check("renderer stats: callback errors reach caller without breaking pump",
             completed && failure.GetAwaiter().GetResult() == "expected" && pump.Invoke(() => "next") == "next",
             "subsequent diagnostics still run");
+    }
+
+    private static void FixRound(TestRun run)
+    {
+        var stats = new TessellationStats { DrewTime = false, Starved = "budget" };
+        stats.Missing.Add("value");
+        var problems = new System.Collections.Generic.List<string> { "landed problem" };
+        var warnings = new System.Collections.Generic.HashSet<string> { "landed warning" };
+        var snapshot = new BuildDiagnostics();
+        snapshot.Capture(stats, problems, "landed drop", warnings);
+        Task.Run(() =>
+        {
+            stats.DrewTime = true;
+            stats.Starved = null;
+            stats.Missing.Clear();
+            problems.Clear();
+            problems.Add("next problem");
+            warnings.Clear();
+        }).GetAwaiter().GetResult();
+        run.Check("renderer snapshot: in-flight writes cannot replace landed diagnostics",
+            !snapshot.DrewTime && snapshot.Starved == "budget" && snapshot.Dropped == "landed drop"
+            && snapshot.Missing.Count == 1 && snapshot.Missing[0] == "value"
+            && snapshot.Problems.Count == 1 && snapshot.Problems[0] == "landed problem"
+            && snapshot.TextWarnings.Count == 1 && snapshot.TextWarnings[0] == "landed warning",
+            "stats, problems, dropped and text warnings retain the last complete build");
+        snapshot.Capture(stats, problems, null, warnings);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 100; i++)
+        {
+            if (i % 2 == 0)
+                warnings.Add("next warning");
+            else
+                warnings.Clear();
+            snapshot.Capture(stats, problems, null, warnings);
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        run.Check("renderer snapshot: landing clears old diagnostics without repeat allocation",
+            snapshot.DrewTime && snapshot.Starved == null && snapshot.Dropped == null
+            && snapshot.Missing.Count == 0 && snapshot.Problems.Count == 1 && snapshot.Problems[0] == "next problem"
+            && snapshot.TextWarnings.Count == 0 && allocated == 0, $"100 captures allocated {allocated} bytes");
+
+        var cadence = new DataCadence();
+        var current = new EvalContext();
+        current.Scalars["gauge"] = 1;
+        var source = new EvalContext();
+        source.Scalars["gauge"] = 1;
+        cadence.Arrive(1);
+        var regular = cadence.Arrive(1.5f);
+        var noOps = true;
+        for (var now = 2f; now <= 4.5f; now += .5f)
+        {
+            cadence.Arrive(now);
+            noOps &= current.CompareData(source, false) == (false, false);
+        }
+        source.Scalars["gauge"] = 2;
+        run.Check("renderer cadence: idle-value payloads preserve the next half-second glide",
+            regular == .5f && noOps && current.CompareData(source, false) == (true, true)
+            && cadence.Arrive(5) == .5f && cadence.Arrive(5.01f) == .05f && cadence.Arrive(10) == 1.5f,
+            "unchanged arrivals refresh cadence without rebuilding; interval clamps still apply");
+
+        current.Arrays["row"] = new[] { 1f, 2f };
+        current.Colours["paint"] = new Color(1, 0, 0, 1);
+        source = new EvalContext { KeepUnmentioned = true };
+        source.Scalars["gauge"] = 1;
+        var unchanged = current.CompareData(source, false) == (false, false);
+        source.Snapped.Add("gauge");
+        var snap = current.CompareData(source, false) == (true, true);
+        source.Snapped.Clear();
+        source.Eased["gauge"] = (2, Easing.Linear, .1f);
+        var ease = current.CompareData(source, false) == (true, true);
+        source.Scalars.Clear();
+        source.Eased.Clear();
+        source.Arrays["row"] = new[] { 1f, 2f };
+        source.Snapped.Add("row");
+        var arraySnap = current.CompareData(source, false) == (true, true);
+        source.Arrays.Clear();
+        source.Snapped.Clear();
+        source.Colours["paint"] = new Color(1, 0, 0, 1);
+        source.Eased["paint"] = (2, Easing.Linear, 0);
+        run.Check("renderer timing: same-value snap and ease payloads still take effect",
+            unchanged && snap && ease && arraySnap && current.CompareData(source, false) == (true, true),
+            "untimed no-op stays quiet; scalar snap/ease, array snap and colour ease rebuild");
+
+        SS.UiValue Map(params SS.UiProp[] props) => new() { Type = SS.UiValueType.Map, Map = props };
+        SS.UiValue Number(float n) => new() { Type = SS.UiValueType.Number, Number = n };
+        SS.UiProp Prop(string key, SS.UiValue value) => new() { Key = key, Value = value };
+        SS.UiProp[] Patch(float x) => new[] { Prop("nodes", Map(Prop("bar", Map(Prop("x", Number(x)),
+            Prop("p", new SS.UiValue { Type = SS.UiValueType.Array, Array = new[] { Number(1), Number(2) } }))))),
+            Prop("keep", new SS.UiValue { Type = SS.UiValueType.Bool, Bool = true }),
+            Prop("ease", Map(Prop("value", Number(2)))) };
+        var previous = Patch(3);
+        var repeat = Patch(3);
+        Array.Reverse(repeat);
+        var changed = Patch(4);
+        UiProps.Equal(previous, repeat);
+        before = GC.GetAllocatedBytesForCurrentThread();
+        var repeats = true;
+        for (var i = 0; i < 100; i++)
+            repeats &= UiProps.Equal(previous, repeat);
+        allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        run.Check("renderer pending patches: identical nested payloads skip merges without allocation",
+            repeats && !UiProps.Equal(previous, changed) && allocated == 0,
+            $"fresh reordered maps and point arrays; changed patch detected; {allocated} bytes on repeats");
     }
 }

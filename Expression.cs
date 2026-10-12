@@ -201,7 +201,8 @@ internal sealed class EvalContext
 
     internal (bool Changed, bool Rebuild) CompareData(EvalContext source, bool usesSince)
     {
-        var changed = !MapsEqual(Scalars, source.Scalars) || !MapsEqual(Strings, source.Strings)
+        var changed = source.Snapped.Count > 0 || source.Eased.Count > 0
+            || !MapsEqual(Scalars, source.Scalars) || !MapsEqual(Strings, source.Strings)
             || !MapsEqual(Colours, source.Colours) || !ArraysEqual(Arrays, source.Arrays)
             || !ArraysEqual(StringArrays, source.StringArrays) || !ArraysEqual(ColourArrays, source.ColourArrays);
         return (changed, changed || usesSince);

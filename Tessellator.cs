@@ -4358,7 +4358,9 @@ internal static class Tessellator
         // on every rebuild.
         if (node.DashPattern.Length == 0)
         {
-            StrokeRun(vh, points, closed, width, paint, node, feather, frame);
+            var strokeBounds = frame.Clip != null && paint.Gradient is { BoundingBox: true } && points.Count > 0
+                ? Stroke.Bounds(points) : (Rect?)null;
+            StrokeRun(vh, points, closed, width, paint, node, feather, frame, strokeBounds);
             return;
         }
 

@@ -8,17 +8,23 @@ ScriptedScreens Vector, newest first.
 
 - **Dashed strokes with `units=bbox` gradients now use the whole undashed path's bounds.**
   This changes their appearance: the gradient spans the path instead of restarting on every
-  dash, including dashes cut by the screen window or a clip. Undashed strokes are unchanged.
+  dash, including dashes cut by the screen window or a clip. Clipped undashed strokes also use
+  the whole path's bounds rather than restarting the gradient on each clipped piece.
 - **Collapsed elements no longer walk every dash.** A non-finite screen rectangle culls all
   dashes and triggers a rebuild when the screen rectangle becomes finite again. Singular or
   non-finite node transforms also skip dashed strokes.
 - **Identical data payloads no longer rebuild the scene or restart its blend clock.** Full
   payloads still remove omitted names. Arrival times still advance, and scenes reading
   `since($name)` rebuild for those arrivals without restarting a value blend.
+  Unchanged arrivals still refresh the measured payload cadence, so the next value change
+  blends over the current tick interval. Explicit snap or ease entries still apply to a
+  restated value, allowing an active glide to jump to its target or change its timing.
+- **Repeated identical node patches waiting for a structure no longer allocate merge buffers.**
+  Earlier patches are still retained when a different patch arrives.
 - **`vector_stats` now works from either thread.** Background requests run through the main
   thread's frame pump, with a short timeout reporting “game busy, try again”. The first request
-  logs which path it took. Surfaces being rebuilt report that status while their worker owns
-  the diagnostics.
+  logs which path it took. Reports use a reusable snapshot of the last landed build's
+  diagnostics, so animated surfaces keep their full report while the next build runs.
 
 ## 0.11.115
 
