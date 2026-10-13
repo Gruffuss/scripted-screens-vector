@@ -59,8 +59,11 @@ internal static class CaptureDump
     /// A capture clones the surface root and renders the clone. An inactive object clones as
     /// an inactive object, so the camera photographs the world behind it and the picture
     /// comes back as terrain and sky — deterministically, for a console that looks perfectly
-    /// correct in game. What switches it off is not established; the log line above names the
-    /// object so the next capture answers it rather than another theory.
+    /// correct in game. What switches it off is the game itself: a computer's screen object is
+    /// active only while the player stands inside a box in front of it (`Computer._viewableBounds`,
+    /// 10 m on a side and centred 4.5 m in front of the screen, polled twice a second), so a
+    /// console more than about 10 m away has its screen switched off. The Console Screen Range mod
+    /// widens that box; this wake is still needed for consoles outside whatever range is set.
     ///
     /// It also has to be the **live** objects rather than the clone: an inactive Graphic gets
     /// no canvas update, so its mesh and its labels do not exist yet to be copied. Waking the
