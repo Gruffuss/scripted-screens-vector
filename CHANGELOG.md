@@ -2,6 +2,18 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.119
+
+### Fixed
+
+- Console scale is measured over the visible part of its surface, clipped to the camera's
+  four side planes and near plane. Off-screen corners no longer inflate tessellation density.
+  Close views still use their real magnification, including when every corner is off screen
+  or the surface crosses the near plane. Fully visible bottom edges keep the same scale.
+- Automatic edge-band rebuilds consider the visible polygon. A still camera does not trigger
+  repeated builds, and a wholly invisible surface retains its last scale and rebuild bucket.
+- Orthographic near-plane clipping uses camera depth separately from the projection divisor.
+
 ## 0.11.118
 
 ### Changed
