@@ -22,12 +22,13 @@ Adds a [b]vector[/b] element: describe a screen once -- shapes, gradients, text,
 [h2]Getting started[/h2]
 The mod folder holds nineteen examples that run on paste, a guide (README.md), a full reference (REFERENCE.md) and the release history (CHANGELOG.md), also [url=https://github.com/Gruffuss/scripted-screens-vector]on GitHub[/url]. With StationeersLua installed, AI editors can read and search the same docs through its MCP server.
 
-[h2]What's new (0.11.94 to 0.11.118)[/h2]
+[h2]What's new (0.11.94 to 0.11.120)[/h2]
 [list]
 [*] [b]Pages bring their own fonts.[/b] A [b]FONT[/b] line names a Google Fonts link, every player's game fetches it (with the ScriptedScreens Fonts mod), and labels switch to it when it arrives -- no re-push
 [*] [b]Shadows meet borders the way a browser draws them[/b]: inset shadows fade their full depth inside rounded panels, and a border no longer hides its own shadow
 [*] [b]Thin borders stay crisp[/b] at any size and distance, and shapes stay sharp when you walk right up to a console
 [*] [b]Gradients blend the way a browser draws them[/b], dashed and solid lines agree, and very dark colours no longer turn black
+[*] [b]Your performance settings apply to data too[/b]: the rebuild rate limit, rate LOD and off-screen culling now cover pages that send data, and consoles close up or at the edge of the screen no longer read as enormous
 [*] [b]Edges are smoothed per pixel[/b]: the automatic soft edge stays about 1.3 screen pixels wide however steeply you look at a console
 [*] [b]Dashed lines of any length[/b] draw without stalling the game, and odd dash patterns alternate correctly
 [*] Text outlines are as wide as a browser draws them, and sending a console the same data again no longer redraws it
