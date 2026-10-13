@@ -2,6 +2,21 @@
 
 ScriptedScreens Vector, newest first.
 
+## 0.11.120
+
+### Fixed
+
+- New data no longer forces an immediate rebuild. Every data payload also triggered a
+  rebuild outside the rate gate, so `Renderer.MaximumHz`, rate LOD and the off-screen cull
+  never applied to data: a console out of view still rebuilt once per payload, and a page
+  sending data every tick rebuilt every tick. Data now waits for the gate like animation.
+
+### Changed
+
+- The Diagnostics line and `vector_stats` say which part of a console the on-screen size was
+  measured on (the whole bottom edge, its visible part, a chord through the visible part,
+  or nothing in view) and the pixels and canvas units it saw there.
+
 ## 0.11.119
 
 ### Fixed
@@ -13,18 +28,6 @@ ScriptedScreens Vector, newest first.
 - Automatic edge-band rebuilds consider the visible polygon. A still camera does not trigger
   repeated builds, and a wholly invisible surface retains its last scale and rebuild bucket.
 - Orthographic near-plane clipping uses camera depth separately from the projection divisor.
-
-## 0.11.119
-
-### Fixed
-
-- A console's on-screen size is now measured over the part of it that is actually in view.
-  Close up, or with the console at the side of the screen, a corner far outside the view could
-  read as tens of thousands of pixels wide (on a 3,440 px screen), and every size-driven detail
-  level followed that number. Fully visible consoles measure exactly as before; a console
-  wholly out of view keeps its last size, so looking away and back no longer rebuilds it.
-- With the camera still, the size and edge-band rebuild triggers no longer fire on parts of a
-  console that are off screen.
 
 ## 0.11.118
 

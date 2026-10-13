@@ -73,6 +73,17 @@ internal struct ScaleMeasurement
         return Pixels / width;
     }
 
+    /// <summary>Which part of the surface the last measurement used, and what it saw there.</summary>
+    internal string Where(float rectWidth) => Reason is Status.None or Status.Outside
+        ? Sample switch
+        {
+            Segment.Bottom => $"the whole bottom edge, {RawPixels:0} px across {rectWidth:0.0} units",
+            Segment.ClippedBottom => $"the visible part of the bottom edge, {Pixels:0} px across {CanvasWidth:0.0} of {rectWidth:0.0} units",
+            Segment.Chord => $"a chord through the visible part, {Pixels:0} px across {CanvasWidth:0.0} of {rectWidth:0.0} units",
+            _ => "nothing in view, last size kept",
+        }
+        : Describe();
+
     internal string Describe() => Reason switch
     {
         Status.EmptyRect => "empty rect",

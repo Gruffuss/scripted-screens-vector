@@ -156,6 +156,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
                     $"{workerText}, {graphic._peakVertices} verts, " +
                     $"{graphic._lastShapeCount} shapes, " +
                     (graphic._screenPixels < 0f ? $"size UNKNOWN ({graphic._scaleMeasurement.Describe()})" : $"{graphic._screenPixels:F0} px") +
+                    $" (now: {graphic._scaleMeasurement.Where(graphic.rectTransform.rect.width)})" +
                     $", job still running at Update on {graphic._lateAtUpdate} frame(s), landed in LateUpdate {graphic._rescuedLate}, received {graphic._payloads} data payload(s) and {graphic._structures} structure(s)");
 
                 ScriptedScreensVectorPlugin.Log?.LogInfo(graphic.DescribeProjection());
@@ -1563,6 +1564,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         var size = _screenPixels < 0f
             ? $"size unknown ({_scaleMeasurement.Describe()})"
             : VectorStatsTool.N(_screenPixels, 0) + " px at the last rebuild";
+        size += $"; measured now on {_scaleMeasurement.Where(rectTransform.rect.width)}";
         // A scene whose only motion is a renderer fade animates without redrawing, so reporting
         // the redraw gate alone said `animated False` about a dot that was visibly pulsing.
         var fading = _fades.Count > 0;
@@ -1771,10 +1773,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         if (!changed)
         {
             if (rebuild)
-            {
                 _dataDirty = true;
-                SetVerticesDirty();
-            }
             return;
         }
         var batch = !keep || (EasesSomething(source) && now - _dataArrived >= MinBlendSeconds);
@@ -1885,9 +1884,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         foreach (var pair in source.ColourArrays)
             _context.ColourArrays[pair.Key] = pair.Value;
 
-        // Asked for here, not only through SetVerticesDirty: that reaches UpdateGeometry after
-        // this frame's Update has passed, so a payload parked behind a running job waited an
-        // extra frame -- a scene fed every frame rebuilt on every second one (35 Hz at 71 FPS).
+        // Asked for here and ONLY here. SetVerticesDirty reaches UpdateGeometry, which forces an
+        // immediate rebuild past MaximumHz, rate LOD and the off-screen cull; this method called
+        // it until 0.11.120, so the split described below never took effect. Seen in game
+        // 2026-10-13: a console outside the view rebuilt once per payload with the cull on.
         //
         // Its own flag rather than `_needsRebuild`, because the two deserve different answers:
         // a new STRUCTURE must draw at once, while new VALUES are just the next frame of an
@@ -1896,7 +1896,6 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // or not, ignoring MaximumHz, rate LOD and the off-screen cull -- none of which a
         // hand-written console at 2 Hz could ever have revealed.
         _dataDirty = true;
-        SetVerticesDirty();
 
         void StampArrivals<T>(Dictionary<string, T>.KeyCollection names, float at)
         {
