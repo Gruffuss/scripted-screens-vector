@@ -1111,9 +1111,10 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         if (target == null || target.renderMode == RenderMode.ScreenSpaceOverlay) return default;
         var camera = target.worldCamera != null ? target.worldCamera : ResolveCamera();
         if (camera == null) return default;
-        var m = camera.projectionMatrix * camera.worldToCameraMatrix * rectTransform.localToWorldMatrix;
-        return SurfaceProjection.FromMatrix(m, camera.pixelWidth, camera.pixelHeight,
-            camera.orthographic ? 0f : camera.nearClipPlane);
+        var view = camera.worldToCameraMatrix * rectTransform.localToWorldMatrix;
+        var m = camera.projectionMatrix * view;
+        return SurfaceProjection.FromMatrix(m, camera.pixelWidth, camera.pixelHeight, camera.nearClipPlane,
+            new Vector3(-view.m20, -view.m21, -view.m23));
     }
 
     private bool ExtentDrifted()
@@ -1147,8 +1148,8 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     /// Buckets are multiplicative, roughly 15% apart, for the same reason the path flattener
     /// quantises its own scale: ordinary camera drift stays inside a bucket, so standing
     /// still and breathing does not retessellate anything, while actually walking up to a
-    /// console does. An unknown size gets its own bucket, so coming into view counts as a
-    /// change and the scene is rebuilt at its real size.
+    /// console does. An entirely invisible surface keeps its built bucket and last scale;
+    /// returning to the same view does not rebuild it.
     /// </remarks>
     private bool ScaleChanged()
     {
@@ -1165,10 +1166,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
     {
         var scale = ScreenPixelsPerCanvasUnit();
 
-        if (scale <= 0f)
-            return int.MinValue + 1;
-
-        return Mathf.FloorToInt(Mathf.Log(scale) / Mathf.Log(1.15f));
+        return _scaleMeasurement.Bucket(scale, _builtForBucket);
     }
 
     /// <summary>
@@ -2006,47 +2004,23 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         var a = camera.WorldToScreenPoint(left);
         var b = camera.WorldToScreenPoint(right);
 
-        // Behind the camera: the projection wraps and the distance is meaningless.
-        //
-        // The threshold is the camera's OWN near plane, not a hardcoded 0.01. One centimetre
-        // was a stand-in for "in front of the camera", but the perspective divide blows up
-        // as z approaches zero, and everything between the near plane and 0.01 is clipped and
-        // never drawn anyway -- so a reading from there is garbage the renderer then works
-        // from. Measured 2026-10-11: a surface reported 11723 px wide (six times any other
-        // reading, steady across seven samples) and the rebuild went 10 ms -> 171-188 ms for
-        // the SAME 221 rect ops and FEWER vertices (98956 verts at 177.87 ms against 206876
-        // at 10.34 ms), because every px-driven density term saturated at once.
-        var near = Mathf.Max(0.01f, camera.nearClipPlane);
-        var measured = _scaleMeasurement.Measure(a, b, near, rect.width);
-        if (measured < 0f) return measured;
-        var pixels = _scaleMeasurement.Pixels;
+        var projection = Projection();
+        var measured = _scaleMeasurement.Measure(a, b, projection, rect, _lastKnownScale);
 
-        // Reject only genuinely degenerate output -- NaN and infinity territory. A grazing-angle
-        // view is LEGITIMATE input: the player standing at an angle to a console. Discarding its
-        // scale is a mitigation that breaks correct rendering, not a fix, and 0.11.106 did exactly
-        // that: unknown scale falls back to 1, which collapses a sigma-5 blur from 96 rings to
-        // about 8 (`Clamp(CeilToInt(reach * 1 * 1 / 2), 4, 96)`). Traded correct output for a cost
-        // that was a self-correcting transient, which is the wrong way round.
-        // DIAGNOSTIC ONLY -- deliberately changes nothing. A span wider than four screens means
-        // the quad is strongly foreshortened, where a single scalar px-per-unit is a poor model:
-        // measured 2026-10-11, corners at z 0.515 and 0.151, so the true scale varies 3.4x across
-        // the surface. Logged to accumulate the z-ratio data, because the real cost is STILL
-        // unexplained -- 10 ms to 171-188 ms for the SAME 221 rect ops and FEWER vertices (98956
-        // against 206876) -- and that signature, time up with geometry down, points at work being
-        // built and then discarded, not at density. Density was already ruled out: `dense` False
-        // in all 30 logged blur lines, points/contour 48 in every one, rings hard-capped at 96.
+        // Keep the original corner span as evidence, alongside the segment actually used.
+        // Fully visible bottom edges retain their original distance and divisor exactly.
         var ceiling = 4f * Mathf.Max(Screen.width, Screen.height);
-        if (pixels > ceiling)
+        if (_scaleMeasurement.Sample != ScaleMeasurement.Segment.Bottom || _scaleMeasurement.RawPixels > ceiling)
         {
             var now = System.DateTime.UtcNow;
             if ((now - _lastScaleReport).TotalSeconds > 5d)
             {
                 _lastScaleReport = now;
                 ScriptedScreensVectorPlugin.Log?.LogInfo(
-                    $"scale: \"{_sceneId}\" projected {pixels:0} px wide over {rect.width:0.0} canvas units "
-                    + $"(soft ceiling {ceiling:0}, screen {Screen.width}x{Screen.height}, "
-                    + $"z {a.z:0.000}/{b.z:0.000}, ratio {Mathf.Max(a.z, b.z) / Mathf.Max(0.0001f, Mathf.Min(a.z, b.z)):0.0}x, "
-                    + $"near {near:0.000}) -- used as-is, diagnostic only");
+                    $"scale: \"{_sceneId}\" bottom corners {_scaleMeasurement.RawPixels:0} px over {rect.width:0.0} canvas units "
+                    + $"(screen {camera.pixelWidth}x{camera.pixelHeight}, z {a.z:0.000}/{b.z:0.000}, near {projection.Near:0.000}); "
+                    + $"visible {_scaleMeasurement.Sample}: {_scaleMeasurement.Pixels:0.0} px over {_scaleMeasurement.CanvasWidth:0.000} canvas units, "
+                    + $"{measured:0.000} px/unit");
             }
         }
 

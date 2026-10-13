@@ -209,6 +209,7 @@ internal static class Program
         RequirementTests.PositionAndHover(run);
         SweepTests.Run(run);
         PixelEdgeTests.Run(run);
+        VisibleScaleTests.Run(run);
         SrgbGradientTests.Run(run);
         PageFontTests.Run(run);
         PatchPathTests.Run(run);
