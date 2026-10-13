@@ -14,6 +14,18 @@ ScriptedScreens Vector, newest first.
   repeated builds, and a wholly invisible surface retains its last scale and rebuild bucket.
 - Orthographic near-plane clipping uses camera depth separately from the projection divisor.
 
+## 0.11.119
+
+### Fixed
+
+- A console's on-screen size is now measured over the part of it that is actually in view.
+  Close up, or with the console at the side of the screen, a corner far outside the view could
+  read as tens of thousands of pixels wide (on a 3,440 px screen), and every size-driven detail
+  level followed that number. Fully visible consoles measure exactly as before; a console
+  wholly out of view keeps its last size, so looking away and back no longer rebuilds it.
+- With the camera still, the size and edge-band rebuild triggers no longer fire on parts of a
+  console that are off screen.
+
 ## 0.11.118
 
 ### Changed

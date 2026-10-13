@@ -2010,7 +2010,7 @@ internal sealed class VectorGraphic : MaskableGraphic, IPointerClickHandler, ISc
         // Keep the original corner span as evidence, alongside the segment actually used.
         // Fully visible bottom edges retain their original distance and divisor exactly.
         var ceiling = 4f * Mathf.Max(Screen.width, Screen.height);
-        if (_scaleMeasurement.Sample != ScaleMeasurement.Segment.Bottom || _scaleMeasurement.RawPixels > ceiling)
+        if (_scaleMeasurement.RawPixels > ceiling)
         {
             var now = System.DateTime.UtcNow;
             if ((now - _lastScaleReport).TotalSeconds > 5d)
