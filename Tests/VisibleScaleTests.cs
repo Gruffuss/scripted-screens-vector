@@ -91,6 +91,10 @@ internal static class VisibleScaleTests
         var a=Screen(full,new Vector2(0,0));var b=Screen(full,new Vector2(SideRect.width,0));
         var exact=legacy.Measure(a,b,full.Near,SideRect.width);
         run.Check("visible scale: fully visible is bit exact",BitConverter.SingleToInt32Bits(Measure(ref state,full,SideRect))==BitConverter.SingleToInt32Bits(exact),"unchanged endpoint distance and divisor");
+        var smallNear=new SurfaceProjection(new Vector3(2,0,1),new Vector3(0,2,1),new Vector3(0,0,0.005f),0.001f,3440,1440);
+        var smallRect=new Rect(0,0,1,1);
+        var originalNear=legacy.Measure(Screen(smallNear,new Vector2(0,0)),Screen(smallNear,new Vector2(1,0)),Math.Max(0.01f,smallNear.Near),1f);
+        run.Check("visible scale: fully visible preserves legacy near threshold",Measure(ref state,smallNear,smallRect)==originalNear,"bit-exact legacy fallback when the camera near plane is below 0.01");
         foreach(var crossing in new[]{false,true})
         {
             var p=Close(crossing); var cornersOutside=true;

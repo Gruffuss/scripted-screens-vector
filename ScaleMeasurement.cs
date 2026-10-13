@@ -16,11 +16,12 @@ internal struct ScaleMeasurement
     {
         CanvasWidth = rect.width; Sample = Segment.Bottom;
         RawPixels = Vector2.Distance(new Vector2(left.x, left.y), new Vector2(right.x, right.y));
-        if (!projection.Valid) return Measure(left, right, projection.Near, rect.width);
+        if (!projection.Valid) return Measure(left, right, Mathf.Max(0.01f, projection.Near), rect.width);
         if (projection.Contains(SurfaceProjection.Corner(rect, 0))
             && projection.Contains(SurfaceProjection.Corner(rect, 1))
             && left.z > projection.Near && right.z > projection.Near)
-            return Measure(left, right, projection.Near, rect.width);
+            // Preserve the legacy near threshold as well as the arithmetic on this path.
+            return Measure(left, right, Mathf.Max(0.01f, projection.Near), rect.width);
 
         LeftDepth = left.z; RightDepth = right.z; Near = projection.Near;
         Sample = Segment.ClippedBottom;

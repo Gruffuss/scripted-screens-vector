@@ -872,6 +872,11 @@ It reports which console object each scene lives under, node and shape counts, v
 rebuild rate, tessellation and upload cost, on-screen size, whether the scene is animated or scroll-driven, and the same problems and
 unresolved names. It is bound by reflection, so the mod is perfectly happy without it.
 
+Scale is measured over the visible part of the surface, clipped to the camera's side and
+near planes. Off-screen corners do not inflate it; a close-up can still have a high scale.
+A wholly invisible surface retains its last scale and rebuild bucket. The `scale:` evidence
+line reports the original bottom-corner span and the visible segment used for measurement.
+
 For measuring rather than debugging, turn on `Diagnostics` in the mod settings and read the
 log line each surface prints every five seconds.
 

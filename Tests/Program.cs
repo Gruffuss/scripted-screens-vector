@@ -74,6 +74,11 @@ internal static class Program
         // `--gif <in> <out>`: the decoder's first frame as "w h" then "r g b a" per pixel, to be
         // compared against an independent decoder.
         var args = Environment.GetCommandLineArgs();
+        if (Array.IndexOf(args, "--scale-cost") >= 0)
+        {
+            ScaleCost.Run();
+            return 0;
+        }
         var dashAt = Array.IndexOf(args, "--dash-invalid-segment");
         if (dashAt >= 0 && dashAt + 1 < args.Length)
             return DashTests.InvalidSegment(args[dashAt + 1]) ? 0 : 1;

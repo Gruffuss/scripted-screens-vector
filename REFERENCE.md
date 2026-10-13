@@ -1993,6 +1993,14 @@ mode the automatic rule is `min(1.3 px, projected stroke width)`, so a sub-pixel
 soft edge without a ramp wider than itself. A `YS`'s `fea_edge` has no size falloff; use it for
 a thin soft-edged band.
 
+The screen scale used for tessellation and geometric feathers measures the visible bottom
+edge of the surface: its screen length divided by its canvas length, clipped to the camera's
+four side planes and near plane. A fully visible bottom edge keeps its original measurement.
+If the bottom edge is invisible, the measurement uses the visible part of a horizontal chord
+halfway between the visible polygon's lowest and highest canvas y. This also handles close
+views with every corner off screen or crossing the near plane. A wholly invisible surface
+retains its last scale and rebuild bucket; off-screen corners do not trigger edge-band drift.
+
 `Renderer.PixelEdges = false` uses the previous geometric feather, sized from one screen scale
 per console; its apparent width varies with viewing angle and uneven transforms. A missing,
 stale or unsupported shader bundle also uses that fallback. A setting change takes effect at
